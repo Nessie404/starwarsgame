@@ -15,8 +15,7 @@
 #include <malloc.h>
 #include <gccore.h>
 #include <wiiuse/wpad.h>
-#include <wiikeyboard/keyboard.h>
-#include <wiikeyboard/keysym.h>
+#include <wiikeyboard/keyboard.h>   /* pulls in wsksymdef.h keysyms */
 
 #include "game.h"
 
