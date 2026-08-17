@@ -102,7 +102,6 @@ static void test_tracks_geometry(void)
             CHECK(t.alpine, "pass %d not alpine", id);
         } else {
             CHECK(t.max_y - t.min_y < 1.0f, "classic not flat");
-            CHECK(t.n_pads > 0, "classic has no boost pads");
         }
         CHECK(t.n_items > 0, "track %d has no item rows", id);
     }
@@ -182,14 +181,22 @@ static void test_gravity_grade(void)
     g.state = STATE_RACING;
     idle_inputs(in);
 
-    /* find a steady climb and a steady descent */
+    /* Find a climb and a descent that stay straight for the whole coast,
+     * otherwise the car runs into a corner and the test measures the
+     * barrier rather than gravity. */
     for (i = 0; i < g.track.n; i++) {
-        if (seg_up < 0 && g.track.slope[i] > 0.06f &&
-            g.track.curv[i] < 0.02f)
-            seg_up = i;
-        if (seg_down < 0 && g.track.slope[i] < -0.06f &&
-            g.track.curv[i] < 0.02f)
-            seg_down = i;
+        int j, ok_up = 1, ok_down = 1;
+        for (j = 0; j < 7; j++) {
+            int m = (i + j) % g.track.n;
+            if (g.track.curv[m] > 0.012f) {
+                ok_up = ok_down = 0;
+                break;
+            }
+            if (g.track.slope[m] < 0.045f)  ok_up = 0;
+            if (g.track.slope[m] > -0.045f) ok_down = 0;
+        }
+        if (seg_up < 0 && ok_up)     seg_up = i;
+        if (seg_down < 0 && ok_down) seg_down = i;
     }
     CHECK(seg_up >= 0 && seg_down >= 0,
           "no straight climb/descent found (up %d down %d)",
@@ -236,7 +243,7 @@ static void test_cornering_grip_cap(void)
     CHECK(g.karts[0].slip > 0.1f, "no understeer slip at full lock");
 }
 
-static void test_items(void)
+static void test_power_ups(void)
 {
     Game g;
     GameConfig cfg = default_cfg(TRACK_CLASSIC);
@@ -253,14 +260,35 @@ static void test_items(void)
         teleport(&g, &g.karts[0], seg, 10.0f);
     }
     in[0].accel = 1;
-    for (f = 0; f < 240 && !g.karts[0].item_held; f++)
+    for (f = 0; f < 240 && !g.karts[0].power_held; f++)
         game_update(&g, in, 1.0f / 60.0f);
-    CHECK(g.karts[0].item_held, "did not pick up an item");
+    CHECK(g.karts[0].power_held, "did not collect a power-up");
+    if (!g.karts[0].power_held) return;
 
-    in[0].item = 1;
-    game_update(&g, in, 1.0f / 60.0f);
-    CHECK(!g.karts[0].item_held, "item not consumed");
-    CHECK(g.karts[0].boost_t > 1.0f, "item gave no nitro");
+    {
+        int kind = g.karts[0].power_held;
+        in[0].item = 1;
+        game_update(&g, in, 1.0f / 60.0f);
+        CHECK(!g.karts[0].power_held, "power-up not consumed");
+        CHECK(g.karts[0].power_fired, "deploying raised no event");
+        if (kind == POWER_PUSH) {
+            CHECK(g.karts[0].push_t > PUSH_SECONDS - 0.5f,
+                  "push-to-pass not deployed (%.2f s)", g.karts[0].push_t);
+            CHECK(g.karts[0].grip_t <= 0.0f, "push also gave grip");
+        } else {
+            CHECK(g.karts[0].grip_t > TIRE_SECONDS - 0.5f,
+                  "fresh rubber not deployed (%.2f s)", g.karts[0].grip_t);
+            CHECK(g.karts[0].push_t <= 0.0f, "tires also gave power");
+        }
+    }
+
+    /* the two power-ups must do different things, and both must be
+     * modest: bounded engine boost, bounded grip gain */
+    CHECK(PUSH_POWER > 1.0f && PUSH_POWER < 1.25f,
+          "push-to-pass %.2fx is not a realistic overtake boost",
+          PUSH_POWER);
+    CHECK(TIRE_GRIP > 1.0f && TIRE_GRIP < 1.25f,
+          "fresh rubber %.2fx grip is not realistic", TIRE_GRIP);
 }
 
 /* The whole AI field must be able to finish a full race on every track,
@@ -428,34 +456,89 @@ static void test_steering_filter(void)
     }
 }
 
-/* Steering sign convention: positive steer must turn the car left, so a
- * left key mapped to +1 actually goes left on screen. */
-static void test_steer_sign(void)
+/*
+ * Steering sign convention, checked the way the player experiences it.
+ *
+ * The renderer places the chase camera behind the car with up = +Y and
+ * looks along the heading, so guLookAt gives it a right-hand axis of
+ *     right = cross(forward, up) = (-sin h, 0, cos h)
+ * This test re-derives that vector independently and asserts that a
+ * STEER_LEFT input actually moves the car toward the LEFT of the screen
+ * (a negative projection onto the camera's right axis) and STEER_RIGHT
+ * toward the right. Checking only "heading increases" is what let the
+ * controls ship mirrored, so do not weaken this back to that.
+ */
+static void screen_right_axis(float heading, float *rx, float *rz)
+{
+    *rx = -sinf(heading);
+    *rz =  cosf(heading);
+}
+
+static float steer_screen_drift(float steer_input)
 {
     Game g;
     GameConfig cfg = default_cfg(TRACK_CLASSIC);
     Input in[MAX_HUMANS];
-    float h0, h_left, h_right;
+    float x0, z0, h0, rx, rz;
+    int f;
 
     game_init(&g, &cfg);
     g.state = STATE_RACING;
     idle_inputs(in);
 
     teleport(&g, &g.karts[0], 2, 20.0f);
+    x0 = g.karts[0].x;
+    z0 = g.karts[0].z;
     h0 = g.karts[0].heading;
-    in[0].steer = 1.0f;
-    game_update(&g, in, 1.0f / 60.0f);
-    h_left = game_angle_wrap(g.karts[0].heading - h0);
+    screen_right_axis(h0, &rx, &rz);
 
-    teleport(&g, &g.karts[0], 2, 20.0f);
-    h0 = g.karts[0].heading;
-    in[0].steer = -1.0f;
-    game_update(&g, in, 1.0f / 60.0f);
-    h_right = game_angle_wrap(g.karts[0].heading - h0);
+    in[0].steer = steer_input;
+    for (f = 0; f < 45; f++)
+        game_update(&g, in, 1.0f / 60.0f);
 
-    CHECK(h_left > 0.0f, "positive steer did not turn left (%.4f)", h_left);
-    CHECK(h_right < 0.0f, "negative steer did not turn right (%.4f)",
-          h_right);
+    /* how far the car ended up to the camera's right of where it began */
+    return (g.karts[0].x - x0) * rx + (g.karts[0].z - z0) * rz;
+}
+
+static void test_steer_sign(void)
+{
+    float left = steer_screen_drift(STEER_LEFT);
+    float right = steer_screen_drift(STEER_RIGHT);
+
+    printf("steering: STEER_LEFT drifts %+.2f m across the screen, "
+           "STEER_RIGHT %+.2f m\n", left, right);
+    CHECK(left < -0.5f,
+          "STEER_LEFT moved the car %+.2f m on screen (should go left, "
+          "i.e. negative)", left);
+    CHECK(right > 0.5f,
+          "STEER_RIGHT moved the car %+.2f m on screen (should go right, "
+          "i.e. positive)", right);
+    CHECK(fabsf(left + right) < 0.35f,
+          "left and right are not mirror images (%+.2f vs %+.2f)",
+          left, right);
+
+    /* and the same relationship must hold for the lateral bookkeeping the
+     * AI and the walls rely on: positive lat is the camera's right */
+    {
+        Game g;
+        GameConfig cfg = default_cfg(TRACK_CLASSIC);
+        Input in[MAX_HUMANS];
+        float rx, rz, proj;
+        int seg = 2;
+
+        game_init(&g, &cfg);
+        screen_right_axis(atan2f(g.track.dz[seg], g.track.dx[seg]),
+                          &rx, &rz);
+        idle_inputs(in);
+        teleport_lat(&g, &g.karts[0], seg, 3.0f, 0.0f);
+        proj = (g.karts[0].x - g.track.px[seg]) * rx +
+               (g.karts[0].z - g.track.pz[seg]) * rz;
+        CHECK(g.karts[0].lat > 2.0f,
+              "teleport_lat(+3) gave lat %.2f", g.karts[0].lat);
+        CHECK(proj > 2.0f,
+              "positive lat is not the camera's right (projection %.2f)",
+              proj);
+    }
 }
 
 
@@ -753,30 +836,84 @@ static void test_player_model_learns(void)
 }
 
 
-/* AI must actually use the nitro they collect. Berthoud has no boost
- * pads and the AI never drift, so any boost seen there came from an
- * item being deliberately spent. */
-static void test_ai_uses_nitro(void)
+/* AI must actually spend the power-ups they collect. Nothing else in the
+ * game hands out push-to-pass or fresh rubber any more, so any deployment
+ * seen here was a deliberate decision by a driver. */
+static void test_ai_uses_power_ups(void)
 {
     Game g;
     GameConfig cfg = default_cfg(TRACK_BERTHOUD);
     Input in[MAX_HUMANS];
-    int f, i, boosts = 0, held_seen = 0;
+    int f, i, pushes = 0, tires = 0, held_seen = 0;
 
     game_init(&g, &cfg);
     idle_inputs(in);
     for (f = 0; f < 60 * 120; f++) {
         game_update(&g, in, 1.0f / 60.0f);
         for (i = 1; i < NUM_KARTS; i++) {
-            if (g.karts[i].item_held)
+            if (g.karts[i].power_held)
                 held_seen = 1;
-            if (g.karts[i].just_boosted)
-                boosts++;
+            if (g.karts[i].power_fired) {
+                if (g.karts[i].push_t > 0.0f)
+                    pushes++;
+                else
+                    tires++;
+            }
         }
     }
-    printf("AI nitro: %d canisters spent over 2 minutes\n", boosts);
-    CHECK(held_seen, "no AI ever picked up an item");
-    CHECK(boosts > 0, "AI never spent their nitro");
+    printf("AI power-ups over 2 minutes: %d push-to-pass, %d fresh rubber\n",
+           pushes, tires);
+    CHECK(held_seen, "no AI ever collected a power-up");
+    CHECK(pushes + tires > 0, "AI never deployed a power-up");
+    CHECK(pushes > 0 && tires > 0,
+          "AI only ever used one kind (%d push, %d tires)", pushes, tires);
+}
+
+/*
+ * No rubber-banding. The same AI car, from a standstill on the same piece
+ * of road, must accelerate identically whether the human is right next to
+ * it or half a lap up the road. Anything else means the game is handing
+ * out horsepower based on position, which is what makes a race feel
+ * scripted.
+ */
+static float ai_launch_speed(int human_seg)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    Kart *ai;
+    int i, f;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+
+    ai = &g.karts[1];
+    /* park the rest of the field out of the way so traffic cannot
+     * influence the measurement */
+    for (i = 2; i < NUM_KARTS; i++)
+        teleport(&g, &g.karts[i], (30 + i * 4) % g.track.n, 0.0f);
+
+    teleport(&g, &g.karts[0], human_seg, 25.0f);
+    teleport(&g, ai, 4, 0.0f);
+    ai->corner_conf[0] = ai->corner_conf[0];   /* leave learning alone */
+
+    for (f = 0; f < 120; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    return ai->speed;
+}
+
+static void test_no_rubber_banding(void)
+{
+    float chased = ai_launch_speed(6);     /* human alongside          */
+    float dropped = ai_launch_speed(70);   /* human way up the road    */
+
+    printf("no-elastic check: AI reaches %.2f m/s with the human "
+           "alongside, %.2f m/s with the human half a lap ahead\n",
+           chased, dropped);
+    CHECK(fabsf(chased - dropped) < 0.25f,
+          "AI gained %.2f m/s when left behind — that is rubber-banding",
+          dropped - chased);
 }
 
 int main(void)
@@ -789,7 +926,7 @@ int main(void)
     test_braking_distance();
     test_gravity_grade();
     test_cornering_grip_cap();
-    test_items();
+    test_power_ups();
     test_corner_segmentation();
     test_full_grid_fits();
     test_ai_races_all_tracks();
@@ -797,7 +934,8 @@ int main(void)
     test_ai_strategies_differ();
     test_ai_learns_from_mistakes();
     test_ai_adapts_to_player();
-    test_ai_uses_nitro();
+    test_ai_uses_power_ups();
+    test_no_rubber_banding();
     test_player_model_learns();
 
     if (failures) {

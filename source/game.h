@@ -26,7 +26,6 @@ extern "C" {
 /* ------------------------------------------------------------------ */
 
 #define TRACK_MAX_POINTS 320
-#define TRACK_MAX_PADS   8
 #define TRACK_MAX_ITEMS  6
 #define TRACK_MAX_CORNERS 48
 
@@ -52,9 +51,7 @@ typedef struct {
     float total_len;
     float road_half;                /* half-width of the paved road      */
     float wall_half;                /* half-width to the hard barrier    */
-    int   pad_seg[TRACK_MAX_PADS];  /* boost pad segments                */
-    int   n_pads;
-    int   item_seg[TRACK_MAX_ITEMS];/* item box rows                     */
+    int   item_seg[TRACK_MAX_ITEMS];/* power-up panel rows               */
     int   n_items;
     int   alpine;                   /* 1 = mountain theme (rock skirts)  */
 
@@ -75,11 +72,10 @@ const char *track_name(int track_id);
 /* Locate (x,z) relative to the track. hint = last known segment
  * (searched +/- a small window); -1 searches everywhere. Outputs
  * nearest segment, fraction along it, signed lateral offset
- * (positive = left of travel) and surface elevation at that point. */
+ * (positive = right of travel) and surface elevation at that point. */
 void track_locate(const Track *t, float x, float z, int hint,
                   int *seg, float *frac, float *lat, float *y);
 
-int track_is_pad_seg(const Track *t, int seg);
 int track_item_row(const Track *t, int seg);   /* -1 or item row index */
 
 /* ------------------------------------------------------------------ */
@@ -109,8 +105,56 @@ extern const KartSpec kart_specs[SPEC_COUNT];
 #define NUM_KARTS  12
 #define RACE_LAPS  3
 
+/*
+ * STEERING SIGN CONVENTION — read before touching any input code.
+ *
+ * The chase camera is built with guLookAt(eye, up=+Y, look) pointing
+ * along the car's heading, so its right-hand axis is
+ *
+ *     right = cross(forward, up) = (-sin h, 0, cos h)
+ *
+ * which is exactly the lateral basis this simulation uses everywhere
+ * (lx = -dz, lz = dx). Two consequences follow, and both are the
+ * opposite of what the code used to claim:
+ *
+ *   - increasing `heading` turns the car toward the RIGHT of the screen,
+ *     and the physics does `heading += f(steer)`, so
+ *         steer > 0 steers RIGHT,  steer < 0 steers LEFT
+ *   - positive `lat` is to the RIGHT of the direction of travel
+ *
+ * Input code must therefore map a "left" control to STEER_LEFT and a
+ * "right" control to STEER_RIGHT instead of hand-writing signs. The host
+ * test test_steer_sign() re-derives the camera's right axis and checks
+ * the car actually moves that way, so an inverted stick cannot slip
+ * through again.
+ */
+#define STEER_LEFT  (-1.0f)
+#define STEER_RIGHT (+1.0f)
+
+/*
+ * Power-ups, kept inside what a real racing car can do rather than
+ * borrowing from karting: a bounded engine overtake boost of the
+ * push-to-pass kind, and a spell of fresh rubber that raises grip. Both
+ * are collected from roadside panels, held in reserve, and deployed by
+ * the driver — there are no projectiles, no floor boosters and no free
+ * speed for sliding the car about.
+ */
+enum {
+    POWER_NONE  = 0,
+    POWER_PUSH  = 1,   /* push-to-pass: +PUSH_POWER engine for a while  */
+    POWER_TIRES = 2,   /* fresh rubber: +TIRE_GRIP lateral grip         */
+    POWER_TYPES = 2
+};
+
+#define PUSH_POWER    1.13f   /* ~+11%, in the region of IndyCar P2P    */
+#define PUSH_SECONDS  4.0f
+#define TIRE_GRIP     1.10f
+#define TIRE_SECONDS  8.0f
+
+const char *power_name(int power);
+
 typedef struct {
-    float steer;   /* -1..1, positive = turn left                       */
+    float steer;   /* -1..1; negative = left, positive = right          */
     int   accel;
     int   brake;
     int   hop;     /* handbrake / drift                                 */
@@ -178,7 +222,7 @@ typedef struct {
     float line_bias;       /* preferred line, fraction of road half     */
     float defend;          /* 0..1 tendency to cover a chasing human    */
     float attack;          /* 0..1 tendency to dive for an overtake     */
-    float nitro_wait;      /* seconds it sits on nitro before using it  */
+    float power_wait;      /* seconds it holds a power-up before using  */
     float power;           /* engine trim                              */
 } AIStrategy;
 
@@ -191,7 +235,7 @@ extern const AIStrategy ai_strategies[AI_STRATEGY_COUNT];
  * contact teaches them to leave you more room.
  */
 typedef struct {
-    float pass_side;   /* -1 = you pass on their right, +1 = their left */
+    float pass_side;   /* -1 = you pass on their left, +1 = their right */
     float pace;        /* your progress rate vs the leading AI, ~1.0    */
     int   passes;      /* completed overtakes on AI cars                */
     int   contacts;    /* panel-rubbing incidents with AI cars          */
@@ -210,14 +254,14 @@ typedef struct {
     float prog_raw;
     float total_progress;
     int   lap;
-    float lat;
+    float lat;            /* signed offset, + = right of travel        */
 
     /* driving state */
     int   spec;           /* index into kart_specs                      */
-    int   drifting;
-    float drift_charge;
-    float boost_t;        /* nitro seconds remaining                    */
-    int   item_held;      /* 0 = none, 1 = nitro canister              */
+    int   drifting;       /* handbrake locked in, +1/-1 = direction     */
+    float push_t;         /* push-to-pass seconds remaining             */
+    float grip_t;         /* fresh-rubber seconds remaining             */
+    int   power_held;     /* POWER_* currently in reserve               */
     int   prev_item_btn;
 
     /* role / livery */
@@ -235,7 +279,7 @@ typedef struct {
     int   learn_events;                      /* adaptations made so far  */
     int   mistakes;                          /* corners actually botched */
     float line_target;                       /* smoothed tactical line   */
-    float nitro_timer;                       /* how long nitro was held  */
+    float power_timer;                       /* how long it has held one */
 
     /* results */
     int   rank;
@@ -244,9 +288,9 @@ typedef struct {
     int   final_rank;
 
     /* one-frame event flags for the platform layer */
-    int   just_boosted;
+    int   power_fired;    /* deployed a power-up this frame             */
     int   hit_wall;
-    int   got_item;
+    int   got_item;       /* collected a power-up this frame            */
 } Kart;
 
 enum {

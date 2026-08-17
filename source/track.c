@@ -25,8 +25,7 @@ typedef struct {
     int   n_cp;
     float road_half, wall_half;
     int   alpine;
-    /* boost pads / item rows given as fractions of the lap [0..1) */
-    const float *pad_frac;   int n_pads;
+    /* power-up panel rows, as fractions of the lap [0..1) */
     const float *item_frac;  int n_items;
 } TrackDef;
 
@@ -37,25 +36,32 @@ static const float CP_CLASSIC[][3] = {
     {   0,  90, 0 }, { -30, 110, 0 }, { -70, 105, 0 }, { -95,  75, 0 },
     { -90,  40, 0 }, { -60,  25, 0 }, { -40,   5, 0 },
 };
-static const float PADS_CLASSIC[]  = { 0.150f, 0.158f, 0.650f };
-static const float ITEMS_CLASSIC[] = { 0.09f, 0.83f };
+static const float ITEMS_CLASSIC[] = { 0.09f, 0.52f, 0.83f };
 
 /* ---------------- BERTHOUD PASS ---------------- */
+/*
+ * Berthoud is the technical one: an opening chicane in the valley, four
+ * switchbacks up the east face broken up by a double-apex sweeper and a
+ * fast kink, a set of esses onto the summit, then a descent that starts
+ * fast and tightens as it drops back to the valley floor.
+ */
 static const float CP_BERTHOUD[][3] = {
-    {    0,   0,  0 },  {  60,   2,  2 },  { 120,  10,  6 },
-    { 170,  30, 11 },
-    { 200,  55, 15 },  { 215,  75, 17 },  { 195,  92, 20 },   /* hairpin 1 */
-    { 130, 100, 26 },  {  70, 108, 32 },
-    {  30, 118, 35 },  {  12, 138, 38 },  {  32, 158, 41 },   /* hairpin 2 */
-    { 100, 166, 47 },  { 160, 174, 53 },
-    { 205, 186, 57 },  { 222, 206, 60 },  { 200, 224, 63 },   /* hairpin 3 */
-    { 130, 234, 68 },  {  60, 242, 74 },
-    {  10, 260, 78 },                                          /* summit */
-    { -40, 285, 74 },  { -90, 260, 63 },  { -120, 210, 51 },
-    { -135, 150, 38 }, { -120,  90, 25 }, {  -90,  45, 13 },
-    {  -50,  12,  4 },
+    {    0,   0,  0 },  {  46,   0,  2 },
+    {  78,  12,  4 },  { 104,  -2,  6 },                  /* chicane      */
+    { 142,   6,  9 },  { 178,  28, 12 },
+    { 202,  56, 15 },  { 216,  78, 17 },  { 192,  96, 20 },/* switchback 1 */
+    { 140,  98, 24 },  { 104, 112, 28 },  {  66, 106, 31 },/* double apex  */
+    {  30, 118, 34 },  {  10, 140, 37 },  {  34, 160, 40 },/* switchback 2 */
+    {  92, 164, 45 },  { 138, 180, 49 },  { 176, 172, 52 },/* fast kink    */
+    { 208, 190, 56 },  { 224, 212, 59 },  { 198, 228, 62 },/* switchback 3 */
+    { 148, 226, 66 },  { 108, 244, 70 },  {  56, 240, 74 },/* esses        */
+    {  14, 258, 78 },                                      /* summit       */
+    { -36, 284, 75 },  { -86, 262, 66 },  { -112, 222, 56 },
+    { -128, 176, 46 }, { -150, 140, 39 },                  /* tightening   */
+    { -128, 104, 30 }, { -104,  66, 20 }, {  -74,  34, 10 },
+    {  -36,  10,  3 },
 };
-static const float ITEMS_BERTHOUD[] = { 0.05f, 0.42f, 0.86f };
+static const float ITEMS_BERTHOUD[] = { 0.04f, 0.30f, 0.55f, 0.88f };
 
 /* ---------------- LOVELAND PASS ---------------- */
 static const float CP_LOVELAND[][3] = {
@@ -79,15 +85,15 @@ static const TrackDef track_defs[TRACK_COUNT] = {
     { "CLASSIC",
       CP_CLASSIC,  (int)(sizeof(CP_CLASSIC)  / sizeof(CP_CLASSIC[0])),
       5.0f, 13.0f, 0,
-      PADS_CLASSIC, 3, ITEMS_CLASSIC, 2 },
+      ITEMS_CLASSIC, 3 },
     { "BERTHOUD",
       CP_BERTHOUD, (int)(sizeof(CP_BERTHOUD) / sizeof(CP_BERTHOUD[0])),
       4.2f,  8.5f, 1,
-      0, 0, ITEMS_BERTHOUD, 3 },
+      ITEMS_BERTHOUD, 4 },
     { "LOUELAND",   /* 'V' cannot be drawn on 7-segment glyphs */
       CP_LOVELAND, (int)(sizeof(CP_LOVELAND) / sizeof(CP_LOVELAND[0])),
       4.2f,  8.5f, 1,
-      0, 0, ITEMS_LOVELAND, 3 },
+      ITEMS_LOVELAND, 3 },
 };
 
 const char *track_name(int track_id)
@@ -253,21 +259,9 @@ void track_init(Track *t, int track_id)
     t->wall_half = d->wall_half;
     t->alpine = d->alpine;
 
-    t->n_pads = d->n_pads;
-    for (i = 0; i < d->n_pads && i < TRACK_MAX_PADS; i++)
-        t->pad_seg[i] = (int)(d->pad_frac[i] * (float)t->n) % t->n;
     t->n_items = d->n_items;
     for (i = 0; i < d->n_items && i < TRACK_MAX_ITEMS; i++)
         t->item_seg[i] = (int)(d->item_frac[i] * (float)t->n) % t->n;
-}
-
-int track_is_pad_seg(const Track *t, int seg)
-{
-    int i;
-    for (i = 0; i < t->n_pads; i++)
-        if (t->pad_seg[i] == seg)
-            return 1;
-    return 0;
 }
 
 int track_item_row(const Track *t, int seg)
@@ -327,6 +321,8 @@ void track_locate(const Track *t, float x, float z, int hint,
     *seg = best;
     *frac = best_frac;
     {
+        /* the lateral basis is the chase camera's right axis, so a
+         * positive result means "to the right of the road" on screen */
         float lx = -t->dz[best];
         float lz =  t->dx[best];
         *lat = (x - best_px) * lx + (z - best_pz) * lz;

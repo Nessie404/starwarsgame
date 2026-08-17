@@ -24,7 +24,8 @@
 
 #define DEFAULT_FIFO_SIZE (256 * 1024)
 
-/* If tilt steering feels inverted on your remote, flip this to -1. */
+/* If tilt steering feels inverted on your remote, flip this to -1.
+ * (Steering polarity itself lives in game.h: STEER_LEFT/STEER_RIGHT.) */
 #define TILT_SIGN (+1.0f)
 
 static void *frameBuffer[2] = { NULL, NULL };
@@ -85,6 +86,10 @@ static int keyboard_ok = 0;
  * brake. Arrow keys mirror the same four axes for anyone who prefers
  * them. Steering is fed through the virtual-stick filter, so holding A
  * winds the wheel on smoothly instead of snapping to full lock.
+ *
+ * All steering signs come from STEER_LEFT / STEER_RIGHT in game.h — see
+ * the convention comment there. Writing raw +1/-1 here is what made the
+ * controls come out mirrored before.
  */
 static u8 key_left, key_right, key_accel, key_brake, key_drift, key_item;
 static u8 key_confirm_edge, key_back_edge, key_menu_edge;
@@ -194,23 +199,23 @@ static void read_player_input(int p, Input *in, float dt)
     in->item  = (wheld[p] & (WPAD_BUTTON_MINUS |
                              WPAD_CLASSIC_BUTTON_MINUS)) != 0;
     if (wheld[p] & (WPAD_BUTTON_UP | WPAD_BUTTON_LEFT))
-        steer += 1.0f;
+        steer += STEER_LEFT;
     if (wheld[p] & (WPAD_BUTTON_DOWN | WPAD_BUTTON_RIGHT))
-        steer -= 1.0f;
+        steer += STEER_RIGHT;
 
     /* Wiimote expansions */
     wd = WPAD_Data(p);
     if (wd) {
         if (wd->exp.type == WPAD_EXP_NUNCHUK) {
-            steer -= stick_x(&wd->exp.nunchuk.js);
+            steer += stick_x(&wd->exp.nunchuk.js) * STEER_RIGHT;
             if (wheld[p] & (WPAD_NUNCHUK_BUTTON_C | WPAD_NUNCHUK_BUTTON_Z))
                 in->hop = 1;
             in->brake |= (wheld[p] & WPAD_BUTTON_B) != 0;
             tilt_ok = 0;
         } else if (wd->exp.type == WPAD_EXP_CLASSIC) {
-            steer -= stick_x(&wd->exp.classic.ljs);
-            if (wheld[p] & WPAD_CLASSIC_BUTTON_LEFT)  steer += 1.0f;
-            if (wheld[p] & WPAD_CLASSIC_BUTTON_RIGHT) steer -= 1.0f;
+            steer += stick_x(&wd->exp.classic.ljs) * STEER_RIGHT;
+            if (wheld[p] & WPAD_CLASSIC_BUTTON_LEFT)  steer += STEER_LEFT;
+            if (wheld[p] & WPAD_CLASSIC_BUTTON_RIGHT) steer += STEER_RIGHT;
             in->accel |= (wheld[p] & (WPAD_CLASSIC_BUTTON_A |
                                       WPAD_CLASSIC_BUTTON_X)) != 0;
             in->brake |= (wheld[p] & (WPAD_CLASSIC_BUTTON_B |
@@ -222,9 +227,11 @@ static void read_player_input(int p, Input *in, float dt)
             tilt_ok = 0;
         }
         if (tilt_ok) {
-            float tilt = TILT_SIGN * -wd->orient.pitch;
+            /* held sideways, rolling the remote like a wheel shows up as
+             * pitch; tipping it clockwise steers right */
+            float tilt = TILT_SIGN * wd->orient.pitch;
             if (fabsf(tilt) > 7.0f)
-                steer += game_clampf(tilt / 45.0f, -1.0f, 1.0f);
+                steer += game_clampf(tilt / 45.0f, -1.0f, 1.0f) * STEER_RIGHT;
         }
     }
 
@@ -232,7 +239,8 @@ static void read_player_input(int p, Input *in, float dt)
     {
         s8 sx = PAD_StickX(p);
         if (sx > 18 || sx < -18)
-            steer -= game_clampf((float)sx / 90.0f, -1.0f, 1.0f);
+            steer += game_clampf((float)sx / 90.0f, -1.0f, 1.0f) *
+                     STEER_RIGHT;
         in->accel |= (gheld[p] & (PAD_BUTTON_A | PAD_BUTTON_X)) != 0;
         in->brake |= (gheld[p] & PAD_BUTTON_B) != 0;
         in->hop   |= (gheld[p] & (PAD_TRIGGER_R | PAD_TRIGGER_L)) != 0;
@@ -241,8 +249,8 @@ static void read_player_input(int p, Input *in, float dt)
 
     /* USB keyboard (player 1 only): WASD, A = left, D = right */
     if (p == 0) {
-        if (key_left)  steer += 1.0f;
-        if (key_right) steer -= 1.0f;
+        if (key_left)  steer += STEER_LEFT;
+        if (key_right) steer += STEER_RIGHT;
         in->accel |= key_accel;
         in->brake |= key_brake;
         in->hop   |= key_drift;
@@ -396,7 +404,7 @@ static void audio_update(void)
     /* engine follows P1's speed; revs rise and fall with velocity */
     v = fabsf(k->speed);
     pitch = (int)(ENGINE_CYCLE * (34.0f + v * 4.4f));      /* Hz * cycle */
-    if (k->boost_t > 0.0f) pitch = (int)(pitch * 1.15f);
+    if (k->push_t > 0.0f) pitch = (int)(pitch * 1.10f);
     if (pitch > 140000) pitch = 140000;
     vol = 70 + (int)(v * 2.2f);
     if (vol > 170) vol = 170;
@@ -605,10 +613,7 @@ static void draw_track(const Track *t, int viewer_seg)
         if (!seg_in_window(t, viewer_seg, i, win_ahead, win_behind))
             continue;
 
-        if (track_is_pad_seg(t, i)) {
-            float pulse = 0.85f + 0.15f * sinf((float)frame_no * 0.2f);
-            r = shade(245, pulse); g = shade(150, pulse); b = 30;
-        } else if (i & 1) {
+        if (i & 1) {
             r = 95; g = 95; b = 100;
         } else {
             r = 85; g = 85; b = 90;
@@ -741,13 +746,22 @@ static void draw_track(const Track *t, int viewer_seg)
                     game.item_respawn[rrow][b] > 0.0f)
                     continue;
                 pulse = 0.8f + 0.2f * sinf((float)frame_no * 0.11f + b);
-                draw_box(t->px[seg] + lx * blat,
-                         t->py[seg] + 1.0f,
-                         t->pz[seg] + lz * blat,
-                         (float)frame_no * 0.05f + (float)b, 0.0f,
-                         0.45f, 0.45f, 0.45f,
-                         shade(70, pulse), shade(200, pulse),
-                         shade(215, pulse));
+                /* amber = push-to-pass, green = fresh rubber; the panel
+                 * always holds the same thing so drivers can aim */
+                if (((rrow + b) & 1) == 0)
+                    draw_box(t->px[seg] + lx * blat, t->py[seg] + 1.0f,
+                             t->pz[seg] + lz * blat,
+                             (float)frame_no * 0.05f + (float)b, 0.0f,
+                             0.45f, 0.45f, 0.45f,
+                             shade(240, pulse), shade(170, pulse),
+                             shade(50, pulse));
+                else
+                    draw_box(t->px[seg] + lx * blat, t->py[seg] + 1.0f,
+                             t->pz[seg] + lz * blat,
+                             (float)frame_no * 0.05f + (float)b, 0.0f,
+                             0.45f, 0.45f, 0.45f,
+                             shade(80, pulse), shade(210, pulse),
+                             shade(110, pulse));
             }
         }
     }
@@ -829,7 +843,7 @@ static void draw_kart(const Track *t, const Kart *k)
 
     draw_car_model(k->x, by, k->z, yaw, pitch, k->steer_vis, col);
 
-    if (k->boost_t > 0.0f) {
+    if (k->push_t > 0.0f) {
         float len = 1.1f * (0.7f + 0.3f * ((frame_no & 2) ? 1.0f : 0.4f));
         u8 fr = 255, fg = (frame_no & 2) ? 170 : 110;
         GX_Begin(GX_TRIANGLES, GX_VTXFMT0, 3);
@@ -845,12 +859,12 @@ static void draw_kart(const Track *t, const Kart *k)
         GX_End();
     }
 
-    /* smoke / sparks when sliding hard */
+    /* tire smoke when sliding hard; tinted while on fresh rubber */
     if (k->slip > 0.35f && fabsf(k->speed) > 5.0f) {
         u8 sr, sg, sb;
         float jx = 0.15f * sinf((float)frame_no * 1.7f);
-        if (k->drifting && k->drift_charge > 1.2f) {
-            sr = 255; sg = 150; sb = 40;
+        if (k->grip_t > 0.0f) {
+            sr = 150; sg = 220; sb = 165;
         } else {
             sr = 200; sg = 200; sb = 205;
         }
@@ -1119,12 +1133,12 @@ static void draw_player_hud(int p)
     hud_text(vx + vw - 60.0f, vy + 12.0f, 13.0f, 22.0f, buf,
              255, 220, 60, 240);
 
-    /* speed, km/h */
+    /* speed, km/h — turns amber while push-to-pass is deployed */
     snprintf(buf, sizeof(buf), "%d", (int)(fabsf(k->speed) * 3.6f));
     hud_text(vx + 14.0f, vy + vh - 40.0f, 13.0f, 24.0f, buf,
-             k->boost_t > 0.0f ? 255 : 235,
-             k->boost_t > 0.0f ? 150 : 235,
-             k->boost_t > 0.0f ? 30 : 235, 235);
+             k->push_t > 0.0f ? 255 : 235,
+             k->push_t > 0.0f ? 170 : 235,
+             k->push_t > 0.0f ? 40 : 235, 235);
 
     /* who you are chasing — and how they drive */
     if (game.cfg.n_humans == 1 && k->rank > 1 &&
@@ -1139,19 +1153,25 @@ static void draw_player_hud(int p)
         }
     }
 
-    /* item slot */
-    if (k->item_held)
-        hud_text(vx + vw - 88.0f, vy + vh - 36.0f, 10.0f, 17.0f, "NITRO",
-                 90, 220, 235, 235);
-
-    /* drift charge */
-    if (k->drifting) {
-        float cfrac = game_clampf(k->drift_charge / 1.2f, 0.0f, 1.0f);
-        u8 cr = 90, cg = 160, cb = 255;
-        if (cfrac >= 1.0f) { cr = 255; cg = 150; cb = 40; }
+    /* power-up in reserve, and the timer while one is deployed */
+    if (k->power_held) {
+        const char *nm = power_name(k->power_held);
+        if (k->power_held == POWER_PUSH)
+            hud_text(vx + vw - 96.0f, vy + vh - 36.0f, 10.0f, 17.0f, nm,
+                     240, 180, 60, 235);
+        else
+            hud_text(vx + vw - 96.0f, vy + vh - 36.0f, 10.0f, 17.0f, nm,
+                     110, 225, 140, 235);
+    }
+    if (k->push_t > 0.0f || k->grip_t > 0.0f) {
+        float frac = (k->push_t > 0.0f) ? k->push_t / PUSH_SECONDS
+                                       : k->grip_t / TIRE_SECONDS;
+        u8 cr = (k->push_t > 0.0f) ? 240 : 110;
+        u8 cg = (k->push_t > 0.0f) ? 175 : 225;
+        u8 cb = (k->push_t > 0.0f) ?  55 : 140;
         hud_rect(vx + 14.0f, vy + vh - 12.0f, 90.0f, 6.0f, 15, 15, 20, 160);
-        hud_rect(vx + 15.0f, vy + vh - 11.0f, 88.0f * cfrac, 4.0f,
-                 cr, cg, cb, 230);
+        hud_rect(vx + 15.0f, vy + vh - 11.0f,
+                 88.0f * game_clampf(frac, 0.0f, 1.0f), 4.0f, cr, cg, cb, 230);
     }
 }
 
@@ -1557,12 +1577,12 @@ static void race_frame(float dt)
     /* per-player rumble + effect sounds (P1 sounds only) */
     for (p = 0; p < game.cfg.n_humans; p++) {
         const Kart *k = &game.karts[p];
-        if (k->just_boosted || k->hit_wall || k->got_item)
+        if (k->power_fired || k->hit_wall || k->got_item)
             rumble_t[p] = 0.18f;
         if (p == 0) {
-            if (k->got_item)      audio_beep(1320.0f, 90, 150);
-            if (k->just_boosted)  audio_beep(220.0f, 200, 170);
-            if (k->hit_wall)      audio_beep(110.0f, 120, 190);
+            if (k->got_item)     audio_beep(1320.0f, 90, 150);
+            if (k->power_fired)  audio_beep(260.0f, 220, 175);
+            if (k->hit_wall)     audio_beep(110.0f, 120, 190);
         }
         if (rumble_t[p] > 0.0f) {
             rumble_t[p] -= dt;

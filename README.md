@@ -18,7 +18,10 @@ fun with a driving model that expects you to brake for the hairpins.
 
 **Version history:** v0.1 was the original arcade kart racer; v1.0 was the
 driving-model rewrite (physics, garage, WASD, Colorado passes); v1.1 adds
-the twelve-car field with individual strategies, learning and adaptation.
+the twelve-car field with individual strategies, learning and adaptation,
+rebuilds Berthoud as a 19-corner technical circuit, swaps nitro and boost
+pads for motorsport power-ups, and removes the remaining arcade cheats.
+v1.1 also **fixes inverted steering** — left really is left now.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -58,10 +61,12 @@ the twelve-car field with individual strategies, learning and adaptation.
   lateral g, drag area, wheelbase and dirt grip — the menu shows the
   derived 0-100 time and top speed, and the physics actually uses these
   numbers.
-- **Three tracks.** CLASSIC (flat speedway with boost pads), plus
-  stylized versions of **Berthoud Pass** (US-40) and **Loveland Pass**
-  (US-6) in Colorado: 6-10% grades, stacked switchbacks, guardrails and
-  ~78 m of climb per lap.
+- **Three tracks.** CLASSIC (a flat, flowing speedway), plus stylized
+  versions of **Berthoud Pass** (US-40) and **Loveland Pass** (US-6) in
+  Colorado: 6-10% grades, guardrails and ~78 m of climb per lap. Berthoud
+  is the technical one — 19 corners including an opening chicane, four
+  switchbacks up the east face, a double-apex sweeper, a fast kink, esses
+  onto the summit and a descent that tightens as it drops.
 - **Garage view.** Pick your car on a lit 3D turntable, with its spec
   sheet, at-a-glance power/brake/grip/dirt bars, and eight paint colors
   — each player gets their own garage before the lights go out.
@@ -72,8 +77,18 @@ the twelve-car field with individual strategies, learning and adaptation.
 - **Split-screen multiplayer** for up to 4 players (horizontal split for
   2, quadrants for 3-4), with view culling so a full field still runs at
   frame rate in four-way split.
-- **Items and boost:** nitro canisters in item boxes, boost pads on the
-  speedway, and a small handbrake-drift mini-turbo as the one arcade nod.
+- **Power-ups, kept inside what a race car can do.** Roadside panels hold
+  one of two things, and each panel always holds the same one so you can
+  aim for what you want: **push-to-pass** (+13% engine for 4 s, in the
+  region of IndyCar's real overtake boost) or **fresh rubber** (+10%
+  lateral grip for 8 s). Deploy with E / Y / −. The AI spend theirs the
+  way an engineer would — push-to-pass on open road with someone to
+  catch, fresh rubber just before a twisty stretch.
+- **No arcade cheats.** There is no rubber-banding (a test proves an AI
+  left behind gets exactly the same power: 18.34 m/s either way), no
+  floor boost pads, and no mini-turbo reward for sliding — the handbrake
+  rotates the car and scrubs speed, because that is what a handbrake
+  does.
 - **Procedural audio:** engine note that follows revs, tire squeal at the
   grip limit, countdown beeps — synthesized at runtime via ASND, no
   sound assets.
@@ -114,7 +129,7 @@ Copy the `apps` folder from `wiikart.zip` onto an SD card (so you have
 | Accelerate  | **W** (or ↑) | A or X                         | 2 or A                 | A         | a or x  |
 | Brake / reverse | **S** (or ↓) | B                          | 1                      | B         | b or y  |
 | Handbrake   | Space or Shift | L or R trigger               | Hold B                 | C or Z    | L/R/ZL/ZR |
-| Nitro       | **E**        | Y                              | −                      | −         | −       |
+| Deploy power-up | **E**    | Y                              | −                      | −         | −       |
 | Back to menu | **R**       | Start                          | +                      | +         | +       |
 | Quit        | Esc          | Z + Start                      | HOME                   | HOME      | HOME    |
 
@@ -124,15 +139,15 @@ Menus and garage: **A/D** (or ←/→) change the selection, **W/S** (or
 Remote the D-pad plus 2.
 
 Driving notes: brake before hairpins — the grip circle is real. The
-handbrake rotates the car but scrubs speed; hold it through a bend and
-release for a small mini-turbo. RALLY keeps 72% of its grip on dirt,
-TOURER only 35%.
+handbrake rotates the car but costs you speed, so use it to place the car,
+not to go faster. RALLY keeps 72% of its grip on dirt, TOURER only 35%.
+Save push-to-pass for a straight where you have someone to catch, and
+fresh rubber for the run into a switchback section.
 
 The HUD names the car you are chasing by its strategy, and the finish
 screen prints the full classification, so you can see whether DEFENDER or
-CHARGER actually got the job done. Loveland is the long one — thirteen
-corners and a summit turnaround: a quick AI laps it in about 60 s and
-Berthoud in about 52 s, against 26 s round Classic.
+CHARGER actually got the job done. A quick AI laps Berthoud in about 62 s
+and Loveland in about 59 s, against 27 s round Classic.
 
 ## The cars
 
@@ -191,13 +206,22 @@ nitro use, and that the AI completes laps on every track — including
 recovering from a botched hairpin by backing out, since a real car can't
 rotate in place.
 
+Steering polarity is tested the way you experience it: the test
+re-derives the chase camera's right-hand axis (`cross(forward, up)`, the
+same vector `guLookAt` uses) and asserts that a left input moves the car
+toward the left of the screen. The earlier test only checked that the
+heading angle changed, which is exactly how the controls shipped
+mirrored in v1.0.
+
 The v1.1 AI behaviour is tested as behaviour, not just as code: that the
 field spreads out across distinct racing lines and error counts, that
 mistakes fall as a race progresses, that overconfident strategies end up
 believing less than they started and timid ones more, that a defender
 covers the side a human has been passing on (and the mirror-image setup
 produces the mirror-image line), and that an overtake is logged with the
-side it happened on.
+side it happened on. Power-ups are checked for being deployed, being
+distinct from one another, and staying within realistic bounds, and a
+dedicated test proves the AI get no rubber-band power boost.
 
 ## Ideas for later
 

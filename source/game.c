@@ -29,7 +29,7 @@
 #define DRIVE_EFF  0.85f       /* drivetrain efficiency                */
 #define HP_TO_W    745.7f
 #define V100       27.78f      /* 100 km/h in m/s                      */
-#define BOOST_PWR  1.35f       /* nitro power multiplier               */
+/* Power-up strengths live in game.h (PUSH_POWER / TIRE_GRIP). */
 
 const KartSpec kart_specs[SPEC_COUNT] = {
     /* name      mass    hp   brake  lat_g  CdA   wheelbase offroad */
@@ -43,7 +43,7 @@ const KartSpec kart_specs[SPEC_COUNT] = {
  * believing it can beat the grip limit: it will run wide, learn, and
  * settle down. Under 1.0 means it starts cautious and works up. */
 const AIStrategy ai_strategies[AI_STRATEGY_COUNT] = {
-/*   name        conf_start conf_max learn_up learn_down line   defend attack nitro power */
+/*   name        conf_start conf_max learn_up learn_down line   defend attack wait  trim */
   { "BALANCED",   0.97f,   1.05f,   0.014f,  0.10f,   0.00f,  0.35f, 0.40f, 1.0f, 1.000f },
   { "LATE",       1.12f,   1.14f,   0.010f,  0.17f,  -0.10f,  0.25f, 0.70f, 0.3f, 1.015f },
   { "INSIDE",     0.99f,   1.06f,   0.013f,  0.11f,  -0.55f,  0.55f, 0.45f, 1.2f, 0.995f },
@@ -52,6 +52,15 @@ const AIStrategy ai_strategies[AI_STRATEGY_COUNT] = {
   { "DRAFTER",    1.00f,   1.09f,   0.016f,  0.12f,   0.30f,  0.40f, 0.80f, 3.0f, 1.005f },
   { "CRUISER",    0.88f,   1.03f,   0.018f,  0.07f,   0.45f,  0.20f, 0.30f, 1.6f, 0.985f },
 };
+
+const char *power_name(int power)
+{
+    switch (power) {
+    case POWER_PUSH:  return "PUSH";
+    case POWER_TIRES: return "TIRES";
+    default:          return "";
+    }
+}
 
 const char *ai_strategy_name(int strategy)
 {
@@ -309,8 +318,8 @@ static int nearest_rival(const Game *g, const Kart *k, int ahead,
 #define AI_ATTACK_RANGE 15.0f    /* metres: "I can have a go at them"  */
 
 /*
- * Decide where on the road this driver wants to be, in meters left of
- * the centerline. Base is the strategy's preferred line; on top of that
+ * Decide where on the road this driver wants to be, as a signed offset
+ * from the centerline (positive = right, see game.h). Base is the strategy's preferred line; on top of that
  * a driver being chased by a human covers the side that human keeps
  * passing on (learned in ai_observe_humans), and a driver hunting a car
  * ahead picks the opposite side to set up a run at it.
@@ -324,7 +333,7 @@ static float ai_tactical_line(const Game *g, const Kart *k)
     float gap;
     int who;
 
-    /* being hunted: cover the side this human likes to come down */
+    /* being hunted: cover the side of the road this human keeps using */
     who = nearest_rival(g, k, 0, 1, AI_DEFEND_RANGE, &gap);
     if (who >= 0) {
         const PlayerModel *pm = &g->pmodel[g->karts[who].human];
@@ -430,18 +439,32 @@ static void ai_control(const Game *g, const Kart *k, Input *in)
     }
 
     /*
-     * Nitro. Chargers empty the bottle the moment they have one, drafters
-     * sit on it until they are close enough behind someone for it to buy a
-     * place, and everyone waits for the road to open up rather than
-     * wasting it mid-hairpin.
+     * Power-ups get spent the way a race engineer would spend them:
+     * push-to-pass when the road is open and there is someone to catch,
+     * fresh rubber just before a twisty stretch where grip is what
+     * actually costs time. Chargers use whatever they have almost
+     * immediately; drafters sit on it until a pass is genuinely on.
      */
-    if (k->item_held) {
-        int straightish = t->curv[k->seg] < 0.02f;
+    if (k->power_held && k->power_timer >= st->power_wait) {
         float gap;
-        int target = nearest_rival(g, k, 1, 0, 25.0f, &gap);
-        if (k->nitro_timer >= st->nitro_wait && straightish &&
-            (target >= 0 || st->nitro_wait < 1.0f))
+        int target = nearest_rival(g, k, 1, 0, 30.0f, &gap);
+        float curv_ahead = 0.0f, d2 = 0.0f;
+        int j2, seg2 = k->seg;
+
+        for (j2 = 0; j2 < 12 && d2 < 80.0f; j2++) {
+            if (t->curv[seg2] > curv_ahead)
+                curv_ahead = t->curv[seg2];
+            d2 += t->seg_len[seg2];
+            seg2 = (seg2 + 1) % t->n;
+        }
+
+        if (k->power_held == POWER_PUSH) {
+            if (t->curv[k->seg] < 0.02f &&
+                (target >= 0 || st->power_wait < 1.0f))
+                in->item = 1;
+        } else if (curv_ahead > 0.03f) {
             in->item = 1;
+        }
     }
 }
 
@@ -548,18 +571,17 @@ static void ai_observe_humans(Game *g, float dt)
     }
 }
 
+/*
+ * Engine trim for an AI car. This deliberately does NOT rubber-band: a
+ * driver who is behind does not quietly gain horsepower, because that is
+ * what makes a race feel scripted. The field stays together because the
+ * cars are similar and the drivers learn, not because the game is
+ * dragging them along on elastic.
+ */
 static float ai_power_scale(const Game *g, const Kart *k)
 {
-    /* light rubber-banding against the best-placed human, on top of the
-     * strategy's own engine trim */
-    float lead = -1e9f;
-    int i;
-    for (i = 0; i < g->cfg.n_humans; i++)
-        if (g->karts[i].total_progress > lead)
-            lead = g->karts[i].total_progress;
-    return k->ai_skill * ai_strategies[k->strategy].power *
-           game_clampf(1.0f + (lead - k->total_progress) * 0.0015f,
-                       0.94f, 1.08f);
+    (void)g;
+    return k->ai_skill * ai_strategies[k->strategy].power;
 }
 
 static void kart_step(Game *g, Kart *k, const Input *in, float dt,
@@ -576,13 +598,18 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     float a = 0.0f;
     int was_inside = fabsf(k->lat) <= t->wall_half;
 
-    k->just_boosted = 0;
+    k->power_fired = 0;
     k->hit_wall = 0;
     k->got_item = 0;
 
-    if (k->boost_t > 0.0f) {
-        P *= BOOST_PWR;
-        k->boost_t -= dt;
+    /* deployed power-ups: a bounded engine boost, and/or fresh rubber */
+    if (k->push_t > 0.0f) {
+        P *= PUSH_POWER;
+        k->push_t -= dt;
+    }
+    if (k->grip_t > 0.0f) {
+        mu_a *= TIRE_GRIP;
+        k->grip_t -= dt;
     }
 
     /* --- longitudinal forces --- */
@@ -614,17 +641,17 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     v += a * dt;
     v = game_clampf(v, -10.0f, 90.0f);
 
-    /* --- handbrake drift --- */
+    /*
+     * Handbrake. It does what a handbrake does — locks the rear axle so
+     * the car rotates, and scrubs speed for the privilege. There is no
+     * mini-turbo reward for using it: sliding a car is slow, and
+     * pretending otherwise was the most arcade thing in here.
+     */
     if (!k->drifting) {
         if (in->hop && fabsf(steer) > 0.2f && v > 8.0f)
             k->drifting = (steer > 0.0f) ? 1 : -1;
     } else if (!in->hop || v < 5.0f) {
-        if (k->drift_charge > 1.2f) {
-            k->boost_t = fmaxf(k->boost_t, 0.8f);
-            k->just_boosted = 1;
-        }
         k->drifting = 0;
-        k->drift_charge = 0.0f;
     }
 
     /* --- steering: bicycle model, grip-capped yaw --- */
@@ -637,9 +664,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         if (k->drifting) {
             yaw_cmd *= 1.35f;
             yaw_cap *= 1.5f;
-            v -= 0.20f * mu_a * dt;                  /* scrub in the slide */
-            if (fabsf(yaw_cmd) > 0.5f * yaw_cap)
-                k->drift_charge += dt;
+            v -= 0.55f * mu_a * dt;                  /* sliding is slow */
             k->slip = fmaxf(k->slip, 0.7f);
         }
 
@@ -694,24 +719,21 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->y = y;
         k->lap = (int)floorf(k->total_progress / (float)t->n);
 
-        if (track_is_pad_seg(t, seg) && fabsf(lat) <= t->road_half) {
-            if (k->boost_t < 0.4f)
-                k->just_boosted = 1;
-            k->boost_t = fmaxf(k->boost_t, 1.0f);
-        }
-
-        /* item boxes: three across the road on marked rows */
+        /* power-up panels: three across the road on marked rows. Which
+         * of the two a panel carries is fixed, so a driver can aim for
+         * the one they actually want instead of drawing a lottery. */
         {
             int row = track_item_row(t, seg);
-            if (row >= 0 && !k->item_held) {
+            if (row >= 0 && !k->power_held) {
                 int b;
                 for (b = 0; b < 3; b++) {
                     float blat = ((float)b - 1.0f) * 0.55f * t->road_half;
                     if (fabsf(lat - blat) < 1.4f &&
                         g->item_respawn[row][b] <= 0.0f) {
-                        k->item_held = 1;
+                        k->power_held = ((row + b) & 1) ? POWER_TIRES
+                                                       : POWER_PUSH;
                         k->got_item = 1;
-                        g->item_respawn[row][b] = 4.0f;
+                        g->item_respawn[row][b] = 6.0f;
                         break;
                     }
                 }
@@ -719,11 +741,14 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         }
     }
 
-    /* --- use item (nitro canister) --- */
-    if (in->item && !k->prev_item_btn && k->item_held) {
-        k->item_held = 0;
-        k->boost_t = fmaxf(k->boost_t, 1.6f);
-        k->just_boosted = 1;
+    /* --- deploy a held power-up --- */
+    if (in->item && !k->prev_item_btn && k->power_held) {
+        if (k->power_held == POWER_PUSH)
+            k->push_t = fmaxf(k->push_t, PUSH_SECONDS);
+        else
+            k->grip_t = fmaxf(k->grip_t, TIRE_SECONDS);
+        k->power_held = POWER_NONE;
+        k->power_fired = 1;
     }
     k->prev_item_btn = in->item;
 }
@@ -841,7 +866,7 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
                               game_clampf(dt * 1.8f, 0.0f, 1.0f);
             ai_control(g, k, &in);
             scale = ai_power_scale(g, k);
-            k->nitro_timer = k->item_held ? k->nitro_timer + dt : 0.0f;
+            k->power_timer = k->power_held ? k->power_timer + dt : 0.0f;
         }
         kart_step(g, k, &in, dt, scale);
 
