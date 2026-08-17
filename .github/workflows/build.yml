@@ -44,6 +44,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: wiikart
@@ -74,13 +75,18 @@ jobs:
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF_NAME}"
-            TITLE="WiiKart ${GITHUB_REF_NAME}"
+          elif [[ -f VERSION ]]; then
+            TAG="v$(cat VERSION)"
           else
             TAG="build-${{ github.run_number }}"
-            TITLE="WiiKart build ${{ github.run_number }}"
           fi
-          gh release create "$TAG" wiikart.zip \
-            --target "${{ github.sha }}" \
-            --title "$TITLE" \
-            --notes "Download wiikart.zip, unzip, and open wiikart.dol in the Dolphin emulator (or copy the apps folder to an SD card for a real Wii). See the README for controls." \
-            --latest
+          TITLE="WiiKart ${TAG}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" wiikart.zip --clobber
+          else
+            gh release create "$TAG" wiikart.zip \
+              --target "${{ github.sha }}" \
+              --title "$TITLE" \
+              --notes "Download wiikart.zip, unzip, and open wiikart.dol in the Dolphin emulator (or copy the apps folder to an SD card for a real Wii). See the README for controls." \
+              --latest
+          fi
