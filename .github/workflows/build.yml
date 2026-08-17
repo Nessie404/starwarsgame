@@ -35,3 +35,45 @@ jobs:
             wiikart.dol
             wiikart.elf
             dist/
+
+  release:
+    name: Publish downloadable release
+    needs: [test, build]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wiikart
+      - name: Package zip
+        run: |
+          mkdir pkg
+          cp wiikart.dol pkg/
+          cp -r dist/apps pkg/apps
+          cat > pkg/README.txt <<'EOF'
+          WiiKart — original kart racer for the Nintendo Wii (homebrew)
+
+          Play in the Dolphin emulator (https://dolphin-emu.org):
+            File > Open... > wiikart.dol
+
+          Play on a real Wii:
+            copy the "apps" folder to your SD card, launch from the
+            Homebrew Channel.
+
+          Controls (Wii Remote sideways): tilt or D-pad = steer,
+          2/A = gas, 1 = brake, hold B = drift (release for boost),
+          + = restart, HOME = quit.
+          EOF
+          (cd pkg && zip -r ../wiikart.zip .)
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "build-${{ github.run_number }}" wiikart.zip \
+            --target "${{ github.sha }}" \
+            --title "WiiKart build ${{ github.run_number }}" \
+            --notes "Automated build. Download wiikart.zip, unzip, and open wiikart.dol in Dolphin." \
+            --latest
