@@ -1,0 +1,6 @@
+build/
+dist/
+*.dol
+*.elf
+*.map
+wiikart-test

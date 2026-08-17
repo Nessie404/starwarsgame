@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<app version="1">
+  <name>WiiKart</name>
+  <coder>kaz</coder>
+  <version>1.0</version>
+  <release_date>20260817000000</release_date>
+  <short_description>Arcade kart racing</short_description>
+  <long_description>An original arcade kart racer: 3 laps against 4 AI drivers, with drifting, mini-turbos and boost pads. Hold the Wii Remote sideways and tilt to steer. Runs on the Wii via the Homebrew Channel and in the Dolphin emulator.</long_description>
+</app>
