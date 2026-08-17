@@ -15,6 +15,8 @@
 #include <malloc.h>
 #include <gccore.h>
 #include <wiiuse/wpad.h>
+#include <wiikeyboard/keyboard.h>
+#include <wiikeyboard/keysym.h>
 
 #include "game.h"
 
@@ -597,47 +599,151 @@ static void draw_hud(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Input                                                               */
+/* Input: Wiimote (tilt / D-pad), Nunchuk, Classic Controller,        */
+/* GameCube pad (= Xbox pads in Dolphin) and USB keyboard              */
 /* ------------------------------------------------------------------ */
+
+static int keyboard_ok = 0;
+static u8 key_left, key_right, key_accel, key_brake, key_drift;
+
+static void restart_race(void)
+{
+    game_init(&game);
+    place_scenery();
+}
+
+/* signed x deflection (-1..1, right positive) of a wiiuse joystick */
+static float stick_x(const joystick_t *js)
+{
+    if (js->mag < 0.2f)
+        return 0.0f;
+    return game_clampf(js->mag, 0.0f, 1.0f) *
+           sinf(js->ang * ((float)M_PI / 180.0f));
+}
+
+static void poll_keyboard(void)
+{
+    keyboard_event ev;
+
+    if (!keyboard_ok)
+        return;
+    while (KEYBOARD_GetEvent(&ev)) {
+        u8 held;
+        if (ev.type == KEYBOARD_DISCONNECTED) {
+            key_left = key_right = key_accel = key_brake = key_drift = 0;
+            continue;
+        }
+        if (ev.type != KEYBOARD_PRESSED && ev.type != KEYBOARD_RELEASED)
+            continue;
+        held = (ev.type == KEYBOARD_PRESSED);
+        switch (ev.symbol) {
+        case KS_Left:                       key_left = held;  break;
+        case KS_Right:                      key_right = held; break;
+        case KS_Up: case KS_x: case KS_X:   key_accel = held; break;
+        case KS_Down: case KS_z: case KS_Z: key_brake = held; break;
+        case KS_space:
+        case KS_Shift_L: case KS_Shift_R:   key_drift = held; break;
+        case KS_Return: case KS_r: case KS_R:
+            if (held) restart_race();
+            break;
+        case KS_Escape:
+            if (held) exit(0);
+            break;
+        default:
+            break;
+        }
+    }
+}
 
 static void read_input(Input *in)
 {
     u32 held, down;
+    u32 gheld, gdown;
     const WPADData *wd;
     float steer = 0.0f;
+    int tilt_ok = 1;
 
     WPAD_ScanPads();
+    PAD_ScanPads();
+    poll_keyboard();
+
     held = WPAD_ButtonsHeld(0);
     down = WPAD_ButtonsDown(0);
+    gheld = PAD_ButtonsHeld(0);
+    gdown = PAD_ButtonsDown(0);
 
-    if (down & WPAD_BUTTON_HOME)
+    if ((down & (WPAD_BUTTON_HOME | WPAD_CLASSIC_BUTTON_HOME)) ||
+        ((gheld & PAD_TRIGGER_Z) && (gdown & PAD_BUTTON_START)))
         exit(0);
-    if (down & WPAD_BUTTON_PLUS) {
-        game_init(&game);
-        place_scenery();
-    }
+    if ((down & (WPAD_BUTTON_PLUS | WPAD_CLASSIC_BUTTON_PLUS)) ||
+        (!(gheld & PAD_TRIGGER_Z) && (gdown & PAD_BUTTON_START)))
+        restart_race();
 
     memset(in, 0, sizeof(*in));
+
+    /* --- Wiimote buttons (sideways grip) --- */
     in->accel = (held & (WPAD_BUTTON_2 | WPAD_BUTTON_A)) != 0;
     in->brake = (held & WPAD_BUTTON_1) != 0;
     in->hop   = (held & WPAD_BUTTON_B) != 0;
 
     /* D-pad steering. Held sideways, the pad's UP points left; also
-     * accept LEFT/RIGHT so normal-grip and Dolphin keyboard users are
-     * covered. Positive steer = turn left. */
+     * accept LEFT/RIGHT for normal grip. Positive steer = turn left. */
     if (held & (WPAD_BUTTON_UP | WPAD_BUTTON_LEFT))
         steer += 1.0f;
     if (held & (WPAD_BUTTON_DOWN | WPAD_BUTTON_RIGHT))
         steer -= 1.0f;
 
-    /* Tilt steering (remote held sideways): raising the nose steers
-     * left, like a steering wheel. 7 degree deadzone. */
+    /* --- Wiimote expansions --- */
     wd = WPAD_Data(0);
     if (wd) {
-        float tilt = TILT_SIGN * -wd->orient.pitch;
-        if (fabsf(tilt) > 7.0f)
-            steer += game_clampf(tilt / 45.0f, -1.0f, 1.0f);
+        if (wd->exp.type == WPAD_EXP_NUNCHUK) {
+            /* stick steers; C or Z drifts; A/B on the remote as usual */
+            steer -= stick_x(&wd->exp.nunchuk.js);
+            if (held & (WPAD_NUNCHUK_BUTTON_C | WPAD_NUNCHUK_BUTTON_Z))
+                in->hop = 1;
+            in->brake |= (held & WPAD_BUTTON_B) != 0;
+            tilt_ok = 0;
+        } else if (wd->exp.type == WPAD_EXP_CLASSIC) {
+            steer -= stick_x(&wd->exp.classic.ljs);
+            if (held & (WPAD_CLASSIC_BUTTON_LEFT))  steer += 1.0f;
+            if (held & (WPAD_CLASSIC_BUTTON_RIGHT)) steer -= 1.0f;
+            in->accel |= (held & (WPAD_CLASSIC_BUTTON_A |
+                                  WPAD_CLASSIC_BUTTON_X)) != 0;
+            in->brake |= (held & (WPAD_CLASSIC_BUTTON_B |
+                                  WPAD_CLASSIC_BUTTON_Y)) != 0;
+            in->hop   |= (held & (WPAD_CLASSIC_BUTTON_FULL_R |
+                                  WPAD_CLASSIC_BUTTON_FULL_L |
+                                  WPAD_CLASSIC_BUTTON_ZR |
+                                  WPAD_CLASSIC_BUTTON_ZL)) != 0;
+            tilt_ok = 0;
+        }
+
+        /* Tilt steering (remote held sideways, no expansion): raising
+         * the nose steers left, like a steering wheel. 7 deg deadzone. */
+        if (tilt_ok) {
+            float tilt = TILT_SIGN * -wd->orient.pitch;
+            if (fabsf(tilt) > 7.0f)
+                steer += game_clampf(tilt / 45.0f, -1.0f, 1.0f);
+        }
     }
+
+    /* --- GameCube controller (Dolphin: map an Xbox/any pad to
+     * "GameCube Controller Port 1 > Standard Controller") --- */
+    {
+        s8 sx = PAD_StickX(0);
+        if (sx > 18 || sx < -18)
+            steer -= game_clampf((float)sx / 90.0f, -1.0f, 1.0f);
+        in->accel |= (gheld & (PAD_BUTTON_A | PAD_BUTTON_X)) != 0;
+        in->brake |= (gheld & PAD_BUTTON_B) != 0;
+        in->hop   |= (gheld & (PAD_TRIGGER_R | PAD_TRIGGER_L)) != 0;
+    }
+
+    /* --- USB keyboard (Dolphin: Config > Wii > Connect USB Keyboard) */
+    if (key_left)  steer += 1.0f;
+    if (key_right) steer -= 1.0f;
+    in->accel |= key_accel;
+    in->brake |= key_brake;
+    in->hop   |= key_drift;
 
     in->steer = game_clampf(steer, -1.0f, 1.0f);
 }
@@ -657,6 +763,9 @@ int main(void)
     VIDEO_Init();
     WPAD_Init();
     WPAD_SetDataFormat(WPAD_CHAN_0, WPAD_FMT_BTNS_ACC);
+    PAD_Init();
+    if (KEYBOARD_Init(NULL) >= 0)
+        keyboard_ok = 1;
 
     rmode = VIDEO_GetPreferredMode(NULL);
     frameBuffer[0] = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
@@ -737,8 +846,10 @@ int main(void)
         if (rumble_t > 0.0f) {
             rumble_t -= dt;
             WPAD_Rumble(0, 1);
+            PAD_ControlMotor(PAD_CHAN0, PAD_MOTOR_RUMBLE);
         } else {
             WPAD_Rumble(0, 0);
+            PAD_ControlMotor(PAD_CHAN0, PAD_MOTOR_STOP);
         }
 
         draw_scene();

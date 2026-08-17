@@ -27,10 +27,24 @@ and tilt steering with the Wii Remote held sideways.
    # equivalent to: dolphin-emu -b -e wiikart.dol
    ```
 
-Dolphin emulates the Wii Remote for you (**Controllers → Emulated Wii
-Remote → Configure**): map the buttons below to your keyboard/gamepad, and
-map *Tilt* if you want motion steering, or just steer with the D-pad
-mappings.
+### Keyboard / Xbox (or any) controller in Dolphin
+
+The game natively supports several input devices, so pick whichever is
+easiest:
+
+- **Xbox / any gamepad:** in Dolphin open **Controllers → GameCube
+  Controller Port 1 → Standard Controller → Configure**, choose your pad
+  as the device (XInput for Xbox controllers) and map A/B/X, the R
+  trigger, Start and the main stick. The game reads the GameCube pad
+  directly — no Wii Remote emulation needed.
+- **Keyboard, option 1 (zero setup):** Dolphin **Config → Wii → Connect
+  USB Keyboard**. The game reads the Wii's USB keyboard: arrows to steer,
+  X or ↑ to accelerate, Z or ↓ to brake, Space/Shift to drift, R/Enter to
+  restart, Esc to quit.
+- **Keyboard, option 2:** map keys onto the emulated GameCube pad
+  (Controllers → Port 1) — Dolphin's default keyboard profile works.
+- **Wii Remote emulation** also still works (**Controllers → Emulated
+  Wii Remote**), including *Tilt* for motion steering.
 
 ## Running on a real Wii
 
@@ -39,17 +53,21 @@ mappings.
    `SD:/apps/wiikart/boot.dol` (plus `meta.xml` and `icon.png`).
 3. Launch **WiiKart** from the Homebrew Channel.
 
-## Controls (Wii Remote held sideways, like Mario Kart Wii)
+## Controls
 
-| Input            | Action                                    |
-|------------------|-------------------------------------------|
-| Tilt the remote  | Steer (steering-wheel style)              |
-| D-pad            | Steer (digital alternative)               |
-| **2** (or A)     | Accelerate                                |
-| **1**            | Brake / reverse                           |
-| **B** (trigger)  | Hold while turning to drift; release for a mini-turbo (charge longer for a bigger one) |
-| **+**            | Restart the race                          |
-| **HOME**         | Quit to loader                            |
+All devices work simultaneously — use whatever is plugged in.
+
+| Action      | Wii Remote (sideways) | + Nunchuk        | Classic Controller | GameCube pad (Xbox pad in Dolphin) | USB keyboard |
+|-------------|------------------------|------------------|--------------------|-------------------------------------|--------------|
+| Steer       | Tilt or D-pad          | Stick            | Left stick / D-pad | Main stick                          | ← / →        |
+| Accelerate  | 2 or A                 | A                | a or x             | A or X                              | X or ↑       |
+| Brake       | 1                      | B                | b or y             | B                                   | Z or ↓       |
+| Drift       | Hold B                 | C or Z           | L / R / ZL / ZR    | L or R trigger                      | Space or Shift |
+| Restart     | +                      | +                | +                  | Start                               | R or Enter   |
+| Quit        | HOME                   | HOME             | HOME               | Z + Start                           | Esc          |
+
+Drifting: hold the drift button while turning, release for a mini-turbo
+(charge longer for a bigger one).
 
 Orange pads on the road give a speed boost. Grass is slow — unless you're
 boosting. Drift sparks go blue → yellow → orange as your mini-turbo charges.
