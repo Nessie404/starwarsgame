@@ -324,8 +324,99 @@ static void test_full_race_classic(void)
     }
 }
 
+/* The virtual analog stick: holding a key must wind the wheel on
+ * progressively rather than snapping to full lock, self-center quickly
+ * when released, and be calmer at speed than at a crawl. */
+static void test_steering_filter(void)
+{
+    SteerAxis a;
+    const float dt = 1.0f / 60.0f;
+    float s1, s_quarter, s_half, s_full, s_fast;
+    int f;
+
+    /* one frame of "A held" from centre is a nudge, not a yank */
+    steer_axis_reset(&a);
+    s1 = steer_axis_update(&a, 1.0f, 20.0f, dt);
+    CHECK(s1 > 0.0f && s1 < 0.06f, "first frame steer %.3f too abrupt", s1);
+
+    /* ramps up over a few tenths of a second, monotonically */
+    steer_axis_reset(&a);
+    for (f = 0; f < 6; f++)  s_quarter = steer_axis_update(&a, 1.0f, 20.0f, dt);
+    for (; f < 15; f++)      s_half    = steer_axis_update(&a, 1.0f, 20.0f, dt);
+    for (; f < 90; f++)      s_full    = steer_axis_update(&a, 1.0f, 20.0f, dt);
+    printf("steering ramp at 20 m/s: 0.1s %.2f  0.25s %.2f  1.5s %.2f\n",
+           s_quarter, s_half, s_full);
+    CHECK(s_quarter < s_half && s_half < s_full, "ramp not monotonic");
+    CHECK(s_quarter < 0.35f, "0.1 s already at %.2f", s_quarter);
+    CHECK(s_full > 0.97f, "full lock never reached (%.2f)", s_full);
+
+    /* releasing snaps back toward centre faster than it wound on */
+    for (f = 0; f < 6; f++)
+        steer_axis_update(&a, 0.0f, 20.0f, dt);
+    CHECK(fabsf(steer_axis_update(&a, 0.0f, 20.0f, dt)) < 0.35f,
+          "wheel does not self-centre");
+
+    /* the same input is gentler at speed than at a crawl */
+    steer_axis_reset(&a);
+    for (f = 0; f < 12; f++)
+        s_half = steer_axis_update(&a, 1.0f, 5.0f, dt);
+    steer_axis_reset(&a);
+    for (f = 0; f < 12; f++)
+        s_fast = steer_axis_update(&a, 1.0f, 45.0f, dt);
+    printf("0.2 s of full input: %.2f at 5 m/s, %.2f at 45 m/s\n",
+           s_half, s_fast);
+    CHECK(s_fast < s_half * 0.85f,
+          "no speed sensitivity (%.2f slow vs %.2f fast)", s_half, s_fast);
+
+    /* symmetric: A and D mirror each other */
+    {
+        SteerAxis l, r;
+        float vl = 0.0f, vr = 0.0f;
+        steer_axis_reset(&l);
+        steer_axis_reset(&r);
+        for (f = 0; f < 20; f++) {
+            vl = steer_axis_update(&l,  1.0f, 20.0f, dt);
+            vr = steer_axis_update(&r, -1.0f, 20.0f, dt);
+        }
+        CHECK(fabsf(vl + vr) < 1e-5f, "left/right asymmetric (%.3f/%.3f)",
+              vl, vr);
+    }
+}
+
+/* Steering sign convention: positive steer must turn the car left, so a
+ * left key mapped to +1 actually goes left on screen. */
+static void test_steer_sign(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    float h0, h_left, h_right;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+
+    teleport(&g, &g.karts[0], 2, 20.0f);
+    h0 = g.karts[0].heading;
+    in[0].steer = 1.0f;
+    game_update(&g, in, 1.0f / 60.0f);
+    h_left = game_angle_wrap(g.karts[0].heading - h0);
+
+    teleport(&g, &g.karts[0], 2, 20.0f);
+    h0 = g.karts[0].heading;
+    in[0].steer = -1.0f;
+    game_update(&g, in, 1.0f / 60.0f);
+    h_right = game_angle_wrap(g.karts[0].heading - h0);
+
+    CHECK(h_left > 0.0f, "positive steer did not turn left (%.4f)", h_left);
+    CHECK(h_right < 0.0f, "negative steer did not turn right (%.4f)",
+          h_right);
+}
+
 int main(void)
 {
+    test_steering_filter();
+    test_steer_sign();
     test_tracks_geometry();
     test_spec_stats();
     test_countdown_holds();

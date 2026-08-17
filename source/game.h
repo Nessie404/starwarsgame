@@ -107,6 +107,30 @@ typedef struct {
     int   item;    /* use held item (edge-detected by the sim)          */
 } Input;
 
+/* ------------------------------------------------------------------ */
+/* Steering feel                                                      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A steering wheel has mass and a driver's hands have a speed limit, so
+ * raw button presses are turned into a "virtual analog stick": the
+ * command ramps toward the target instead of snapping, self-centers
+ * faster than it winds on, slows down as speed rises, and passes
+ * through a progressive curve so small inputs are gentle and full lock
+ * still reaches full lock. Keyboards and D-pads therefore feel like a
+ * real stick rather than an on/off switch.
+ *
+ * Analog sticks are fed through the same filter (their raw deflection
+ * is the target), which keeps every device consistent and stops
+ * flick-steering at speed.
+ */
+typedef struct {
+    float value;      /* current wheel position, -1..1                 */
+} SteerAxis;
+
+void  steer_axis_reset(SteerAxis *a);
+float steer_axis_update(SteerAxis *a, float target, float speed, float dt);
+
 typedef struct {
     /* pose */
     float x, z, y;
@@ -130,8 +154,9 @@ typedef struct {
     int   item_held;      /* 0 = none, 1 = nitro canister              */
     int   prev_item_btn;
 
-    /* role */
+    /* role / livery */
     int   human;          /* -1 = AI, else human player index          */
+    int   paint_idx;      /* index into the platform layer's palette   */
     float ai_line;
     float ai_skill;
 
@@ -153,10 +178,13 @@ enum {
     STATE_FINISHED  = 2   /* all humans done; sim keeps running        */
 };
 
+#define PAINT_COUNT 8
+
 typedef struct {
     int track_id;
     int n_humans;                 /* 1..MAX_HUMANS                     */
-    int spec[MAX_HUMANS];         /* chosen kart spec per human        */
+    int spec[MAX_HUMANS];         /* chosen car spec per human         */
+    int paint[MAX_HUMANS];        /* chosen paint index per human      */
 } GameConfig;
 
 typedef struct {

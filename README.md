@@ -9,10 +9,14 @@ Wii hardware through the Homebrew Channel.
 [latest release](https://github.com/Nessie404/starwarsgame/releases/latest),
 unzip, and open `wiikart.dol` in Dolphin.
 
-Version 1.0 is a semi-sim mountain racer: pick a car defined by
-real-world performance numbers, then race 3 laps against 5 AI drivers over
-three circuits — including two stylized Colorado passes with real grades,
-switchbacks and gravity.
+Version 1.0 is a semi-sim mountain racer: pick a car in the garage —
+defined by real-world performance numbers — then race 3 laps against 5 AI
+drivers over three circuits, including two stylized Colorado passes with
+real grades, switchbacks and gravity. Think arcade fun with a driving
+model that expects you to brake for the hairpins.
+
+**Version history:** v0.1 was the original arcade kart racer; v1.0 is the
+driving-model rewrite (physics, garage, WASD, Colorado passes).
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -35,6 +39,13 @@ switchbacks and gravity.
   stylized versions of **Berthoud Pass** (US-40) and **Loveland Pass**
   (US-6) in Colorado: 6-10% grades, stacked switchbacks, guardrails and
   ~78 m of climb per lap.
+- **Garage view.** Pick your car on a lit 3D turntable, with its spec
+  sheet, at-a-glance power/brake/grip/dirt bars, and eight paint colors
+  — each player gets their own garage before the lights go out.
+- **Steering with weight.** Every input runs through a virtual analog
+  stick: the wheel winds on over a few tenths of a second, self-centers
+  faster than it winds on, calms down as speed rises, and passes through
+  a progressive curve. Keyboards feel like a stick, not a switch.
 - **Split-screen multiplayer** for up to 4 players (horizontal split for
   2, quadrants for 3-4).
 - **Items and boost:** nitro canisters in item boxes, boost pads on the
@@ -58,9 +69,9 @@ switchbacks and gravity.
 - **Xbox / any gamepad:** Dolphin → **Controllers → GameCube Controller
   Port 1 → Standard Controller → Configure**, select your pad (XInput
   for Xbox) and map the stick, A/B/X/Y, R/L triggers and Start.
-- **Keyboard:** Dolphin → **Config → Wii → Connect USB Keyboard**. Then:
-  arrows steer, X/↑ gas, Z/↓ brake, Space/Shift handbrake, C item,
-  R back to menu, Esc quit.
+- **Keyboard (WASD):** Dolphin → **Config → Wii → Connect USB Keyboard**,
+  and that's it — no key mapping needed. **A** steers left, **D** right,
+  **W** is the throttle, **S** the brake (arrow keys mirror all four).
 - **Wii Remote (emulated or real):** sideways grip, tilt to steer —
   Nunchuk and Classic Controller also work.
 
@@ -71,17 +82,22 @@ Copy the `apps` folder from `wiikart.zip` onto an SD card (so you have
 
 ## Controls
 
-Menus: **left/right** change, **A/2/Enter** confirm, **B/1** back.
+**Keyboard is WASD by default** — A left, D right, W gas, S brake.
 
-| Action      | Wii Remote (sideways) | + Nunchuk    | Classic     | GameCube pad (Xbox in Dolphin) | USB keyboard |
-|-------------|------------------------|--------------|-------------|--------------------------------|--------------|
-| Steer       | Tilt or D-pad          | Stick        | Left stick  | Main stick                     | ← / →        |
-| Accelerate  | 2 or A                 | A            | a or x      | A or X                         | X or ↑       |
-| Brake / reverse | 1                  | B            | b or y      | B                              | Z or ↓       |
-| Handbrake / drift | Hold B           | C or Z       | L/R/ZL/ZR   | L or R trigger                 | Space/Shift  |
-| Use item    | −                      | −            | −           | Y                              | C            |
-| Back to menu | +                     | +            | +           | Start                          | R            |
-| Quit        | HOME                   | HOME         | HOME        | Z + Start                      | Esc          |
+| Action      | USB keyboard | GameCube pad (Xbox in Dolphin) | Wii Remote (sideways) | + Nunchuk | Classic |
+|-------------|--------------|--------------------------------|------------------------|-----------|---------|
+| Steer left / right | **A** / **D** (or ← / →) | Main stick | Tilt or D-pad | Stick | Left stick |
+| Accelerate  | **W** (or ↑) | A or X                         | 2 or A                 | A         | a or x  |
+| Brake / reverse | **S** (or ↓) | B                          | 1                      | B         | b or y  |
+| Handbrake   | Space or Shift | L or R trigger               | Hold B                 | C or Z    | L/R/ZL/ZR |
+| Nitro       | **E**        | Y                              | −                      | −         | −       |
+| Back to menu | **R**       | Start                          | +                      | +         | +       |
+| Quit        | Esc          | Z + Start                      | HOME                   | HOME      | HOME    |
+
+Menus and garage: **A/D** (or ←/→) change the selection, **W/S** (or
+↑/↓) change the paint in the garage, **Enter** or **Space** confirms,
+**Q** goes back. On a pad it's the D-pad plus A/Start, and on a Wii
+Remote the D-pad plus 2.
 
 Driving notes: brake before hairpins — the grip circle is real. The
 handbrake rotates the car but scrubs speed; hold it through a bend and
@@ -137,10 +153,11 @@ gcc -std=c99 -O2 -Wall -Werror -Isource \
 ```
 
 Tests verify the physics against the spec sheets (measured stopping
-distance vs quoted, grip-capped yaw rate, gravity on grades), track
-geometry for all circuits, item pickup, and that the AI completes laps
-on every track — including recovering from a botched hairpin by backing
-out, since a real car can't rotate in place.
+distance vs quoted, grip-capped yaw rate, gravity on grades), the
+steering filter (ramp shape, self-centering, speed sensitivity, and that
+left really is left), track geometry for all circuits, item pickup, and
+that the AI completes laps on every track — including recovering from a
+botched hairpin by backing out, since a real car can't rotate in place.
 
 ## Ideas for later
 

@@ -54,6 +54,45 @@ float game_angle_wrap(float a)
 }
 
 /* ------------------------------------------------------------------ */
+/* Steering feel: the virtual analog stick (see game.h)                */
+/* ------------------------------------------------------------------ */
+
+#define STEER_RATE_ON      2.6f   /* wind-on rate at a standstill, 1/s */
+#define STEER_RATE_CENTER  6.0f   /* self-centering rate, 1/s          */
+#define STEER_SPEED_FADE   0.035f /* how fast the wheel slows with v   */
+#define STEER_CURVE        1.55f  /* >1 = gentle near center           */
+
+void steer_axis_reset(SteerAxis *a)
+{
+    a->value = 0.0f;
+}
+
+float steer_axis_update(SteerAxis *a, float target, float speed, float dt)
+{
+    float rate, diff, mag;
+
+    target = game_clampf(target, -1.0f, 1.0f);
+
+    /* unwinding toward center (or crossing it) is quick, like letting a
+     * real wheel spin back; winding on is slower, and slower still the
+     * faster the car is going */
+    if (fabsf(target) < fabsf(a->value) || target * a->value < 0.0f) {
+        rate = STEER_RATE_CENTER;
+    } else {
+        rate = STEER_RATE_ON *
+               (0.30f + 0.70f / (1.0f + fabsf(speed) * STEER_SPEED_FADE));
+    }
+
+    diff = target - a->value;
+    if (diff >  rate * dt) diff =  rate * dt;
+    if (diff < -rate * dt) diff = -rate * dt;
+    a->value = game_clampf(a->value + diff, -1.0f, 1.0f);
+
+    mag = powf(fabsf(a->value), STEER_CURVE);
+    return (a->value < 0.0f) ? -mag : mag;
+}
+
+/* ------------------------------------------------------------------ */
 /* Spec-derived display stats                                          */
 /* ------------------------------------------------------------------ */
 
@@ -126,9 +165,12 @@ void game_init(Game *g, const GameConfig *cfg)
             k->human = i;
             k->spec = g->cfg.spec[i] % SPEC_COUNT;
             if (k->spec < 0) k->spec = 0;
+            k->paint_idx = ((g->cfg.paint[i] % PAINT_COUNT) + PAINT_COUNT)
+                           % PAINT_COUNT;
         } else {
             k->human = -1;
             k->spec = (i - g->cfg.n_humans) % SPEC_COUNT;
+            k->paint_idx = (i * 3 + 2) % PAINT_COUNT;
             k->ai_line = ((i & 1) ? -1.0f : 1.0f) *
                          (0.25f + 0.10f * (float)(i % 3)) *
                          g->track.road_half;

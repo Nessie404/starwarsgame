@@ -1,0 +1,45 @@
+name: release-admin
+
+# One-off release housekeeping, run by hand from the Actions tab.
+# Branch pushes cannot create or move tags, so this job does it with the
+# workflow token instead.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  admin:
+    name: Tidy release names
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Rename the first build to v0.1 and drop interim builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # The first published build becomes v0.1 — the original arcade
+          # kart racer, before the 1.0 driving model.
+          if gh release view build-2 >/dev/null 2>&1; then
+            SHA=$(gh api "repos/$GH_REPO/git/refs/tags/build-2" -q .object.sha)
+            gh api "repos/$GH_REPO/git/refs" \
+              -f ref=refs/tags/v0.1 -f sha="$SHA" || true
+            gh release edit build-2 --tag v0.1 \
+              --title "WiiKart v0.1" \
+              --notes "First release: the original arcade kart racer. Unzip wiikart.zip and open wiikart.dol in the Dolphin emulator, or copy the apps folder to an SD card for a real Wii."
+            gh api -X DELETE "repos/$GH_REPO/git/refs/tags/build-2" || true
+          fi
+
+          # Interim CI builds and the mis-numbered v1.0.0 are superseded
+          # by v1.0, which the build workflow publishes.
+          for tag in build-1 build-3 build-4 build-5 build-6 build-7 v1.0.0; do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release delete "$tag" --yes --cleanup-tag
+            fi
+          done
+
+          echo "--- releases now ---"
+          gh release list

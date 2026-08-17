@@ -41,6 +41,7 @@ static int menu_screen = 0;          /* 0 players, 1 track, 2.. karts */
 static int sel_players = 1;
 static int sel_track = 0;
 static int sel_spec[MAX_HUMANS] = { 1, 1, 1, 1 };
+static int sel_paint[MAX_HUMANS] = { 0, 1, 2, 3 };
 static Track menu_track;
 static int menu_track_loaded = -1;
 
@@ -48,14 +49,25 @@ static int menu_track_loaded = -1;
 static float cam_x[MAX_HUMANS], cam_y[MAX_HUMANS], cam_z[MAX_HUMANS];
 static float rumble_t[MAX_HUMANS];
 
-static const u8 kart_colors[NUM_KARTS][3] = {
-    { 230,  40,  40 },   /* P1 red    */
-    {  50,  90, 230 },   /* P2 blue   */
-    {  40, 170,  70 },   /* P3 green  */
-    { 240, 200,  40 },   /* P4 yellow */
-    { 160,  70, 220 },   /* AI purple */
-    { 235, 130,  40 },   /* AI orange */
+/* paint shop: indexes match Kart.paint_idx / GameConfig.paint */
+static const u8 paint_palette[PAINT_COUNT][3] = {
+    { 220,  45,  45 },   /* RED    */
+    {  45,  95, 225 },   /* BLUE   */
+    {  40, 175,  75 },   /* GREEN  */
+    { 240, 200,  50 },   /* GOLD   */
+    { 155,  70, 215 },   /* PURPLE */
+    { 235, 130,  40 },   /* ORANGE */
+    {  40, 190, 195 },   /* TEAL   */
+    { 175, 180, 190 },   /* STEEL  */
 };
+static const char *paint_names[PAINT_COUNT] = {
+    "RED", "BLUE", "GREEN", "GOLD", "PURPLE", "ORANGE", "TEAL", "STEEL"
+};
+
+static const u8 *kart_color(const Kart *k)
+{
+    return paint_palette[k->paint_idx % PAINT_COUNT];
+}
 
 static const float LX = 0.45f, LY = 0.85f, LZ = 0.28f;
 
@@ -66,6 +78,14 @@ static const float LX = 0.45f, LY = 0.85f, LZ = 0.28f;
 static u32 wheld[MAX_HUMANS], wdown[MAX_HUMANS];
 static u32 gheld[MAX_HUMANS], gdown[MAX_HUMANS];
 static int keyboard_ok = 0;
+
+/*
+ * Keyboard layout is WASD-first, the way a PC driving game is expected
+ * to play: A steers left, D steers right, W is the throttle, S the
+ * brake. Arrow keys mirror the same four axes for anyone who prefers
+ * them. Steering is fed through the virtual-stick filter, so holding A
+ * winds the wheel on smoothly instead of snapping to full lock.
+ */
 static u8 key_left, key_right, key_accel, key_brake, key_drift, key_item;
 static u8 key_confirm_edge, key_back_edge, key_menu_edge;
 
@@ -86,23 +106,34 @@ static void poll_keyboard(void)
             continue;
         held = (ev.type == KEYBOARD_PRESSED);
         switch (ev.symbol) {
-        case KS_Left:                       key_left = held;  break;
-        case KS_Right:                      key_right = held; break;
-        case KS_Up: case KS_x: case KS_X:
-            key_accel = held;
-            if (held)
-                key_confirm_edge = 1;
+        case KS_a: case KS_A: case KS_Left:
+            key_left = held;
             break;
-        case KS_Down: case KS_z: case KS_Z:
+        case KS_d: case KS_D: case KS_Right:
+            key_right = held;
+            break;
+        case KS_w: case KS_W: case KS_Up:
+            key_accel = held;
+            break;
+        case KS_s: case KS_S: case KS_Down:
             key_brake = held;
-            if (held)
-                key_back_edge = 1;
             break;
         case KS_space:
-        case KS_Shift_L: case KS_Shift_R:   key_drift = held; break;
-        case KS_c: case KS_C:               key_item = held;  break;
+            key_drift = held;
+            if (held)
+                key_confirm_edge = 1;      /* doubles as menu confirm */
+            break;
+        case KS_Shift_L: case KS_Shift_R:
+            key_drift = held;
+            break;
+        case KS_e: case KS_E:
+            key_item = held;
+            break;
         case KS_Return:
             if (held) key_confirm_edge = 1;
+            break;
+        case KS_q: case KS_Q:
+            if (held) key_back_edge = 1;
             break;
         case KS_r: case KS_R:
             if (held) key_menu_edge = 1;
@@ -146,7 +177,9 @@ static float stick_x(const joystick_t *js)
            sinf(js->ang * ((float)M_PI / 180.0f));
 }
 
-static void read_player_input(int p, Input *in)
+static SteerAxis steer_axis[MAX_HUMANS];
+
+static void read_player_input(int p, Input *in, float dt)
 {
     const WPADData *wd;
     float steer = 0.0f;
@@ -206,7 +239,7 @@ static void read_player_input(int p, Input *in)
         in->item  |= (gheld[p] & PAD_BUTTON_Y) != 0;
     }
 
-    /* USB keyboard (player 1 only) */
+    /* USB keyboard (player 1 only): WASD, A = left, D = right */
     if (p == 0) {
         if (key_left)  steer += 1.0f;
         if (key_right) steer -= 1.0f;
@@ -216,15 +249,21 @@ static void read_player_input(int p, Input *in)
         in->item  |= key_item;
     }
 
-    in->steer = game_clampf(steer, -1.0f, 1.0f);
+    /* every device goes through the virtual stick, so a tapped key and
+     * a flicked thumbstick both move the wheel at a believable rate */
+    in->steer = steer_axis_update(&steer_axis[p],
+                                  game_clampf(steer, -1.0f, 1.0f),
+                                  game.karts[p].speed, dt);
 }
 
 /* menu edges, driven by player 1's devices */
 static int menu_confirm(void)
 {
+    /* Start is deliberately not a confirm: it is the in-race "back to
+     * menu" button, and would otherwise bounce straight back out. */
     return (wdown[0] & (WPAD_BUTTON_2 | WPAD_BUTTON_A |
                         WPAD_CLASSIC_BUTTON_A)) ||
-           (gdown[0] & (PAD_BUTTON_A | PAD_BUTTON_START)) ||
+           (gdown[0] & PAD_BUTTON_A) ||
            key_confirm_edge;
 }
 
@@ -236,19 +275,29 @@ static int menu_back(void)
            key_back_edge;
 }
 
-static int menu_delta(void)
+/* horizontal menu movement: change the selected option */
+static int menu_dx(void)
 {
     int d = 0;
-    if (wdown[0] & (WPAD_BUTTON_UP | WPAD_BUTTON_LEFT |
-                    WPAD_CLASSIC_BUTTON_LEFT))
-        d -= 1;
-    if (wdown[0] & (WPAD_BUTTON_DOWN | WPAD_BUTTON_RIGHT |
-                    WPAD_CLASSIC_BUTTON_RIGHT))
-        d += 1;
+    if (wdown[0] & (WPAD_BUTTON_LEFT | WPAD_CLASSIC_BUTTON_LEFT))  d -= 1;
+    if (wdown[0] & (WPAD_BUTTON_RIGHT | WPAD_CLASSIC_BUTTON_RIGHT)) d += 1;
     if (gdown[0] & PAD_BUTTON_LEFT)  d -= 1;
     if (gdown[0] & PAD_BUTTON_RIGHT) d += 1;
-    if (key_left && (frame_no % 12) == 0)  d -= 1;
-    if (key_right && (frame_no % 12) == 0) d += 1;
+    if (key_left && (frame_no % 10) == 0)  d -= 1;
+    if (key_right && (frame_no % 10) == 0) d += 1;
+    return d;
+}
+
+/* vertical menu movement: in the garage this changes the paint */
+static int menu_dy(void)
+{
+    int d = 0;
+    if (wdown[0] & (WPAD_BUTTON_UP | WPAD_CLASSIC_BUTTON_UP))     d -= 1;
+    if (wdown[0] & (WPAD_BUTTON_DOWN | WPAD_CLASSIC_BUTTON_DOWN)) d += 1;
+    if (gdown[0] & PAD_BUTTON_UP)   d -= 1;
+    if (gdown[0] & PAD_BUTTON_DOWN) d += 1;
+    if (key_accel && (frame_no % 10) == 0) d -= 1;
+    if (key_brake && (frame_no % 10) == 0) d += 1;
     return d;
 }
 
@@ -693,8 +742,33 @@ static void draw_track(const Track *t)
     }
 }
 
-static void draw_kart(const Track *t, const Kart *k, const u8 col[3])
+/* the car itself: body, cabin and four wheels, shared by the race view
+ * and the garage turntable */
+static void draw_car_model(float cx, float cy, float cz, float yaw,
+                           float pitch, float steer_vis, const u8 col[3])
 {
+    float fx = cosf(yaw), fz = sinf(yaw);
+    float lx = -fz, lz = fx;
+    int w;
+
+    draw_box(cx, cy + 0.42f, cz, yaw, pitch,
+             1.10f, 0.28f, 0.65f, col[0], col[1], col[2]);
+    draw_box(cx - fx * 0.25f, cy + 0.92f, cz - fz * 0.25f, yaw, pitch,
+             0.30f, 0.26f, 0.30f, 40, 40, 45);
+
+    for (w = 0; w < 4; w++) {
+        float s_f = (w < 2) ? 1.0f : -1.0f;
+        float s_l = (w & 1) ? 1.0f : -1.0f;
+        float wyaw = yaw + ((w < 2) ? steer_vis * 0.45f : 0.0f);
+        draw_box(cx + fx * 0.85f * s_f + lx * 0.72f * s_l, cy + 0.30f,
+                 cz + fz * 0.85f * s_f + lz * 0.72f * s_l,
+                 wyaw, 0.0f, 0.30f, 0.30f, 0.14f, 25, 25, 28);
+    }
+}
+
+static void draw_kart(const Track *t, const Kart *k)
+{
+    const u8 *col = kart_color(k);
     float yaw = k->heading + (k->drifting ? (float)k->drifting * 0.30f : 0.0f)
                 + k->steer_vis * 0.05f + k->slip * 0.10f *
                   (k->steer_vis > 0.0f ? -1.0f : 1.0f);
@@ -717,19 +791,7 @@ static void draw_kart(const Track *t, const Kart *k, const u8 col[3])
          k->z - fz * 1.3f + lz * 0.85f,
          0, 0, 0, 90);
 
-    draw_box(k->x, by + 0.42f, k->z, yaw, pitch,
-             1.10f, 0.28f, 0.65f, col[0], col[1], col[2]);
-    draw_box(k->x - fx * 0.25f, by + 0.92f, k->z - fz * 0.25f, yaw, pitch,
-             0.30f, 0.26f, 0.30f, 40, 40, 45);
-
-    for (w = 0; w < 4; w++) {
-        float s_f = (w < 2) ? 1.0f : -1.0f;
-        float s_l = (w & 1) ? 1.0f : -1.0f;
-        float wyaw = yaw + ((w < 2) ? k->steer_vis * 0.45f : 0.0f);
-        draw_box(k->x + fx * 0.85f * s_f + lx * 0.72f * s_l, by + 0.30f,
-                 k->z + fz * 0.85f * s_f + lz * 0.72f * s_l,
-                 wyaw, 0.0f, 0.30f, 0.30f, 0.14f, 25, 25, 28);
-    }
+    draw_car_model(k->x, by, k->z, yaw, pitch, k->steer_vis, col);
 
     if (k->boost_t > 0.0f) {
         float len = 1.1f * (0.7f + 0.3f * ((frame_no & 2) ? 1.0f : 0.4f));
@@ -831,7 +893,7 @@ static void draw_scene_for_player(int p)
 
     draw_track(t);
     for (i = 0; i < NUM_KARTS; i++)
-        draw_kart(t, &game.karts[i], kart_colors[i]);
+        draw_kart(t, &game.karts[i]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -948,12 +1010,11 @@ static void draw_minimap(const Track *t, int with_karts,
         return;
     for (i = NUM_KARTS - 1; i >= 0; i--) {
         const Kart *k = &game.karts[i];
+        const u8 *c = kart_color(k);
         float mx = ox + (k->x - t->min_x) * scale;
         float my = oy + (t->max_z - k->z) * scale;
         float s = (k->human >= 0) ? 5.0f : 4.0f;
-        hud_rect(mx - s * 0.5f, my - s * 0.5f, s, s,
-                 kart_colors[i][0], kart_colors[i][1], kart_colors[i][2],
-                 255);
+        hud_rect(mx - s * 0.5f, my - s * 0.5f, s, s, c[0], c[1], c[2], 255);
     }
 }
 
@@ -1058,13 +1119,12 @@ static void draw_race_hud(void)
                  H * 0.5f - 130.0f, 42.0f, 70.0f, "FINISH",
                  255, 255, 255, 240);
         for (p = 0; p < game.cfg.n_humans; p++) {
+            const u8 *c = kart_color(&game.karts[p]);
             snprintf(buf, sizeof(buf), "P%d   %d   %.1fS",
                      p + 1, game.karts[p].final_rank,
                      game.karts[p].finish_time);
             hud_text(W * 0.5f - 130.0f, H * 0.5f - 30.0f + 34.0f * p,
-                     15.0f, 26.0f, buf,
-                     kart_colors[p][0], kart_colors[p][1],
-                     kart_colors[p][2], 240);
+                     15.0f, 26.0f, buf, c[0], c[1], c[2], 240);
         }
         hud_text(W * 0.5f - hud_text_width(11.0f, "PRESS  ") * 0.5f,
                  H - 60.0f, 11.0f, 18.0f, "PRESS  ",
@@ -1080,6 +1140,157 @@ static void draw_race_hud(void)
 /* ------------------------------------------------------------------ */
 /* Menus                                                               */
 /* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* Garage: a real 3D workshop with the chosen car on a turntable       */
+/* ------------------------------------------------------------------ */
+
+static void draw_garage_scene(int paint_idx)
+{
+    Mtx view;
+    Mtx44 persp;
+    guVector cam, up, look;
+    float W = (float)rmode->fbWidth, H = (float)rmode->efbHeight;
+    float turn = (float)frame_no * 0.010f;
+    int i;
+
+    GX_SetViewport(0.0f, 0.0f, W, H, 0.0f, 1.0f);
+    GX_SetScissor(0, 0, rmode->fbWidth, rmode->efbHeight);
+    guPerspective(persp, 40.0f, W / H, 0.3f, 200.0f);
+    GX_LoadProjectionMtx(persp, GX_PERSPECTIVE);
+
+    cam.x = 4.4f;  cam.y = 2.35f; cam.z = 5.2f;
+    up.x  = 0.0f;  up.y  = 1.0f;  up.z  = 0.0f;
+    look.x = 0.30f; look.y = 0.60f; look.z = 0.0f;
+    guLookAt(view, &cam, &up, &look);
+    GX_LoadPosMtxImm(view, GX_PNMTX0);
+    GX_SetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
+
+    /* floor slab with a checker inlay */
+    quad(-16.0f, 0.0f, -16.0f,  16.0f, 0.0f, -16.0f,
+          16.0f, 0.0f,  16.0f, -16.0f, 0.0f,  16.0f, 38, 41, 50, 255);
+    for (i = 0; i < 64; i++) {
+        int cxi = i & 7, czi = i >> 3;
+        float x0, z0;
+        if (((cxi + czi) & 1) == 0)
+            continue;
+        x0 = -8.0f + 2.0f * (float)cxi;
+        z0 = -8.0f + 2.0f * (float)czi;
+        quad(x0,         0.01f, z0,
+             x0 + 2.0f,  0.01f, z0,
+             x0 + 2.0f,  0.01f, z0 + 2.0f,
+             x0,         0.01f, z0 + 2.0f, 52, 56, 67, 255);
+    }
+
+    /* workshop walls */
+    quad(-16.0f, 0.0f, -10.0f,  16.0f, 0.0f, -10.0f,
+          16.0f, 11.0f, -10.0f, -16.0f, 11.0f, -10.0f, 47, 51, 63, 255);
+    quad(-10.0f, 0.0f, -16.0f, -10.0f, 0.0f,  16.0f,
+         -10.0f, 11.0f,  16.0f, -10.0f, 11.0f, -16.0f, 41, 45, 56, 255);
+
+    /* overhead light bars (and their glow on the wall) */
+    for (i = -1; i <= 1; i += 2) {
+        float zc = (float)i * 3.2f;
+        quad(-5.5f, 4.9f, zc - 0.35f,  5.5f, 4.9f, zc - 0.35f,
+              5.5f, 4.9f, zc + 0.35f, -5.5f, 4.9f, zc + 0.35f,
+             245, 246, 235, 255);
+    }
+    quad(-9.9f, 3.4f, -9.0f, -9.9f, 3.4f, 9.0f,
+         -9.9f, 3.9f,  9.0f, -9.9f, 3.9f, -9.0f, 96, 104, 122, 255);
+
+    /* turntable, then the car itself */
+    draw_cone(0.0f, 0.02f, 0.0f, 3.1f, 0.10f, 74, 79, 92);
+    draw_cone(0.0f, 0.12f, 0.0f, 2.7f, 0.06f, 92, 98, 112);
+    quad(-1.6f, 0.19f, -1.1f,  1.6f, 0.19f, -1.1f,
+          1.6f, 0.19f,  1.1f, -1.6f, 0.19f,  1.1f, 0, 0, 0, 90);
+    draw_car_model(0.0f, 0.18f, 0.0f, turn, 0.0f, 0.0f,
+                   paint_palette[paint_idx % PAINT_COUNT]);
+}
+
+static void draw_stat_bar(float x, float y, float w, float h, float frac,
+                          u8 r, u8 g, u8 b)
+{
+    hud_rect(x, y, w, h, 16, 18, 26, 210);
+    hud_rect(x + 1.0f, y + 1.0f,
+             (w - 2.0f) * game_clampf(frac, 0.02f, 1.0f), h - 2.0f,
+             r, g, b, 240);
+}
+
+static void draw_garage_overlay(int p)
+{
+    const KartSpec *s = &kart_specs[sel_spec[p] % SPEC_COUNT];
+    const u8 *paint = paint_palette[sel_paint[p] % PAINT_COUNT];
+    float W = (float)rmode->fbWidth;
+    float H = (float)rmode->efbHeight;
+    float x = 34.0f, y;
+    char buf[32];
+    int i;
+
+    hud_ortho_fullscreen();
+
+    /* readability panel behind the left-hand column */
+    hud_rect(18.0f, 24.0f, 250.0f, H - 90.0f, 12, 15, 24, 165);
+
+    snprintf(buf, sizeof(buf), "P%d GARAGE", p + 1);
+    hud_text(x, 38.0f, 12.0f, 21.0f, buf, paint[0], paint[1], paint[2], 255);
+
+    snprintf(buf, sizeof(buf), "%s", s->name);
+    hud_text(x, 70.0f, 18.0f, 30.0f, buf, 255, 220, 60, 255);
+
+    /* spec sheet */
+    y = 118.0f;
+    snprintf(buf, sizeof(buf), "HP    %d", (int)s->power_hp);
+    hud_text(x, y, 9.0f, 15.0f, buf, 205, 210, 220, 255); y += 22.0f;
+    snprintf(buf, sizeof(buf), "CURB  %d", (int)s->mass_kg);
+    hud_text(x, y, 9.0f, 15.0f, buf, 205, 210, 220, 255); y += 22.0f;
+    snprintf(buf, sizeof(buf), "0-100 %.1fS", spec_accel_time(s));
+    hud_text(x, y, 9.0f, 15.0f, buf, 205, 210, 220, 255); y += 22.0f;
+    snprintf(buf, sizeof(buf), "TOP   %d", (int)spec_top_speed(s));
+    hud_text(x, y, 9.0f, 15.0f, buf, 205, 210, 220, 255); y += 22.0f;
+    snprintf(buf, sizeof(buf), "100-0 %d", (int)s->brake_dist_100);
+    hud_text(x, y, 9.0f, 15.0f, buf, 205, 210, 220, 255); y += 22.0f;
+    snprintf(buf, sizeof(buf), "GRIP  %.2fG", s->lat_g);
+    hud_text(x, y, 9.0f, 15.0f, buf, 205, 210, 220, 255); y += 30.0f;
+
+    /* at-a-glance bars */
+    hud_text(x, y, 8.0f, 13.0f, "POWER", 150, 158, 175, 255);
+    draw_stat_bar(x + 74.0f, y, 150.0f, 12.0f,
+                  s->power_hp / 320.0f, 235, 120, 60);
+    y += 24.0f;
+    hud_text(x, y, 8.0f, 13.0f, "BRAKE", 150, 158, 175, 255);
+    draw_stat_bar(x + 74.0f, y, 150.0f, 12.0f,
+                  (48.0f - s->brake_dist_100) / 22.0f, 90, 190, 235);
+    y += 24.0f;
+    hud_text(x, y, 8.0f, 13.0f, "GRIP", 150, 158, 175, 255);
+    draw_stat_bar(x + 74.0f, y, 150.0f, 12.0f,
+                  s->lat_g / 1.40f, 235, 200, 70);
+    y += 24.0f;
+    hud_text(x, y, 8.0f, 13.0f, "DIRT", 150, 158, 175, 255);
+    draw_stat_bar(x + 74.0f, y, 150.0f, 12.0f,
+                  s->offroad_grip, 130, 200, 110);
+    y += 34.0f;
+
+    /* paint shop */
+    snprintf(buf, sizeof(buf), "PAINT %s", paint_names[sel_paint[p] %
+                                                       PAINT_COUNT]);
+    hud_text(x, y, 9.0f, 15.0f, buf, 205, 210, 220, 255);
+    y += 24.0f;
+    for (i = 0; i < PAINT_COUNT; i++) {
+        float sx = x + (float)i * 27.0f;
+        const u8 *c = paint_palette[i];
+        if (i == sel_paint[p] % PAINT_COUNT)
+            hud_rect(sx - 3.0f, y - 3.0f, 28.0f, 28.0f, 255, 255, 255, 235);
+        hud_rect(sx, y, 22.0f, 22.0f, c[0], c[1], c[2], 255);
+    }
+
+    /* controls */
+    hud_text(W * 0.5f - 60.0f, H - 52.0f, 9.0f, 15.0f, "A D   CAR",
+             170, 175, 190, 225);
+    hud_text(W * 0.5f - 60.0f, H - 32.0f, 9.0f, 15.0f, "W S   PAINT",
+             170, 175, 190, 225);
+    hud_text(W - 210.0f, H - 42.0f, 9.0f, 15.0f, "ENTER   GO",
+             120, 235, 130, 235);
+}
 
 static void menu_update_track_preview(void)
 {
@@ -1121,41 +1332,12 @@ static void draw_menu(void)
             hud_text(60.0f, 296.0f, 10.0f, 17.0f, "COLORADO PASS",
                      150, 190, 230, 255);
         draw_minimap(&menu_track, 0, W - 220.0f, 160.0f, 170.0f);
-    } else {
-        int p = menu_screen - 2;
-        const KartSpec *s = &kart_specs[sel_spec[p] % SPEC_COUNT];
-        snprintf(buf, sizeof(buf), "P%d CAR", p + 1);
-        hud_text(60.0f, 130.0f, 13.0f, 22.0f, buf,
-                 kart_colors[p][0], kart_colors[p][1], kart_colors[p][2],
-                 255);
-        snprintf(buf, sizeof(buf), "- %s -", s->name);
-        hud_text(60.0f, 168.0f, 15.0f, 25.0f, buf, 255, 220, 60, 255);
-
-        snprintf(buf, sizeof(buf), "HP    %d", (int)s->power_hp);
-        hud_text(60.0f, 220.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
-        snprintf(buf, sizeof(buf), "CURB  %d", (int)s->mass_kg);
-        hud_text(60.0f, 246.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
-        snprintf(buf, sizeof(buf), "0-100 %.1fS", spec_accel_time(s));
-        hud_text(60.0f, 272.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
-        snprintf(buf, sizeof(buf), "TOP   %d", (int)spec_top_speed(s));
-        hud_text(60.0f, 298.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
-        snprintf(buf, sizeof(buf), "100-0 %d", (int)s->brake_dist_100);
-        hud_text(60.0f, 324.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
-        snprintf(buf, sizeof(buf), "GRIP  %.2fG", s->lat_g);
-        hud_text(60.0f, 350.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
-        snprintf(buf, sizeof(buf), "DIRT  %d", (int)(s->offroad_grip * 100.0f));
-        hud_text(60.0f, 376.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
-
-        /* car preview: colored box on a plinth */
-        hud_rect(W - 240.0f, 250.0f, 170.0f, 60.0f,
-                 kart_colors[p][0], kart_colors[p][1], kart_colors[p][2],
-                 255);
-        hud_rect(W - 240.0f, 310.0f, 170.0f, 10.0f, 30, 34, 48, 255);
     }
 
-    hud_text(W * 0.5f - hud_text_width(9.0f, "2 SELECT   1 BACK") * 0.5f,
-             H - 42.0f, 9.0f, 15.0f, "2 SELECT   1 BACK",
-             160, 165, 180, 220);
+    hud_text(W * 0.5f - hud_text_width(9.0f, "A D  CHOOSE") * 0.5f,
+             H - 62.0f, 9.0f, 15.0f, "A D  CHOOSE", 160, 165, 180, 220);
+    hud_text(W * 0.5f - hud_text_width(9.0f, "ENTER  OR  2  GO") * 0.5f,
+             H - 40.0f, 9.0f, 15.0f, "ENTER  OR  2  GO", 160, 165, 180, 220);
 }
 
 static void start_race(void)
@@ -1166,8 +1348,10 @@ static void start_race(void)
     memset(&cfg, 0, sizeof(cfg));
     cfg.track_id = sel_track;
     cfg.n_humans = sel_players;
-    for (p = 0; p < MAX_HUMANS; p++)
+    for (p = 0; p < MAX_HUMANS; p++) {
         cfg.spec[p] = sel_spec[p] % SPEC_COUNT;
+        cfg.paint[p] = sel_paint[p] % PAINT_COUNT;
+    }
 
     game_init(&game, &cfg);
     place_scenery(&game.track);
@@ -1177,6 +1361,7 @@ static void start_race(void)
         cam_y[p] = k->y + 3.6f;
         cam_z[p] = k->z - sinf(k->heading) * 9.0f;
         rumble_t[p] = 0.0f;
+        steer_axis_reset(&steer_axis[p]);
     }
     app_state = APP_RACE;
     audio_beep(660.0f, 90, 160);
@@ -1184,22 +1369,40 @@ static void start_race(void)
 
 static void menu_frame(void)
 {
-    int d = menu_delta();
+    int dx = menu_dx();
+    int dy = menu_dy();
+    int moved = 0;
 
     if (menu_screen == 0) {
-        sel_players += d;
-        if (sel_players < 1) sel_players = MAX_HUMANS;
-        if (sel_players > MAX_HUMANS) sel_players = 1;
+        if (dx || dy) {
+            sel_players += (dx ? dx : dy);
+            if (sel_players < 1) sel_players = MAX_HUMANS;
+            if (sel_players > MAX_HUMANS) sel_players = 1;
+            moved = 1;
+        }
         if (menu_confirm()) { menu_screen = 1; audio_beep(880.0f, 60, 140); }
     } else if (menu_screen == 1) {
-        sel_track = ((sel_track + d) % TRACK_COUNT + TRACK_COUNT)
-                    % TRACK_COUNT;
+        if (dx || dy) {
+            int d = dx ? dx : dy;
+            sel_track = ((sel_track + d) % TRACK_COUNT + TRACK_COUNT)
+                        % TRACK_COUNT;
+            moved = 1;
+        }
         if (menu_confirm()) { menu_screen = 2; audio_beep(880.0f, 60, 140); }
         else if (menu_back()) { menu_screen = 0; }
     } else {
+        /* garage: left/right swaps the car, up/down swaps the paint */
         int p = menu_screen - 2;
-        sel_spec[p] = ((sel_spec[p] + d) % SPEC_COUNT + SPEC_COUNT)
-                      % SPEC_COUNT;
+        if (dx) {
+            sel_spec[p] = ((sel_spec[p] + dx) % SPEC_COUNT + SPEC_COUNT)
+                          % SPEC_COUNT;
+            moved = 1;
+        }
+        if (dy) {
+            sel_paint[p] = ((sel_paint[p] + dy) % PAINT_COUNT + PAINT_COUNT)
+                           % PAINT_COUNT;
+            moved = 1;
+        }
         if (menu_confirm()) {
             audio_beep(880.0f, 60, 140);
             if (p + 1 < sel_players)
@@ -1211,10 +1414,19 @@ static void menu_frame(void)
         }
     }
 
-    if (d)
+    if (moved)
         audio_beep(440.0f, 35, 90);
 
-    draw_menu();
+    if (app_state == APP_RACE)
+        return;                     /* start_race() already switched away */
+
+    if (menu_screen >= 2) {
+        int p = menu_screen - 2;
+        draw_garage_scene(sel_paint[p]);
+        draw_garage_overlay(p);
+    } else {
+        draw_menu();
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1229,7 +1441,7 @@ static void race_frame(float dt)
     int p;
 
     for (p = 0; p < MAX_HUMANS; p++)
-        read_player_input(p, &in[p]);
+        read_player_input(p, &in[p], dt);
 
     if (race_to_menu_pressed()) {
         app_state = APP_MENU;
@@ -1366,7 +1578,9 @@ int main(void)
 
         if (app_state == APP_MENU)
             menu_frame();
-        else
+        /* not an else: starting a race mid-frame draws its first frame
+         * here rather than leaving the screen blank for one flip */
+        if (app_state == APP_RACE)
             race_frame(dt);
 
         audio_update();
