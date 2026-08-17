@@ -1,4 +1,4 @@
-# WiiKart 1.0
+# WiiKart 1.1
 
 An original racing game built as **Nintendo Wii homebrew**. It compiles to
 a real Wii executable (`wiikart.dol`) that runs in the
@@ -9,14 +9,16 @@ Wii hardware through the Homebrew Channel.
 [latest release](https://github.com/Nessie404/starwarsgame/releases/latest),
 unzip, and open `wiikart.dol` in Dolphin.
 
-Version 1.0 is a semi-sim mountain racer: pick a car in the garage —
-defined by real-world performance numbers — then race 3 laps against 5 AI
-drivers over three circuits, including two stylized Colorado passes with
-real grades, switchbacks and gravity. Think arcade fun with a driving
-model that expects you to brake for the hairpins.
+Version 1.1 is a semi-sim mountain racer: pick a car in the garage —
+defined by real-world performance numbers — then race 3 laps against a
+**field of eleven AI drivers who each race differently, learn from their
+mistakes, and adapt to you**, over three circuits including two stylized
+Colorado passes with real grades, switchbacks and gravity. Think arcade
+fun with a driving model that expects you to brake for the hairpins.
 
-**Version history:** v0.1 was the original arcade kart racer; v1.0 is the
-driving-model rewrite (physics, garage, WASD, Colorado passes).
+**Version history:** v0.1 was the original arcade kart racer; v1.0 was the
+driving-model rewrite (physics, garage, WASD, Colorado passes); v1.1 adds
+the twelve-car field with individual strategies, learning and adaptation.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -24,6 +26,27 @@ driving-model rewrite (physics, garage, WASD, Colorado passes).
 
 ## Features
 
+- **A grid of twelve, and nobody drives like anyone else.** Eleven AI
+  rivals share out seven strategy sheets — BALANCED, LATE (brakes far too
+  late), INSIDE (tight and defensive), DEFENDER (covers your favourite
+  passing side), CHARGER (dives for every gap, empties the nitro at
+  once), DRAFTER (sits in your mirrors saving nitro), CRUISER (cautious,
+  wide, smooth). Each sheet sets its racing line, how it brakes, how it
+  overtakes, when it spends nitro, and how it learns.
+- **They learn from their mistakes.** Every driver keeps its own nerve
+  rating for each corner on the track. Run wide, clip a barrier, or spin
+  and that corner's rating drops, so it arrives slower next lap; take it
+  cleanly and the rating creeps back up. Over a race the field visibly
+  tidies up — in the test suite, mistakes across the grid fall from 78 in
+  the first third of a race to 13 in the last. The late-brakers start
+  over the limit and talk themselves down; the cruiser starts timid and
+  finds pace.
+- **They adapt to you.** The game keeps a model of each human: which
+  side you complete your passes on, how your pace compares with the
+  leading AI, and how often you lean on people. Defenders move over to
+  cover the side you keep using, a quick human raises the whole field's
+  ambition (and a slow one lets it relax), and drivers you keep banging
+  into start leaving you more room.
 - **Physically-based driving.** Acceleration comes from engine power
   (F = P/v, traction-capped), top speed emerges from aerodynamic drag,
   braking matches the car's quoted 100-0 km/h stopping distance, and
@@ -47,7 +70,8 @@ driving-model rewrite (physics, garage, WASD, Colorado passes).
   faster than it winds on, calms down as speed rises, and passes through
   a progressive curve. Keyboards feel like a stick, not a switch.
 - **Split-screen multiplayer** for up to 4 players (horizontal split for
-  2, quadrants for 3-4).
+  2, quadrants for 3-4), with view culling so a full field still runs at
+  frame rate in four-way split.
 - **Items and boost:** nitro canisters in item boxes, boost pads on the
   speedway, and a small handbrake-drift mini-turbo as the one arcade nod.
 - **Procedural audio:** engine note that follows revs, tire squeal at the
@@ -104,6 +128,12 @@ handbrake rotates the car but scrubs speed; hold it through a bend and
 release for a small mini-turbo. RALLY keeps 72% of its grip on dirt,
 TOURER only 35%.
 
+The HUD names the car you are chasing by its strategy, and the finish
+screen prints the full classification, so you can see whether DEFENDER or
+CHARGER actually got the job done. Loveland is the long one — thirteen
+corners and a summit turnaround: a quick AI laps it in about 60 s and
+Berthoud in about 52 s, against 26 s round Classic.
+
 ## The cars
 
 | Car    | Power | Curb  | 100-0 | Lateral | Dirt grip |
@@ -137,7 +167,7 @@ Every push builds on GitHub Actions and publishes a release with
 ```
 source/game.h     shared types, kart spec sheets, simulation API
 source/track.c    3D circuit geometry (Catmull-Rom, elevation, curvature)
-source/game.c     vehicle dynamics, AI (braking points + recovery), items
+source/game.c     vehicle dynamics, AI strategies/learning/adaptation, items
 source/main.c     Wii layer: GX renderer, menus, split screen, audio, input
 tests/            host-side physics/AI tests (plain gcc, no Wii SDK)
 hbc/              Homebrew Channel metadata
@@ -155,12 +185,23 @@ gcc -std=c99 -O2 -Wall -Werror -Isource \
 Tests verify the physics against the spec sheets (measured stopping
 distance vs quoted, grip-capped yaw rate, gravity on grades), the
 steering filter (ramp shape, self-centering, speed sensitivity, and that
-left really is left), track geometry for all circuits, item pickup, and
-that the AI completes laps on every track — including recovering from a
-botched hairpin by backing out, since a real car can't rotate in place.
+left really is left), track geometry and corner segmentation for all
+circuits, that a twelve-car grid fits on the road, item pickup and AI
+nitro use, and that the AI completes laps on every track — including
+recovering from a botched hairpin by backing out, since a real car can't
+rotate in place.
+
+The v1.1 AI behaviour is tested as behaviour, not just as code: that the
+field spreads out across distinct racing lines and error counts, that
+mistakes fall as a race progresses, that overconfident strategies end up
+believing less than they started and timid ones more, that a defender
+covers the side a human has been passing on (and the mirror-image setup
+produces the mirror-image line), and that an overtake is logged with the
+side it happened on.
 
 ## Ideas for later
 
+- Open-road mode down the passes with traffic to overtake
 - Ghost laps and lap-time records
 - Weather (rain lowers μ; snow on the passes)
 - More passes (Independence, Pikes Peak hill climb)

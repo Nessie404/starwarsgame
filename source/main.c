@@ -552,10 +552,36 @@ static void draw_cone(float cx, float cy_base, float cz,
 /* 3D scene                                                            */
 /* ------------------------------------------------------------------ */
 
-static void draw_track(const Track *t)
+/*
+ * With a twelve-car field and up to four viewports, drawing every road
+ * segment for every player is more immediate-mode geometry than the GX
+ * FIFO wants to chew through. Cull to a window of segments around the
+ * viewer (wider in one-player, tighter in split screen) and drop distant
+ * cars and scenery.
+ */
+static void view_window(int *ahead, int *behind)
+{
+    int n = game.cfg.n_humans;
+    *behind = 12;
+    *ahead = (n <= 1) ? 96 : (n == 2 ? 64 : 44);
+}
+
+static int seg_in_window(const Track *t, int viewer_seg, int seg,
+                         int ahead, int behind)
+{
+    int rel = seg - viewer_seg;
+    if (rel < -t->n / 2) rel += t->n;
+    if (rel >  t->n / 2) rel -= t->n;
+    return (rel >= -behind && rel <= ahead);
+}
+
+static void draw_track(const Track *t, int viewer_seg)
 {
     const float RW = t->road_half;
+    int win_ahead, win_behind;
     int i;
+
+    view_window(&win_ahead, &win_behind);
 
     /* valley floor */
     {
@@ -575,6 +601,9 @@ static void draw_track(const Track *t)
         float l1x = -t->dz[in], l1z = t->dx[in];
         float y0 = t->py[i] + 0.06f, y1 = t->py[in] + 0.06f;
         u8 r, g, b;
+
+        if (!seg_in_window(t, viewer_seg, i, win_ahead, win_behind))
+            continue;
 
         if (track_is_pad_seg(t, i)) {
             float pulse = 0.85f + 0.15f * sinf((float)frame_no * 0.2f);
@@ -703,6 +732,8 @@ static void draw_track(const Track *t)
         for (rrow = 0; rrow < t->n_items; rrow++) {
             int seg = t->item_seg[rrow];
             float lx = -t->dz[seg], lz = t->dx[seg];
+            if (!seg_in_window(t, viewer_seg, seg, win_ahead, win_behind))
+                continue;
             for (b = 0; b < 3; b++) {
                 float blat = ((float)b - 1.0f) * 0.55f * RW;
                 float pulse;
@@ -721,8 +752,13 @@ static void draw_track(const Track *t)
         }
     }
 
-    /* trees and far peaks */
+    /* trees (near ones only) and the far peaks, which are always drawn
+     * because they are the horizon */
     for (i = 0; i < n_trees; i++) {
+        float ddx = tree_x[i] - t->px[viewer_seg];
+        float ddz = tree_z[i] - t->pz[viewer_seg];
+        if (ddx * ddx + ddz * ddz > 150.0f * 150.0f)
+            continue;
         draw_box(tree_x[i], tree_y[i] + 0.6f, tree_z[i], 0.0f, 0.0f,
                  0.25f, 0.6f, 0.25f, 110, 75, 40);
         draw_cone(tree_x[i], tree_y[i] + 1.2f, tree_z[i], 1.7f, 3.4f,
@@ -891,9 +927,15 @@ static void draw_scene_for_player(int p)
 
     GX_SetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
 
-    draw_track(t);
-    for (i = 0; i < NUM_KARTS; i++)
-        draw_kart(t, &game.karts[i]);
+    draw_track(t, k->seg);
+    for (i = 0; i < NUM_KARTS; i++) {
+        const Kart *o = &game.karts[i];
+        float ddx = o->x - cam_x[p];
+        float ddz = o->z - cam_z[p];
+        if (o != k && ddx * ddx + ddz * ddz > 220.0f * 220.0f)
+            continue;              /* a speck at this range */
+        draw_kart(t, o);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1034,6 +1076,27 @@ static void hud_ortho_fullscreen(void)
     GX_SetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
 }
 
+/* label for a car: players are P1..P4, AI are named by strategy so the
+ * field reads as a grid of characters rather than "CPU 1..11" */
+static const char *kart_label(const Kart *k)
+{
+    static char buf[8];
+    if (k->human >= 0) {
+        snprintf(buf, sizeof(buf), "P%d", k->human + 1);
+        return buf;
+    }
+    return ai_strategy_name(k->strategy);
+}
+
+static const Kart *kart_at_rank(int rank)
+{
+    int i;
+    for (i = 0; i < NUM_KARTS; i++)
+        if (game.karts[i].rank == rank)
+            return &game.karts[i];
+    return NULL;
+}
+
 static void draw_player_hud(int p)
 {
     const Kart *k = &game.karts[p];
@@ -1062,6 +1125,19 @@ static void draw_player_hud(int p)
              k->boost_t > 0.0f ? 255 : 235,
              k->boost_t > 0.0f ? 150 : 235,
              k->boost_t > 0.0f ? 30 : 235, 235);
+
+    /* who you are chasing — and how they drive */
+    if (game.cfg.n_humans == 1 && k->rank > 1 &&
+        game.state == STATE_RACING) {
+        const Kart *ahead = kart_at_rank(k->rank - 1);
+        if (ahead) {
+            const u8 *c = kart_color(ahead);
+            hud_text(vx + 100.0f, vy + 14.0f, 8.0f, 14.0f, "CHASING",
+                     170, 175, 190, 210);
+            hud_text(vx + 176.0f, vy + 14.0f, 8.0f, 14.0f,
+                     kart_label(ahead), c[0], c[1], c[2], 235);
+        }
+    }
 
     /* item slot */
     if (k->item_held)
@@ -1114,25 +1190,41 @@ static void draw_race_hud(void)
     }
 
     if (game.state == STATE_FINISHED) {
-        hud_rect(0.0f, 0.0f, W, H, 0, 0, 20, 110);
-        hud_text(W * 0.5f - hud_text_width(42.0f, "FINISH") * 0.5f,
-                 H * 0.5f - 130.0f, 42.0f, 70.0f, "FINISH",
-                 255, 255, 255, 240);
-        for (p = 0; p < game.cfg.n_humans; p++) {
-            const u8 *c = kart_color(&game.karts[p]);
-            snprintf(buf, sizeof(buf), "P%d   %d   %.1fS",
-                     p + 1, game.karts[p].final_rank,
-                     game.karts[p].finish_time);
-            hud_text(W * 0.5f - 130.0f, H * 0.5f - 30.0f + 34.0f * p,
-                     15.0f, 26.0f, buf, c[0], c[1], c[2], 240);
+        int rank, rows = NUM_KARTS < 8 ? NUM_KARTS : 8;
+        float y0;
+
+        hud_rect(0.0f, 0.0f, W, H, 0, 0, 20, 150);
+        hud_text(W * 0.5f - hud_text_width(30.0f, "FINISH") * 0.5f,
+                 26.0f, 30.0f, 50.0f, "FINISH", 255, 255, 255, 240);
+
+        /* full classification, so you can see which strategy won */
+        y0 = 96.0f;
+        for (rank = 1; rank <= rows; rank++) {
+            const Kart *k = kart_at_rank(rank);
+            const u8 *c;
+            float y = y0 + (float)(rank - 1) * 25.0f;
+            if (!k)
+                continue;
+            c = kart_color(k);
+            snprintf(buf, sizeof(buf), "%d", rank);
+            hud_text(W * 0.5f - 170.0f, y, 11.0f, 18.0f, buf,
+                     230, 230, 235, 230);
+            hud_text(W * 0.5f - 132.0f, y, 11.0f, 18.0f, kart_label(k),
+                     c[0], c[1], c[2], 240);
+            if (k->finished)
+                snprintf(buf, sizeof(buf), "%.1fS", k->finish_time);
+            else
+                snprintf(buf, sizeof(buf), "LAP %d", k->lap + 1);
+            hud_text(W * 0.5f + 74.0f, y, 11.0f, 18.0f, buf,
+                     200, 205, 215, 225);
         }
         hud_text(W * 0.5f - hud_text_width(11.0f, "PRESS  ") * 0.5f,
-                 H - 60.0f, 11.0f, 18.0f, "PRESS  ",
+                 H - 34.0f, 11.0f, 18.0f, "PRESS  ",
                  200, 200, 210, 200);
         /* '+' drawn as two bars */
-        hud_rect(W * 0.5f + 52.0f, H - 53.0f, 14.0f, 4.0f,
+        hud_rect(W * 0.5f + 52.0f, H - 27.0f, 14.0f, 4.0f,
                  200, 200, 210, 200);
-        hud_rect(W * 0.5f + 57.0f, H - 58.0f, 4.0f, 14.0f,
+        hud_rect(W * 0.5f + 57.0f, H - 32.0f, 4.0f, 14.0f,
                  200, 200, 210, 200);
     }
 }

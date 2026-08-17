@@ -53,6 +53,25 @@ static void teleport(Game *g, Kart *k, int seg, float speed)
     k->total_progress = k->prog_raw;
 }
 
+/* as teleport(), but offset laterally from the centerline (positive =
+ * left of the direction of travel) */
+static void teleport_lat(Game *g, Kart *k, int seg, float lat, float speed)
+{
+    const Track *t = &g->track;
+    float lx = -t->dz[seg], lz = t->dx[seg];
+    float frac, got;
+
+    k->x = t->px[seg] + lx * lat;
+    k->z = t->pz[seg] + lz * lat;
+    k->heading = atan2f(t->dz[seg], t->dx[seg]);
+    k->speed = speed;
+    k->slip = 0.0f;
+    track_locate(t, k->x, k->z, -1, &k->seg, &frac, &got, &k->y);
+    k->lat = got;
+    k->prog_raw = (float)k->seg + frac;
+    k->total_progress = k->prog_raw;
+}
+
 /* ------------------------------------------------------------------ */
 
 static void test_tracks_geometry(void)
@@ -244,40 +263,66 @@ static void test_items(void)
     CHECK(g.karts[0].boost_t > 1.0f, "item gave no nitro");
 }
 
-static void test_ai_laps_all_tracks(void)
+/* The whole AI field must be able to finish a full race on every track,
+ * cleanly: no NaNs, nobody outside the barriers, and a sane winning lap
+ * time for the circuit's length. */
+static void test_ai_races_all_tracks(void)
 {
     int id;
     for (id = 0; id < TRACK_COUNT; id++) {
         Game g;
         GameConfig cfg = default_cfg(id);
         Input in[MAX_HUMANS];
-        int f, i;
-        const int max_frames = 60 * 240;
-        int lapped = 0;
+        int f, i, done = 0, finished = 0;
+        const int max_frames = 60 * 400;
+        float best_lap = 1e9f, lap_start[NUM_KARTS];
+        int last_lap[NUM_KARTS];
 
         game_init(&g, &cfg);
         idle_inputs(in);
+        for (i = 0; i < NUM_KARTS; i++) {
+            last_lap[i] = g.karts[i].lap;
+            lap_start[i] = 0.0f;
+        }
 
-        for (f = 0; f < max_frames && !lapped; f++) {
+        for (f = 0; f < max_frames && !done; f++) {
             game_update(&g, in, 1.0f / 60.0f);
-            lapped = 1;
+            done = 1;
             for (i = 1; i < NUM_KARTS; i++) {
                 Kart *k = &g.karts[i];
                 CHECK(!isnan(k->x) && !isnan(k->speed) && !isnan(k->heading),
                       "AI %d NaN on track %d frame %d", i, id, f);
                 CHECK(fabsf(k->lat) < g.track.wall_half + 2.0f,
-                      "AI %d off-world on track %d (lat %.1f) frame %d",
-                      i, id, k->lat, f);
+                      "AI %d outside the barriers on track %d (lat %.1f)",
+                      i, id, k->lat);
                 if (failures) return;
-                if (k->total_progress < (float)g.track.n)
-                    lapped = 0;
+                if (k->lap > last_lap[i]) {
+                    float lt = g.race_t - lap_start[i];
+                    if (last_lap[i] >= 0 && lt < best_lap)
+                        best_lap = lt;
+                    last_lap[i] = k->lap;
+                    lap_start[i] = g.race_t;
+                }
+                if (!k->finished)
+                    done = 0;
             }
         }
-        CHECK(lapped, "AI karts did not complete a lap on track %d", id);
-        if (lapped)
-            printf("track %-8s: all AI completed a lap by t=%.0f s "
-                   "(lap ~%.0f m)\n",
-                   g.track.name, f / 60.0f, g.track.total_len);
+
+        for (i = 1; i < NUM_KARTS; i++)
+            if (g.karts[i].finished)
+                finished++;
+
+        printf("track %-8s: %2d/%d AI finished %d laps, best AI lap %.1f s "
+               "(%.0f m)\n", g.track.name, finished, NUM_KARTS - 1,
+               RACE_LAPS, best_lap, g.track.total_len);
+        CHECK(finished == NUM_KARTS - 1,
+              "only %d of %d AI finished on track %d", finished,
+              NUM_KARTS - 1, id);
+        /* a plausible pace for the distance: 8..32 m/s average */
+        CHECK(best_lap > g.track.total_len / 32.0f &&
+              best_lap < g.track.total_len / 8.0f,
+              "best lap %.1f s implausible for %.0f m on track %d",
+              best_lap, g.track.total_len, id);
     }
 }
 
@@ -413,6 +458,327 @@ static void test_steer_sign(void)
           h_right);
 }
 
+
+/* ------------------------------------------------------------------ */
+/* v1.1: a bigger field, individual strategies, learning, adaptation   */
+/* ------------------------------------------------------------------ */
+
+/* Corners are what the AI learn about, so the segmentation has to be
+ * sane: several per lap, contiguous ids, and plausible radii. */
+static void test_corner_segmentation(void)
+{
+    int id;
+    for (id = 0; id < TRACK_COUNT; id++) {
+        Track t;
+        int i, c, seen[TRACK_MAX_CORNERS];
+        track_init(&t, id);
+        {
+            float peak = 0.0f;
+            for (i = 0; i < t.n_corners; i++)
+                if (t.corner_peak[i] > peak)
+                    peak = t.corner_peak[i];
+            printf("track %-8s: %2d corners, tightest R = %.0f m\n",
+                   t.name, t.n_corners, peak > 0.0f ? 1.0f / peak : 0.0f);
+        }
+        CHECK(t.n_corners >= 4 && t.n_corners <= TRACK_MAX_CORNERS,
+              "track %d has %d corners", id, t.n_corners);
+        for (c = 0; c < TRACK_MAX_CORNERS; c++)
+            seen[c] = 0;
+        for (i = 0; i < t.n; i++) {
+            c = t.corner_id[i];
+            CHECK(c >= -1 && c < t.n_corners,
+                  "bad corner id %d at seg %d on track %d", c, i, id);
+            if (c >= 0)
+                seen[c]++;
+        }
+        for (c = 0; c < t.n_corners; c++) {
+            CHECK(seen[c] > 0, "corner %d on track %d has no segments",
+                  c, id);
+            CHECK(t.corner_peak[c] > 0.005f && t.corner_peak[c] < 0.25f,
+                  "corner %d curvature %.3f implausible", c,
+                  t.corner_peak[c]);
+        }
+        /* no single corner may swallow most of the lap, or a mistake
+         * could not be attributed to a specific piece of road */
+        for (c = 0; c < t.n_corners; c++)
+            CHECK(seen[c] < t.n / 3,
+                  "corner %d covers %d of %d segments on track %d",
+                  c, seen[c], t.n, id);
+    }
+}
+
+/* A twelve-car grid has to fit on the road, including the back row that
+ * sits ~40 m behind the line and often round a bend. */
+static void test_full_grid_fits(void)
+{
+    int id, i, j;
+    for (id = 0; id < TRACK_COUNT; id++) {
+        Game g;
+        GameConfig cfg = default_cfg(id);
+        game_init(&g, &cfg);
+        for (i = 0; i < NUM_KARTS; i++) {
+            Kart *k = &g.karts[i];
+            CHECK(fabsf(k->lat) <= g.track.road_half + 0.5f,
+                  "grid slot %d off the road on track %d (lat %.2f)",
+                  i, id, k->lat);
+            CHECK(k->total_progress < 0.5f,
+                  "grid slot %d starts past the line on track %d (%.2f)",
+                  i, id, k->total_progress);
+            for (j = i + 1; j < NUM_KARTS; j++) {
+                float dx = g.karts[j].x - k->x;
+                float dz = g.karts[j].z - k->z;
+                CHECK(dx * dx + dz * dz > 1.6f * 1.6f,
+                      "grid slots %d and %d overlap on track %d", i, j, id);
+            }
+        }
+    }
+}
+
+/* Run a race and hand back the game state for the behavioural tests. */
+static void race_for(Game *g, int track_id, float seconds,
+                     int *mist_thirds)
+{
+    GameConfig cfg = default_cfg(track_id);
+    Input in[MAX_HUMANS];
+    int f, i, frames = (int)(seconds * 60.0f);
+
+    game_init(g, &cfg);
+    idle_inputs(in);
+    if (mist_thirds)
+        mist_thirds[0] = mist_thirds[1] = mist_thirds[2] = 0;
+
+    for (f = 0; f < frames; f++) {
+        int before = 0, after = 0, third = (f * 3) / frames;
+        if (mist_thirds)
+            for (i = 1; i < NUM_KARTS; i++)
+                before += g->karts[i].mistakes;
+        game_update(g, in, 1.0f / 60.0f);
+        if (mist_thirds) {
+            for (i = 1; i < NUM_KARTS; i++)
+                after += g->karts[i].mistakes;
+            mist_thirds[third > 2 ? 2 : third] += after - before;
+        }
+    }
+}
+
+/* Eleven AI on seven strategy sheets must actually drive differently:
+ * different lines, different error counts, different pace. */
+static void test_ai_strategies_differ(void)
+{
+    Game g;
+    int i, distinct_lines = 0, min_mist = 1 << 30, max_mist = -1;
+    float min_conf = 9.9f, max_conf = -9.9f;
+    float lines[NUM_KARTS];
+
+    race_for(&g, TRACK_CLASSIC, 100.0f, NULL);
+
+    for (i = 1; i < NUM_KARTS; i++) {
+        Kart *k = &g.karts[i];
+        float conf = ai_corner_conf(k, &g.track, g.track.corner_entry[0]);
+        int j, dup = 0;
+
+        CHECK(k->strategy >= 0 && k->strategy < AI_STRATEGY_COUNT,
+              "kart %d has bad strategy %d", i, k->strategy);
+        if (k->mistakes < min_mist) min_mist = k->mistakes;
+        if (k->mistakes > max_mist) max_mist = k->mistakes;
+        if (conf < min_conf) min_conf = conf;
+        if (conf > max_conf) max_conf = conf;
+
+        lines[i] = k->ai_line;
+        for (j = 1; j < i; j++)
+            if (fabsf(lines[j] - k->ai_line) < 0.05f)
+                dup = 1;
+        if (!dup)
+            distinct_lines++;
+    }
+
+    printf("field spread: mistakes %d..%d, corner-1 nerve %.2f..%.2f, "
+           "%d distinct racing lines\n",
+           min_mist, max_mist, min_conf, max_conf, distinct_lines);
+    CHECK(distinct_lines >= 4, "only %d distinct racing lines",
+          distinct_lines);
+    CHECK(max_mist >= min_mist + 3,
+          "error counts too uniform (%d..%d)", min_mist, max_mist);
+    CHECK(max_conf - min_conf > 0.04f,
+          "learned nerve too uniform (%.3f..%.3f)", min_conf, max_conf);
+}
+
+/* Learning: the field should make fewer mistakes as the race goes on,
+ * the overconfident sheets should talk themselves down, and the timid
+ * one should find pace. */
+static void test_ai_learns_from_mistakes(void)
+{
+    Game g;
+    int thirds[3];
+    int i, checked_bold = 0, checked_timid = 0, total_events = 0;
+
+    race_for(&g, TRACK_CLASSIC, 150.0f, thirds);
+
+    printf("mistakes by race third: %d / %d / %d\n",
+           thirds[0], thirds[1], thirds[2]);
+    CHECK(thirds[0] > 0, "no mistakes at all to learn from");
+    CHECK(thirds[2] < thirds[0],
+          "field did not get tidier (%d then %d)", thirds[0], thirds[2]);
+
+    for (i = 1; i < NUM_KARTS; i++) {
+        Kart *k = &g.karts[i];
+        const AIStrategy *st = &ai_strategies[k->strategy];
+        float sum = 0.0f, mean;
+        int c;
+
+        total_events += k->learn_events;
+        for (c = 0; c < g.track.n_corners; c++)
+            sum += k->corner_conf[c];
+        mean = sum / (float)g.track.n_corners;
+
+        CHECK(mean >= 0.70f && mean <= st->conf_max + 0.01f,
+              "%s ended with nerve %.3f outside [0.70, %.3f]",
+              st->name, mean, st->conf_max);
+
+        if (k->strategy == AI_LATE || k->strategy == AI_CHARGER) {
+            /* started believing it could beat the grip limit */
+            CHECK(mean < st->conf_start - 0.02f,
+                  "%s never learned to brake earlier (%.3f from %.3f)",
+                  st->name, mean, st->conf_start);
+            CHECK(k->mistakes > 0, "%s made no mistakes to learn from",
+                  st->name);
+            checked_bold = 1;
+        }
+        if (k->strategy == AI_CRUISER) {
+            CHECK(mean > st->conf_start + 0.02f,
+                  "%s never found extra pace (%.3f from %.3f)",
+                  st->name, mean, st->conf_start);
+            checked_timid = 1;
+        }
+    }
+    CHECK(checked_bold && checked_timid,
+          "did not exercise both a bold and a timid strategy");
+    CHECK(total_events > 50, "only %d learning updates", total_events);
+}
+
+/* Park a human on an AI's bumper and check the AI covers the side that
+ * human has been passing on — the same setup with the opposite learned
+ * habit must produce the opposite defensive line. */
+static float defended_line(float learned_pass_side)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    Kart *ai = NULL;
+    int i, f;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+
+    for (i = 1; i < NUM_KARTS; i++)
+        if (g.karts[i].strategy == AI_DEFENDER) {
+            ai = &g.karts[i];
+            break;
+        }
+    if (!ai)
+        return 0.0f;
+
+    g.pmodel[0].pass_side = learned_pass_side;
+    teleport(&g, ai, 40, 22.0f);
+    ai->line_target = 0.0f;
+
+    for (f = 0; f < 90; f++) {
+        /* hold the human just behind the AI, in its mirrors */
+        int behind = (ai->seg - 1 + g.track.n) % g.track.n;
+        teleport(&g, &g.karts[0], behind, 22.0f);
+        g.karts[0].prev_progress = g.karts[0].total_progress;
+        g.pmodel[0].pass_side = learned_pass_side;
+        game_update(&g, in, 1.0f / 60.0f);
+    }
+    return ai->line_target;
+}
+
+static void test_ai_adapts_to_player(void)
+{
+    float left = defended_line(1.0f);
+    float right = defended_line(-1.0f);
+
+    printf("defender line vs a left-side passer %.2f m, "
+           "right-side passer %.2f m\n", left, right);
+    CHECK(left > right + 0.5f,
+          "defender ignores which side the player passes on (%.2f vs %.2f)",
+          left, right);
+    CHECK(left > 0.0f && right < 0.0f,
+          "defender covered the wrong side (%.2f / %.2f)", left, right);
+}
+
+/* The player model itself: overtakes are noticed, with the side they
+ * happened on, and contact is counted. */
+static void test_player_model_learns(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    Kart *ai = NULL;
+    int i, f;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+
+    for (i = 1; i < NUM_KARTS; i++)
+        if (g.karts[i].strategy == AI_CRUISER) {
+            ai = &g.karts[i];
+            break;
+        }
+    CHECK(ai != NULL, "no cruiser in the field");
+    if (!ai) return;
+
+    /* clear the road: move everyone else far up the track so only this
+     * one AI is in play */
+    for (i = 1; i < NUM_KARTS; i++)
+        if (&g.karts[i] != ai)
+            teleport_lat(&g, &g.karts[i], 70 + i, 0.0f, 0.0f);
+
+    /* the AI ambles along on the right, the human arrives fast on the
+     * left: the overtake should be logged as a left-side pass */
+    teleport_lat(&g, ai, 30, -2.0f, 6.0f);
+    teleport_lat(&g, &g.karts[0], 28, 3.0f, 30.0f);
+
+    for (f = 0; f < 120 && g.pmodel[0].passes == 0; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+
+    printf("player model: %d pass(es), side bias %.2f\n",
+           g.pmodel[0].passes, g.pmodel[0].pass_side);
+    CHECK(g.pmodel[0].passes > 0, "overtake was not noticed");
+    CHECK(g.pmodel[0].pass_side > 0.1f,
+          "pass side learned wrong (%.2f, expected positive/left)",
+          g.pmodel[0].pass_side);
+}
+
+
+/* AI must actually use the nitro they collect. Berthoud has no boost
+ * pads and the AI never drift, so any boost seen there came from an
+ * item being deliberately spent. */
+static void test_ai_uses_nitro(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_BERTHOUD);
+    Input in[MAX_HUMANS];
+    int f, i, boosts = 0, held_seen = 0;
+
+    game_init(&g, &cfg);
+    idle_inputs(in);
+    for (f = 0; f < 60 * 120; f++) {
+        game_update(&g, in, 1.0f / 60.0f);
+        for (i = 1; i < NUM_KARTS; i++) {
+            if (g.karts[i].item_held)
+                held_seen = 1;
+            if (g.karts[i].just_boosted)
+                boosts++;
+        }
+    }
+    printf("AI nitro: %d canisters spent over 2 minutes\n", boosts);
+    CHECK(held_seen, "no AI ever picked up an item");
+    CHECK(boosts > 0, "AI never spent their nitro");
+}
+
 int main(void)
 {
     test_steering_filter();
@@ -424,8 +790,15 @@ int main(void)
     test_gravity_grade();
     test_cornering_grip_cap();
     test_items();
-    test_ai_laps_all_tracks();
+    test_corner_segmentation();
+    test_full_grid_fits();
+    test_ai_races_all_tracks();
     test_full_race_classic();
+    test_ai_strategies_differ();
+    test_ai_learns_from_mistakes();
+    test_ai_adapts_to_player();
+    test_ai_uses_nitro();
+    test_player_model_learns();
 
     if (failures) {
         printf("%d FAILURE(S)\n", failures);

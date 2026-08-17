@@ -60,14 +60,18 @@ static const float ITEMS_BERTHOUD[] = { 0.05f, 0.42f, 0.86f };
 /* ---------------- LOVELAND PASS ---------------- */
 static const float CP_LOVELAND[][3] = {
     {    0,   0,  0 },  {  80,  -8,  3 },  { 160,   0,  9 },
-    { 220,  30, 16 },  { 245,  90, 24 },  { 230, 150, 32 },
-    { 240, 190, 38 },  { 252, 212, 41 },  { 232, 230, 44 },   /* hairpin A */
-    { 170, 240, 50 },  { 110, 248, 56 },  {  55, 258, 62 },
-    {  18, 270, 66 },  {   0, 292, 69 },  {  22, 312, 72 },   /* hairpin B */
-    {  80, 322, 78 },                                          /* summit */
-    {   0, 330, 74 },  { -80, 315, 64 },  { -130, 260, 52 },
-    { -150, 215, 45 }, { -168, 195, 42 }, { -150, 175, 39 },  /* hairpin C */
-    { -100, 130, 27 }, {  -60,  75, 14 }, {  -30,  30,  5 },
+    { 220,  30, 16 },  { 245,  90, 24 },  { 232, 150, 32 },
+    { 244, 188, 38 },  { 262, 214, 41 },  { 226, 236, 44 },   /* hairpin A */
+    { 170, 244, 50 },  { 110, 250, 56 },  {  55, 258, 62 },
+    {  16, 266, 66 },  { -12, 292, 69 },  {  22, 312, 72 },   /* hairpin B */
+    /* summit turnaround: the road climbs east, swings round the top and
+     * comes back west, so it needs a rounded loop rather than a spike */
+    {  62, 320, 76 },  {  84, 338, 78 },  {  62, 356, 77 },
+    {  10, 352, 74 },  { -66, 330, 64 },  { -132, 268, 52 },
+    /* hairpin C: a rounded switchback back down toward the valley */
+    { -142, 226, 45 }, { -172, 206, 42 }, { -176, 176, 40 },
+    { -140, 156, 36 }, { -100, 122, 26 }, {  -60,  72, 14 },
+    {  -30,  30,  5 },
 };
 static const float ITEMS_LOVELAND[] = { 0.05f, 0.40f, 0.90f };
 
@@ -178,6 +182,71 @@ void track_init(Track *t, int track_id)
             lensum += t->seg_len[a];
         }
         t->curv[i] = acc / (lensum > 0.1f ? lensum : 0.1f);
+    }
+
+    /*
+     * Group the curvature profile into corners the AI can learn about.
+     * A run of curvature above a modest threshold opens a corner, short
+     * straight-ish gaps inside a bend do not close it, and a long run is
+     * chopped every CORNER_SPAN meters so that a whole curvy third of a
+     * lap does not become one giant "corner" — the point is to attribute
+     * a mistake to a specific piece of road. Runs may wrap past the
+     * start line.
+     */
+    {
+        const float CORNER_MIN_CURV = 0.012f;   /* ~80 m radius or tighter */
+        const float CORNER_SPAN     = 45.0f;    /* max arc length, meters  */
+        const int   GAP_TOLERANCE   = 2;
+        int in_corner = 0, gap = 0, cur = -1;
+        float span = 0.0f;
+
+        for (i = 0; i < t->n; i++)
+            t->corner_id[i] = -1;
+        t->n_corners = 0;
+
+        for (i = 0; i < t->n; i++) {
+            int cornerish = (t->curv[i] >= CORNER_MIN_CURV);
+
+            if (cornerish && in_corner && span >= CORNER_SPAN)
+                in_corner = 0;               /* long bend: start a new one */
+
+            if (cornerish) {
+                if (!in_corner) {
+                    if (t->n_corners >= TRACK_MAX_CORNERS)
+                        break;
+                    cur = t->n_corners++;
+                    t->corner_entry[cur] = i;
+                    t->corner_peak[cur] = t->curv[i];
+                    in_corner = 1;
+                    span = 0.0f;
+                }
+                if (t->curv[i] > t->corner_peak[cur])
+                    t->corner_peak[cur] = t->curv[i];
+                t->corner_id[i] = cur;
+                span += t->seg_len[i];
+                gap = 0;
+            } else if (in_corner) {
+                if (++gap > GAP_TOLERANCE) {
+                    in_corner = 0;
+                } else {
+                    t->corner_id[i] = cur;   /* still the same bend */
+                    span += t->seg_len[i];
+                }
+            }
+        }
+
+        /* a corner straddling the start line is one corner, not two */
+        if (t->n_corners > 1 && t->corner_id[0] == 0 &&
+            t->corner_id[t->n - 1] == t->n_corners - 1) {
+            int last = t->n_corners - 1;
+            for (i = 0; i < t->n; i++)
+                if (t->corner_id[i] == last)
+                    t->corner_id[i] = 0;
+            if (t->corner_peak[last] > t->corner_peak[0])
+                t->corner_peak[0] = t->corner_peak[last];
+            t->corner_entry[0] = t->corner_entry[last];
+            t->n_corners--;
+        }
     }
 
     t->road_half = d->road_half;

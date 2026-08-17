@@ -39,6 +39,39 @@ const KartSpec kart_specs[SPEC_COUNT] = {
     { "TOURER", 1350.f, 310.f, 34.f, 1.02f, 0.60f, 2.70f,   0.35f },
 };
 
+/* Strategy sheets. conf_start over 1.0 means the driver begins the race
+ * believing it can beat the grip limit: it will run wide, learn, and
+ * settle down. Under 1.0 means it starts cautious and works up. */
+const AIStrategy ai_strategies[AI_STRATEGY_COUNT] = {
+/*   name        conf_start conf_max learn_up learn_down line   defend attack nitro power */
+  { "BALANCED",   0.97f,   1.05f,   0.014f,  0.10f,   0.00f,  0.35f, 0.40f, 1.0f, 1.000f },
+  { "LATE",       1.12f,   1.14f,   0.010f,  0.17f,  -0.10f,  0.25f, 0.70f, 0.3f, 1.015f },
+  { "INSIDE",     0.99f,   1.06f,   0.013f,  0.11f,  -0.55f,  0.55f, 0.45f, 1.2f, 0.995f },
+  { "DEFENDER",   0.95f,   1.02f,   0.011f,  0.09f,   0.10f,  0.95f, 0.25f, 2.2f, 0.990f },
+  { "CHARGER",    1.06f,   1.11f,   0.012f,  0.14f,  -0.25f,  0.30f, 0.95f, 0.0f, 1.020f },
+  { "DRAFTER",    1.00f,   1.09f,   0.016f,  0.12f,   0.30f,  0.40f, 0.80f, 3.0f, 1.005f },
+  { "CRUISER",    0.88f,   1.03f,   0.018f,  0.07f,   0.45f,  0.20f, 0.30f, 1.6f, 0.985f },
+};
+
+const char *ai_strategy_name(int strategy)
+{
+    if (strategy < 0 || strategy >= AI_STRATEGY_COUNT)
+        return "BALANCED";
+    return ai_strategies[strategy].name;
+}
+
+/* what this driver currently believes about the corner at `seg` */
+float ai_corner_conf(const Kart *k, const Track *t, int seg)
+{
+    int c;
+    if (seg < 0 || seg >= t->n)
+        return 1.0f;
+    c = t->corner_id[seg];
+    if (c < 0 || c >= t->n_corners)
+        return 1.0f;
+    return k->corner_conf[c];
+}
+
 float game_clampf(float v, float lo, float hi)
 {
     if (v < lo) return lo;
@@ -126,18 +159,45 @@ float spec_accel_time(const KartSpec *s)
 
 /* ------------------------------------------------------------------ */
 
+/*
+ * Place a car on the starting grid. With a full twelve-car field the back
+ * row sits ~40 m behind the line, which on a mountain pass is already
+ * round a bend, so the grid is walked backwards along the centerline
+ * rather than in a straight line from the start.
+ */
 static void kart_place_on_grid(Game *g, Kart *k, int grid_slot)
 {
     const Track *t = &g->track;
-    float d0x = t->dx[0], d0z = t->dz[0];
-    float lx = -d0z, lz = d0x;
     float side = (grid_slot % 2 == 0) ? 1.7f : -1.7f;
-    float back = 6.0f + (float)grid_slot * 3.6f;
-    float frac;
+    float back = 7.0f + (float)(grid_slot / 2) * 6.4f;
+    float remain = back;
+    float along, cx, cz, lx, lz, frac;
+    int seg = 0, guard, nxt;
 
-    k->x = t->px[0] - d0x * back + lx * side;
-    k->z = t->pz[0] - d0z * back + lz * side;
-    k->heading = atan2f(d0z, d0x);
+    /* Walk back to the segment holding the target point, then interpolate
+     * inside it: snapping to sample boundaries would collapse two rows
+     * onto one another whenever the row spacing is close to the sample
+     * spacing. */
+    for (guard = 0; guard < t->n; guard++) {
+        int prev = (seg - 1 + t->n) % t->n;
+        if (remain <= t->seg_len[prev]) {
+            seg = prev;
+            break;
+        }
+        remain -= t->seg_len[prev];
+        seg = prev;
+    }
+    along = 1.0f - remain / t->seg_len[seg];        /* 0..1 within seg */
+    nxt = (seg + 1) % t->n;
+
+    cx = t->px[seg] + (t->px[nxt] - t->px[seg]) * along;
+    cz = t->pz[seg] + (t->pz[nxt] - t->pz[seg]) * along;
+    lx = -t->dz[seg];
+    lz =  t->dx[seg];
+
+    k->x = cx + lx * side;
+    k->z = cz + lz * side;
+    k->heading = atan2f(t->dz[seg], t->dx[seg]);
     k->speed = 0.0f;
 
     track_locate(t, k->x, k->z, -1, &k->seg, &frac, &k->lat, &k->y);
@@ -168,13 +228,23 @@ void game_init(Game *g, const GameConfig *cfg)
             k->paint_idx = ((g->cfg.paint[i] % PAINT_COUNT) + PAINT_COUNT)
                            % PAINT_COUNT;
         } else {
+            int ai_no = i - g->cfg.n_humans;
+            const AIStrategy *st;
+            int c;
+
             k->human = -1;
-            k->spec = (i - g->cfg.n_humans) % SPEC_COUNT;
+            k->spec = ai_no % SPEC_COUNT;
             k->paint_idx = (i * 3 + 2) % PAINT_COUNT;
-            k->ai_line = ((i & 1) ? -1.0f : 1.0f) *
-                         (0.25f + 0.10f * (float)(i % 3)) *
-                         g->track.road_half;
-            k->ai_skill = 0.94f + 0.03f * (float)((i * 7) % 5);
+            k->strategy = ai_no % AI_STRATEGY_COUNT;
+            st = &ai_strategies[k->strategy];
+            k->ai_line = st->line_bias * g->track.road_half * 0.75f;
+            k->line_target = k->ai_line;
+            /* a little spread inside each strategy so two drivers on the
+             * same sheet are still individuals */
+            k->ai_skill = 0.95f + 0.02f * (float)((ai_no * 5) % 4);
+            for (c = 0; c < TRACK_MAX_CORNERS; c++)
+                k->corner_conf[c] = st->conf_start;
+            k->cur_corner = -1;
         }
         /* humans start at the back of the grid */
         kart_place_on_grid(g, k,
@@ -182,6 +252,11 @@ void game_init(Game *g, const GameConfig *cfg)
                                ? NUM_KARTS - g->cfg.n_humans + k->human
                                : i - g->cfg.n_humans);
         k->rank = i + 1;
+    }
+
+    for (i = 0; i < MAX_HUMANS; i++) {
+        g->pmodel[i].pass_side = 0.0f;
+        g->pmodel[i].pace = 1.0f;
     }
 
     for (r = 0; r < g->track.n_items; r++)
@@ -193,13 +268,90 @@ void game_init(Game *g, const GameConfig *cfg)
 }
 
 /* ------------------------------------------------------------------ */
-/* AI driver                                                           */
+/* AI drivers: strategy, learning, and reacting to the humans          */
 /* ------------------------------------------------------------------ */
+
+/*
+ * Find the nearest rival within `window` meters ahead or behind. Progress
+ * is kept in track-segment units, so it is converted to metres with the
+ * track's mean segment length. Returns the kart index or -1;
+ * `want_human` restricts the search to human-driven cars.
+ */
+static int nearest_rival(const Game *g, const Kart *k, int ahead,
+                         int want_human, float window, float *gap_out)
+{
+    const Track *t = &g->track;
+    float m_per_seg = t->total_len / (float)t->n;
+    int best = -1, i;
+    float best_gap = window;
+
+    for (i = 0; i < NUM_KARTS; i++) {
+        const Kart *o = &g->karts[i];
+        float gap;
+        if (o == k || o->finished)
+            continue;
+        if (want_human && o->human < 0)
+            continue;
+        gap = ahead ? (o->total_progress - k->total_progress)
+                    : (k->total_progress - o->total_progress);
+        gap *= m_per_seg;
+        if (gap > 0.0f && gap < best_gap) {
+            best_gap = gap;
+            best = i;
+        }
+    }
+    if (gap_out)
+        *gap_out = best_gap;
+    return best;
+}
+
+#define AI_DEFEND_RANGE 18.0f    /* metres: "someone is on my bumper"  */
+#define AI_ATTACK_RANGE 15.0f    /* metres: "I can have a go at them"  */
+
+/*
+ * Decide where on the road this driver wants to be, in meters left of
+ * the centerline. Base is the strategy's preferred line; on top of that
+ * a driver being chased by a human covers the side that human keeps
+ * passing on (learned in ai_observe_humans), and a driver hunting a car
+ * ahead picks the opposite side to set up a run at it.
+ */
+static float ai_tactical_line(const Game *g, const Kart *k)
+{
+    const Track *t = &g->track;
+    const AIStrategy *st = &ai_strategies[k->strategy];
+    float line = k->ai_line;
+    float room = t->road_half * 0.70f;
+    float gap;
+    int who;
+
+    /* being hunted: cover the side this human likes to come down */
+    who = nearest_rival(g, k, 0, 1, AI_DEFEND_RANGE, &gap);
+    if (who >= 0) {
+        const PlayerModel *pm = &g->pmodel[g->karts[who].human];
+        float close = 1.0f - gap / AI_DEFEND_RANGE;   /* 1 = on the bumper */
+        float side = pm->pass_side;
+        if (fabsf(side) < 0.15f)                  /* no read yet: cover the
+                                                   * side they are on now */
+            side = (g->karts[who].lat > k->lat) ? 1.0f : -1.0f;
+        line += side * st->defend * close * room;
+    }
+
+    /* hunting: line up on the opposite side of the car ahead */
+    who = nearest_rival(g, k, 1, 0, AI_ATTACK_RANGE, &gap);
+    if (who >= 0) {
+        float side = (g->karts[who].lat > k->lat) ? -1.0f : 1.0f;
+        float close = 1.0f - gap / AI_ATTACK_RANGE;
+        line += side * st->attack * close * room;
+    }
+
+    return game_clampf(line, -room, room);
+}
 
 static void ai_control(const Game *g, const Kart *k, Input *in)
 {
     const Track *t = &g->track;
     const KartSpec *s = &kart_specs[k->spec];
+    const AIStrategy *st = &ai_strategies[k->strategy];
     float v = fabsf(k->speed);
     float mu = s->lat_g * k->ai_skill;
     float a_brk = 0.75f * (V100 * V100) / (2.0f * s->brake_dist_100);
@@ -232,8 +384,8 @@ static void ai_control(const Game *g, const Kart *k, Input *in)
         seg = (seg + 1) % t->n;
     }
     {
-        float txp = t->px[seg] - t->dz[seg] * k->ai_line;
-        float tzp = t->pz[seg] + t->dx[seg] * k->ai_line;
+        float txp = t->px[seg] - t->dz[seg] * k->line_target;
+        float tzp = t->pz[seg] + t->dx[seg] * k->line_target;
         float desired = atan2f(tzp - k->z, txp - k->x);
         float diff = game_angle_wrap(desired - k->heading);
         int pinned = fabsf(k->lat) > t->wall_half - 0.6f;
@@ -251,13 +403,20 @@ static void ai_control(const Game *g, const Kart *k, Input *in)
         in->steer = game_clampf(diff * 2.2f, -1.0f, 1.0f);
     }
 
-    /* speed: braking-point logic against the corner speeds ahead */
+    /*
+     * Speed: look down the road and find the lowest speed this driver
+     * could still brake down to in the distance available. Each corner's
+     * target speed is scaled by what this driver has *learned* about that
+     * specific corner, so a bend it ran wide on last lap gets approached
+     * slower next time round.
+     */
     vmax_allow = 1000.0f;
     seg = k->seg;
     d = 0.0f;
     for (j = 0; j < 48; j++) {
-        float vt = sqrtf(mu * GRAVITY / (t->curv[seg] > 1e-4f
-                                             ? t->curv[seg] : 1e-4f)) * 0.88f;
+        float curv = t->curv[seg] > 1e-4f ? t->curv[seg] : 1e-4f;
+        float conf = ai_corner_conf(k, t, seg);
+        float vt = sqrtf(mu * GRAVITY / curv) * 0.88f * conf;
         float allowed = sqrtf(vt * vt + 2.0f * a_brk * d);
         if (allowed < vmax_allow) vmax_allow = allowed;
         d += t->seg_len[seg];
@@ -269,24 +428,139 @@ static void ai_control(const Game *g, const Kart *k, Input *in)
     } else if (v < vmax_allow * 0.97f) {
         in->accel = 1;
     }
+
+    /*
+     * Nitro. Chargers empty the bottle the moment they have one, drafters
+     * sit on it until they are close enough behind someone for it to buy a
+     * place, and everyone waits for the road to open up rather than
+     * wasting it mid-hairpin.
+     */
+    if (k->item_held) {
+        int straightish = t->curv[k->seg] < 0.02f;
+        float gap;
+        int target = nearest_rival(g, k, 1, 0, 25.0f, &gap);
+        if (k->nitro_timer >= st->nitro_wait && straightish &&
+            (target >= 0 || st->nitro_wait < 1.0f))
+            in->item = 1;
+    }
+}
+
+/*
+ * Learning. A driver is "in" a corner while its current segment belongs
+ * to one; anything that goes wrong in there (running off the road, a
+ * barrier, or big understeer) marks the corner as botched. On the way out
+ * the belief for that corner is updated: knocked down after a mistake,
+ * nudged up after a clean pass. Over three laps this is visible as the
+ * late-brakers tidying up and the cautious drivers finding pace.
+ */
+static void ai_learn(Game *g, Kart *k)
+{
+    const Track *t = &g->track;
+    const AIStrategy *st = &ai_strategies[k->strategy];
+    int c = t->corner_id[k->seg];
+
+    /*
+     * What counts as a mistake: putting wheels off the road, hitting a
+     * barrier, or a genuine big slide. Ordinary understeer at the limit
+     * does not count — the steering controller asks for more yaw than
+     * grip allows in every tight corner, and punishing that would teach
+     * the drivers to crawl.
+     */
+    if (k->cur_corner >= 0) {
+        if (k->hit_wall || fabsf(k->lat) > t->road_half + 0.4f ||
+            k->slip > 0.85f)
+            k->corner_fault = 1;
+    }
+
+    if (c == k->cur_corner)
+        return;
+
+    /* left a corner: fold the result into what this driver believes */
+    if (k->cur_corner >= 0 && k->cur_corner < t->n_corners) {
+        float *conf = &k->corner_conf[k->cur_corner];
+        /* a quick human raises the whole field's ambition, a slow one
+         * lets it relax — the grid tunes itself to who it is racing */
+        float pace = 1.0f;
+        int h;
+        for (h = 0; h < g->cfg.n_humans; h++)
+            if (g->pmodel[h].pace > pace)
+                pace = g->pmodel[h].pace;
+        {
+            float ceiling = st->conf_max *
+                            game_clampf(0.97f + 0.10f * (pace - 1.0f),
+                                        0.95f, 1.10f);
+            if (k->corner_fault) {
+                *conf = game_clampf(*conf * (1.0f - st->learn_down),
+                                    0.72f, ceiling);
+                k->mistakes++;
+            } else {
+                *conf = game_clampf(*conf * (1.0f + st->learn_up),
+                                    0.72f, ceiling);
+            }
+            k->learn_events++;
+        }
+    }
+
+    k->cur_corner = c;
+    k->corner_fault = 0;
+}
+
+/*
+ * Watch the humans so the AI has something to adapt to: which side they
+ * complete passes on, and how their pace compares with the leading AI.
+ */
+static void ai_observe_humans(Game *g, float dt)
+{
+    int h, i;
+
+    for (h = 0; h < g->cfg.n_humans; h++) {
+        Kart *hk = &g->karts[h];
+        PlayerModel *pm = &g->pmodel[h];
+        float best_ai = -1e9f;
+
+        for (i = 0; i < NUM_KARTS; i++) {
+            Kart *ai = &g->karts[i];
+            if (ai->human >= 0)
+                continue;
+            if (ai->total_progress > best_ai)
+                best_ai = ai->total_progress;
+
+            /* a pass completed this frame, close enough to be a real
+             * wheel-to-wheel move rather than a lap gap */
+            if (hk->prev_progress < ai->prev_progress &&
+                hk->total_progress > ai->total_progress &&
+                fabsf(hk->total_progress - ai->total_progress) *
+                    (g->track.total_len / (float)g->track.n) < 12.0f) {
+                float side = (hk->lat > ai->lat) ? 1.0f : -1.0f;
+                pm->pass_side = pm->pass_side * 0.7f + side * 0.3f;
+                pm->passes++;
+            }
+        }
+
+        /* pace: how the human's progress compares with the best AI's,
+         * smoothed hard so it tracks the race rather than one corner */
+        if (g->race_t > 1.0f && best_ai > 1.0f) {
+            float ratio = game_clampf(hk->total_progress / best_ai,
+                                      0.5f, 1.5f);
+            pm->pace += (ratio - pm->pace) * game_clampf(dt * 0.5f,
+                                                         0.0f, 1.0f);
+        }
+    }
 }
 
 static float ai_power_scale(const Game *g, const Kart *k)
 {
-    /* light rubber-banding against the best-placed human */
+    /* light rubber-banding against the best-placed human, on top of the
+     * strategy's own engine trim */
     float lead = -1e9f;
     int i;
     for (i = 0; i < g->cfg.n_humans; i++)
         if (g->karts[i].total_progress > lead)
             lead = g->karts[i].total_progress;
-    return k->ai_skill *
+    return k->ai_skill * ai_strategies[k->strategy].power *
            game_clampf(1.0f + (lead - k->total_progress) * 0.0015f,
                        0.94f, 1.08f);
 }
-
-/* ------------------------------------------------------------------ */
-/* Vehicle dynamics                                                    */
-/* ------------------------------------------------------------------ */
 
 static void kart_step(Game *g, Kart *k, const Input *in, float dt,
                       float power_scale)
@@ -472,6 +746,12 @@ static void resolve_kart_collisions(Game *g)
                 b->x += nx * push; b->z += nz * push;
                 a->speed *= 0.995f;
                 b->speed *= 0.995f;
+                /* remember who rubs panels: AI leave more room to a
+                 * human who keeps leaning on them */
+                if (a->human >= 0 && b->human < 0)
+                    g->pmodel[a->human].contacts++;
+                else if (b->human >= 0 && a->human < 0)
+                    g->pmodel[b->human].contacts++;
             }
         }
     }
@@ -534,6 +814,9 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
 
     g->race_t += dt;
 
+    for (i = 0; i < NUM_KARTS; i++)
+        g->karts[i].prev_progress = g->karts[i].total_progress;
+
     for (i = 0; i < NUM_KARTS; i++) {
         Kart *k = &g->karts[i];
         Input in;
@@ -542,11 +825,28 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
         if (k->human >= 0 && !k->finished) {
             in = inputs[k->human];
         } else {
+            /* ease onto the tactical line rather than darting sideways,
+             * and give more room to a human who has been leaning on us */
+            float want = ai_tactical_line(g, k);
+            int h;
+            for (h = 0; h < g->cfg.n_humans; h++) {
+                if (g->pmodel[h].contacts > 6) {
+                    float shy = game_clampf(
+                        (float)g->pmodel[h].contacts * 0.02f, 0.0f, 0.5f);
+                    want *= (1.0f - shy * 0.4f);
+                    break;
+                }
+            }
+            k->line_target += (want - k->line_target) *
+                              game_clampf(dt * 1.8f, 0.0f, 1.0f);
             ai_control(g, k, &in);
-            if (k->human < 0)
-                scale = ai_power_scale(g, k);
+            scale = ai_power_scale(g, k);
+            k->nitro_timer = k->item_held ? k->nitro_timer + dt : 0.0f;
         }
         kart_step(g, k, &in, dt, scale);
+
+        if (k->human < 0)
+            ai_learn(g, k);
 
         if (!k->finished && k->lap >= RACE_LAPS) {
             k->finished = 1;
@@ -562,5 +862,6 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
     }
 
     resolve_kart_collisions(g);
+    ai_observe_humans(g, dt);
     update_ranks(g);
 }

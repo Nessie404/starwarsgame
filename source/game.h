@@ -28,6 +28,7 @@ extern "C" {
 #define TRACK_MAX_POINTS 320
 #define TRACK_MAX_PADS   8
 #define TRACK_MAX_ITEMS  6
+#define TRACK_MAX_CORNERS 48
 
 enum {
     TRACK_CLASSIC  = 0,   /* flat speedway with boost pads            */
@@ -56,6 +57,15 @@ typedef struct {
     int   item_seg[TRACK_MAX_ITEMS];/* item box rows                     */
     int   n_items;
     int   alpine;                   /* 1 = mountain theme (rock skirts)  */
+
+    /* Corners, found by walking the curvature profile. AI drivers learn
+     * per corner rather than per sample, so "that hairpin" is a thing
+     * they can remember between laps. */
+    int   corner_id[TRACK_MAX_POINTS];   /* corner index, -1 = straight  */
+    int   n_corners;
+    float corner_peak[TRACK_MAX_CORNERS];/* peak curvature, 1/m         */
+    int   corner_entry[TRACK_MAX_CORNERS];
+
     float min_x, max_x, min_z, max_z, min_y, max_y;
 } Track;
 
@@ -96,7 +106,7 @@ extern const KartSpec kart_specs[SPEC_COUNT];
 /* ------------------------------------------------------------------ */
 
 #define MAX_HUMANS 4
-#define NUM_KARTS  6
+#define NUM_KARTS  12
 #define RACE_LAPS  3
 
 typedef struct {
@@ -131,6 +141,62 @@ typedef struct {
 void  steer_axis_reset(SteerAxis *a);
 float steer_axis_update(SteerAxis *a, float target, float speed, float dt);
 
+/* ------------------------------------------------------------------ */
+/* AI drivers                                                         */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Every AI runs the same driving code but a different strategy sheet, so
+ * the field behaves like a grid of people rather than one robot copied
+ * eleven times: some brake late and scruff their tires, some flow wide
+ * and carry exit speed, some hound your bumper waiting for a mistake.
+ *
+ * Strategies also decide how a driver learns. conf_start is how much of
+ * the theoretical cornering limit it believes on lap one; a mistake
+ * knocks that belief down by learn_down and a clean corner nudges it up
+ * by learn_up, up to conf_max. A late-braker therefore starts over the
+ * limit, makes a mess of a hairpin, and is measurably tidier next lap,
+ * while a cruiser starts cautious and creeps up to a decent pace.
+ */
+enum {
+    AI_BALANCED = 0,   /* textbook lines, average everything            */
+    AI_LATE     = 1,   /* brakes far too late, then learns better       */
+    AI_INSIDE   = 2,   /* hugs the inside, tight and defensive          */
+    AI_DEFENDER = 3,   /* covers the line you like to pass on           */
+    AI_CHARGER  = 4,   /* dives for overtakes, spends nitro at once     */
+    AI_DRAFTER  = 5,   /* sits in your mirrors, saves nitro to pounce   */
+    AI_CRUISER  = 6,   /* cautious, smooth, wide lines                  */
+    AI_STRATEGY_COUNT  = 7
+};
+
+typedef struct {
+    const char *name;      /* 7-segment-safe                           */
+    float conf_start;      /* belief in the grip limit on lap one       */
+    float conf_max;        /* ceiling once it has learned               */
+    float learn_up;        /* gain per clean corner                     */
+    float learn_down;      /* loss per botched corner                   */
+    float line_bias;       /* preferred line, fraction of road half     */
+    float defend;          /* 0..1 tendency to cover a chasing human    */
+    float attack;          /* 0..1 tendency to dive for an overtake     */
+    float nitro_wait;      /* seconds it sits on nitro before using it  */
+    float power;           /* engine trim                              */
+} AIStrategy;
+
+extern const AIStrategy ai_strategies[AI_STRATEGY_COUNT];
+
+/*
+ * What an AI has worked out about a human. Passes teach it which side
+ * you like to come down (so defenders can cover it), your pace relative
+ * to the field decides how hard the whole grid dares to push, and
+ * contact teaches them to leave you more room.
+ */
+typedef struct {
+    float pass_side;   /* -1 = you pass on their right, +1 = their left */
+    float pace;        /* your progress rate vs the leading AI, ~1.0    */
+    int   passes;      /* completed overtakes on AI cars                */
+    int   contacts;    /* panel-rubbing incidents with AI cars          */
+} PlayerModel;
+
 typedef struct {
     /* pose */
     float x, z, y;
@@ -157,8 +223,19 @@ typedef struct {
     /* role / livery */
     int   human;          /* -1 = AI, else human player index          */
     int   paint_idx;      /* index into the platform layer's palette   */
-    float ai_line;
+    float ai_line;        /* base racing-line offset, meters           */
     float ai_skill;
+    float prev_progress;  /* last frame's progress, for pass detection */
+
+    /* AI strategy and what it has learned */
+    int   strategy;                          /* index into ai_strategies */
+    float corner_conf[TRACK_MAX_CORNERS];    /* learned per-corner nerve */
+    int   cur_corner;                        /* corner being taken, -1   */
+    int   corner_fault;                      /* botched the current one  */
+    int   learn_events;                      /* adaptations made so far  */
+    int   mistakes;                          /* corners actually botched */
+    float line_target;                       /* smoothed tactical line   */
+    float nitro_timer;                       /* how long nitro was held  */
 
     /* results */
     int   rank;
@@ -192,6 +269,7 @@ typedef struct {
     GameConfig cfg;
     Kart  karts[NUM_KARTS];       /* karts[0..n_humans-1] are human    */
     float item_respawn[TRACK_MAX_ITEMS][3];  /* per row, 3 boxes across */
+    PlayerModel pmodel[MAX_HUMANS];
     int   state;
     float countdown;
     float race_t;
@@ -205,6 +283,10 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt);
 /* helpers shared with rendering / tests */
 float game_angle_wrap(float a);
 float game_clampf(float v, float lo, float hi);
+
+/* AI helpers exposed for the HUD and the tests */
+const char *ai_strategy_name(int strategy);
+float       ai_corner_conf(const Kart *k, const Track *t, int seg);
 
 /* derived stats for menus: 0-100 km/h time (s) and top speed (km/h) */
 float spec_accel_time(const KartSpec *s);
