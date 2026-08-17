@@ -1,110 +1,134 @@
-# WiiKart
+# WiiKart 1.0
 
-An original Mario-Kart-style arcade racer built as **Nintendo Wii homebrew**.
-It compiles to a real Wii executable (`wiikart.dol`) that runs in the
-[Dolphin](https://dolphin-emu.org/) Wii emulator on your PC, and on real Wii
-hardware through the Homebrew Channel.
+An original racing game built as **Nintendo Wii homebrew**. It compiles to
+a real Wii executable (`wiikart.dol`) that runs in the
+[Dolphin](https://dolphin-emu.org/) Wii emulator on your PC, and on real
+Wii hardware through the Homebrew Channel.
 
-Race 3 laps around a circuit against 4 AI drivers, with Mario-Kart-style
-drifting, mini-turbos, boost pads, rubber-band AI, a chase camera, minimap
-and tilt steering with the Wii Remote held sideways.
+**Download:** grab `wiikart.zip` from the
+[latest release](https://github.com/Nessie404/starwarsgame/releases/latest),
+unzip, and open `wiikart.dol` in Dolphin.
+
+Version 1.0 is a semi-sim mountain racer: pick a car defined by
+real-world performance numbers, then race 3 laps against 5 AI drivers over
+three circuits — including two stylized Colorado passes with real grades,
+switchbacks and gravity.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
-> no Nintendo code or assets and does not require (or include) any game disc
-> or ROM. Emulating the actual *Mario Kart Wii* game requires a disc image
-> you have dumped from your own copy, which this project neither provides
-> nor needs.
+> no Nintendo code or assets and does not require (or include) any game
+> disc or ROM.
 
-## Running it in the Dolphin Wii emulator
+## Features
+
+- **Physically-based driving.** Acceleration comes from engine power
+  (F = P/v, traction-capped), top speed emerges from aerodynamic drag,
+  braking matches the car's quoted 100-0 km/h stopping distance, and
+  cornering is limited by lateral grip (v²/r ≤ μg) — push past it and the
+  car understeers wide, scrubbing speed. Gravity acts along the road
+  grade: climbs cost speed, descents give it back.
+- **Car selection with real spec sheets.** Four cars (RACER, SPORT,
+  RALLY, TOURER) defined by horsepower, curb weight, stopping distance,
+  lateral g, drag area, wheelbase and dirt grip — the menu shows the
+  derived 0-100 time and top speed, and the physics actually uses these
+  numbers.
+- **Three tracks.** CLASSIC (flat speedway with boost pads), plus
+  stylized versions of **Berthoud Pass** (US-40) and **Loveland Pass**
+  (US-6) in Colorado: 6-10% grades, stacked switchbacks, guardrails and
+  ~78 m of climb per lap.
+- **Split-screen multiplayer** for up to 4 players (horizontal split for
+  2, quadrants for 3-4).
+- **Items and boost:** nitro canisters in item boxes, boost pads on the
+  speedway, and a small handbrake-drift mini-turbo as the one arcade nod.
+- **Procedural audio:** engine note that follows revs, tire squeal at the
+  grip limit, countdown beeps — synthesized at runtime via ASND, no
+  sound assets.
+- Chase cameras with terrain avoidance, minimap, 7-segment HUD with
+  km/h speedo, rumble on every supported controller.
+
+## Running it in Dolphin
 
 1. Install Dolphin: <https://dolphin-emu.org/download/>
-2. Get `wiikart.dol` (see **Building** below, or grab the `wiikart`
-   artifact from the GitHub Actions **build** workflow of this repo).
-3. In Dolphin: **File → Open…** and pick `wiikart.dol`. Or from a terminal:
+2. Download `wiikart.zip` from the
+   [latest release](https://github.com/Nessie404/starwarsgame/releases/latest)
+   (or build it — see below), unzip.
+3. **File → Open…** → `wiikart.dol`. Or: `tools/run-dolphin.sh`
 
-   ```sh
-   tools/run-dolphin.sh            # finds dolphin-emu and boots the .dol
-   # equivalent to: dolphin-emu -b -e wiikart.dol
-   ```
+### Pick your controls (all natively supported)
 
-### Keyboard / Xbox (or any) controller in Dolphin
-
-The game natively supports several input devices, so pick whichever is
-easiest:
-
-- **Xbox / any gamepad:** in Dolphin open **Controllers → GameCube
-  Controller Port 1 → Standard Controller → Configure**, choose your pad
-  as the device (XInput for Xbox controllers) and map A/B/X, the R
-  trigger, Start and the main stick. The game reads the GameCube pad
-  directly — no Wii Remote emulation needed.
-- **Keyboard, option 1 (zero setup):** Dolphin **Config → Wii → Connect
-  USB Keyboard**. The game reads the Wii's USB keyboard: arrows to steer,
-  X or ↑ to accelerate, Z or ↓ to brake, Space/Shift to drift, R/Enter to
-  restart, Esc to quit.
-- **Keyboard, option 2:** map keys onto the emulated GameCube pad
-  (Controllers → Port 1) — Dolphin's default keyboard profile works.
-- **Wii Remote emulation** also still works (**Controllers → Emulated
-  Wii Remote**), including *Tilt* for motion steering.
+- **Xbox / any gamepad:** Dolphin → **Controllers → GameCube Controller
+  Port 1 → Standard Controller → Configure**, select your pad (XInput
+  for Xbox) and map the stick, A/B/X/Y, R/L triggers and Start.
+- **Keyboard:** Dolphin → **Config → Wii → Connect USB Keyboard**. Then:
+  arrows steer, X/↑ gas, Z/↓ brake, Space/Shift handbrake, C item,
+  R back to menu, Esc quit.
+- **Wii Remote (emulated or real):** sideways grip, tilt to steer —
+  Nunchuk and Classic Controller also work.
 
 ## Running on a real Wii
 
-1. Build the Homebrew Channel layout: `make dist`
-2. Copy `dist/apps` onto an SD card so you end up with
-   `SD:/apps/wiikart/boot.dol` (plus `meta.xml` and `icon.png`).
-3. Launch **WiiKart** from the Homebrew Channel.
+Copy the `apps` folder from `wiikart.zip` onto an SD card (so you have
+`SD:/apps/wiikart/boot.dol`) and launch WiiKart from the Homebrew Channel.
 
 ## Controls
 
-All devices work simultaneously — use whatever is plugged in.
+Menus: **left/right** change, **A/2/Enter** confirm, **B/1** back.
 
-| Action      | Wii Remote (sideways) | + Nunchuk        | Classic Controller | GameCube pad (Xbox pad in Dolphin) | USB keyboard |
-|-------------|------------------------|------------------|--------------------|-------------------------------------|--------------|
-| Steer       | Tilt or D-pad          | Stick            | Left stick / D-pad | Main stick                          | ← / →        |
-| Accelerate  | 2 or A                 | A                | a or x             | A or X                              | X or ↑       |
-| Brake       | 1                      | B                | b or y             | B                                   | Z or ↓       |
-| Drift       | Hold B                 | C or Z           | L / R / ZL / ZR    | L or R trigger                      | Space or Shift |
-| Restart     | +                      | +                | +                  | Start                               | R or Enter   |
-| Quit        | HOME                   | HOME             | HOME               | Z + Start                           | Esc          |
+| Action      | Wii Remote (sideways) | + Nunchuk    | Classic     | GameCube pad (Xbox in Dolphin) | USB keyboard |
+|-------------|------------------------|--------------|-------------|--------------------------------|--------------|
+| Steer       | Tilt or D-pad          | Stick        | Left stick  | Main stick                     | ← / →        |
+| Accelerate  | 2 or A                 | A            | a or x      | A or X                         | X or ↑       |
+| Brake / reverse | 1                  | B            | b or y      | B                              | Z or ↓       |
+| Handbrake / drift | Hold B           | C or Z       | L/R/ZL/ZR   | L or R trigger                 | Space/Shift  |
+| Use item    | −                      | −            | −           | Y                              | C            |
+| Back to menu | +                     | +            | +           | Start                          | R            |
+| Quit        | HOME                   | HOME         | HOME        | Z + Start                      | Esc          |
 
-Drifting: hold the drift button while turning, release for a mini-turbo
-(charge longer for a bigger one).
+Driving notes: brake before hairpins — the grip circle is real. The
+handbrake rotates the car but scrubs speed; hold it through a bend and
+release for a small mini-turbo. RALLY keeps 72% of its grip on dirt,
+TOURER only 35%.
 
-Orange pads on the road give a speed boost. Grass is slow — unless you're
-boosting. Drift sparks go blue → yellow → orange as your mini-turbo charges.
+## The cars
+
+| Car    | Power | Curb  | 100-0 | Lateral | Dirt grip |
+|--------|-------|-------|-------|---------|-----------|
+| RACER  | 48 hp | 260 kg | 30 m | 1.30 g  | 30% |
+| SPORT  | 150 hp | 950 kg | 37 m | 0.95 g  | 45% |
+| RALLY  | 220 hp | 1180 kg | 40 m | 0.88 g  | 72% |
+| TOURER | 310 hp | 1350 kg | 34 m | 1.02 g  | 35% |
+
+0-100 times and top speeds shown in the menu are derived from these
+numbers by the same equations the physics uses.
 
 ## Building
 
 You need devkitPro's **devkitPPC** toolchain (`wii-dev` package group).
-No other dependencies — no assets, no external libraries beyond libogc.
 
 ```sh
-# with devkitPPC installed locally
 export DEVKITPPC=/opt/devkitpro/devkitPPC
-make            # produces wiikart.dol + wiikart.elf
-make dist       # assembles dist/apps/wiikart for SD cards
+make            # wiikart.dol + wiikart.elf
+make dist       # dist/apps/wiikart for SD cards
 
-# or without installing anything, via the official container
+# or via the official container
 docker run --rm -v "$PWD:/src" -w /src devkitpro/devkitppc:latest make
 ```
 
-Every push also builds `wiikart.dol` on GitHub Actions
-(`.github/workflows/build.yml`) and uploads it as the `wiikart` artifact,
-so you can download a ready-to-run binary from the Actions tab.
+Every push builds on GitHub Actions and publishes a release with
+`wiikart.zip`; tags (e.g. `v1.0.0`) publish named version releases.
 
 ## Project layout
 
 ```
-source/game.h     shared types and the simulation API
-source/track.c    circuit geometry (Catmull-Rom spline), locate/progress
-source/game.c     kart physics, drifting, boost, AI, laps, ranking
-source/main.c     Wii platform layer: GX 3D renderer, HUD, Wiimote input
-tests/            host-side tests for the simulation (plain gcc, no Wii SDK)
-hbc/              Homebrew Channel metadata (meta.xml, icon.png)
+source/game.h     shared types, kart spec sheets, simulation API
+source/track.c    3D circuit geometry (Catmull-Rom, elevation, curvature)
+source/game.c     vehicle dynamics, AI (braking points + recovery), items
+source/main.c     Wii layer: GX renderer, menus, split screen, audio, input
+tests/            host-side physics/AI tests (plain gcc, no Wii SDK)
+hbc/              Homebrew Channel metadata
 tools/            run-dolphin.sh launcher
 ```
 
-The simulation (`game.c`, `track.c`) is deliberately platform-independent
-C99, so it is unit-tested on the host with a normal compiler:
+The simulation is platform-independent C99, tested on the host:
 
 ```sh
 gcc -std=c99 -O2 -Wall -Werror -Isource \
@@ -112,11 +136,15 @@ gcc -std=c99 -O2 -Wall -Werror -Isource \
 ./wiikart-test
 ```
 
-The tests simulate whole AI races headlessly and check track geometry, lap
-counting, ranking, drift boosts and physics stability.
+Tests verify the physics against the spec sheets (measured stopping
+distance vs quoted, grip-capped yaw rate, gravity on grades), track
+geometry for all circuits, item pickup, and that the AI completes laps
+on every track — including recovering from a botched hairpin by backing
+out, since a real car can't rotate in place.
 
 ## Ideas for later
 
-- Engine/skid audio via ASND
-- More circuits and a track selector
-- Items, and split-screen multiplayer for up to 4 Wii Remotes
+- Ghost laps and lap-time records
+- Weather (rain lowers μ; snow on the passes)
+- More passes (Independence, Pikes Peak hill climb)
+- Online time-trial leaderboards

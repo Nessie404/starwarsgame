@@ -72,8 +72,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "build-${{ github.run_number }}" wiikart.zip \
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            TITLE="WiiKart ${GITHUB_REF_NAME}"
+          else
+            TAG="build-${{ github.run_number }}"
+            TITLE="WiiKart build ${{ github.run_number }}"
+          fi
+          gh release create "$TAG" wiikart.zip \
             --target "${{ github.sha }}" \
-            --title "WiiKart build ${{ github.run_number }}" \
-            --notes "Automated build. Download wiikart.zip, unzip, and open wiikart.dol in Dolphin." \
+            --title "$TITLE" \
+            --notes "Download wiikart.zip, unzip, and open wiikart.dol in the Dolphin emulator (or copy the apps folder to an SD card for a real Wii). See the README for controls." \
             --latest

@@ -2,8 +2,10 @@
  * WiiKart — Wii platform layer.
  *
  * Everything libogc-specific lives here: video / GX setup, flat-shaded
- * 3D rendering of the track and karts, the 2D HUD (7-segment glyphs,
- * minimap) and Wiimote input (held sideways, Mario-Kart-Wii-style).
+ * 3D rendering (elevation, mountainside skirts, guardrails, item
+ * boxes), menus, up-to-4-player split screen, procedural ASND audio
+ * (engine, tire squeal, beeps) and input from Wiimote (tilt / D-pad /
+ * Nunchuk / Classic Controller), GameCube pads and USB keyboards.
  *
  * Runs on real hardware via the Homebrew Channel and in the Dolphin
  * emulator (File > Open > wiikart.dol).
@@ -16,6 +18,7 @@
 #include <gccore.h>
 #include <wiiuse/wpad.h>
 #include <wiikeyboard/keyboard.h>   /* pulls in wsksymdef.h keysyms */
+#include <asndlib.h>
 
 #include "game.h"
 
@@ -30,41 +33,349 @@ static u32 fb = 0;
 
 static Game game;
 static u32 frame_no = 0;
-static float rumble_t = 0.0f;
 
-/* camera state (smoothed) */
-static float cam_x, cam_y, cam_z;
+/* app flow */
+enum { APP_MENU = 0, APP_RACE = 1 };
+static int app_state = APP_MENU;
+static int menu_screen = 0;          /* 0 players, 1 track, 2.. karts */
+static int sel_players = 1;
+static int sel_track = 0;
+static int sel_spec[MAX_HUMANS] = { 1, 1, 1, 1 };
+static Track menu_track;
+static int menu_track_loaded = -1;
+
+/* per-player camera + rumble */
+static float cam_x[MAX_HUMANS], cam_y[MAX_HUMANS], cam_z[MAX_HUMANS];
+static float rumble_t[MAX_HUMANS];
 
 static const u8 kart_colors[NUM_KARTS][3] = {
-    { 230,  40,  40 },   /* player: red   */
-    {  50,  90, 230 },   /* blue          */
-    {  40, 170,  70 },   /* green         */
-    { 240, 200,  40 },   /* yellow        */
-    { 160,  70, 220 },   /* purple        */
+    { 230,  40,  40 },   /* P1 red    */
+    {  50,  90, 230 },   /* P2 blue   */
+    {  40, 170,  70 },   /* P3 green  */
+    { 240, 200,  40 },   /* P4 yellow */
+    { 160,  70, 220 },   /* AI purple */
+    { 235, 130,  40 },   /* AI orange */
 };
 
-/* directional light for fake flat shading */
 static const float LX = 0.45f, LY = 0.85f, LZ = 0.28f;
 
 /* ------------------------------------------------------------------ */
-/* Scenery placed at init (kept off the road)                          */
+/* Input state (polled once per frame, consumed per player)            */
 /* ------------------------------------------------------------------ */
 
-#define MAX_TREES 24
-static float tree_x[MAX_TREES], tree_z[MAX_TREES];
+static u32 wheld[MAX_HUMANS], wdown[MAX_HUMANS];
+static u32 gheld[MAX_HUMANS], gdown[MAX_HUMANS];
+static int keyboard_ok = 0;
+static u8 key_left, key_right, key_accel, key_brake, key_drift, key_item;
+static u8 key_confirm_edge, key_back_edge, key_menu_edge;
+
+static void poll_keyboard(void)
+{
+    keyboard_event ev;
+
+    if (!keyboard_ok)
+        return;
+    while (KEYBOARD_GetEvent(&ev)) {
+        u8 held;
+        if (ev.type == KEYBOARD_DISCONNECTED) {
+            key_left = key_right = key_accel = key_brake = 0;
+            key_drift = key_item = 0;
+            continue;
+        }
+        if (ev.type != KEYBOARD_PRESSED && ev.type != KEYBOARD_RELEASED)
+            continue;
+        held = (ev.type == KEYBOARD_PRESSED);
+        switch (ev.symbol) {
+        case KS_Left:                       key_left = held;  break;
+        case KS_Right:                      key_right = held; break;
+        case KS_Up: case KS_x: case KS_X:
+            key_accel = held;
+            if (held)
+                key_confirm_edge = 1;
+            break;
+        case KS_Down: case KS_z: case KS_Z:
+            key_brake = held;
+            if (held)
+                key_back_edge = 1;
+            break;
+        case KS_space:
+        case KS_Shift_L: case KS_Shift_R:   key_drift = held; break;
+        case KS_c: case KS_C:               key_item = held;  break;
+        case KS_Return:
+            if (held) key_confirm_edge = 1;
+            break;
+        case KS_r: case KS_R:
+            if (held) key_menu_edge = 1;
+            break;
+        case KS_Escape:
+            if (held) exit(0);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+static void poll_all_inputs(void)
+{
+    int p;
+
+    WPAD_ScanPads();
+    PAD_ScanPads();
+    key_confirm_edge = key_back_edge = key_menu_edge = 0;
+    poll_keyboard();
+
+    for (p = 0; p < MAX_HUMANS; p++) {
+        wheld[p] = WPAD_ButtonsHeld(p);
+        wdown[p] = WPAD_ButtonsDown(p);
+        gheld[p] = PAD_ButtonsHeld(p);
+        gdown[p] = PAD_ButtonsDown(p);
+    }
+
+    if ((wdown[0] & (WPAD_BUTTON_HOME | WPAD_CLASSIC_BUTTON_HOME)) ||
+        ((gheld[0] & PAD_TRIGGER_Z) && (gdown[0] & PAD_BUTTON_START)))
+        exit(0);
+}
+
+/* signed x deflection (-1..1, right positive) of a wiiuse joystick */
+static float stick_x(const joystick_t *js)
+{
+    if (js->mag < 0.2f)
+        return 0.0f;
+    return game_clampf(js->mag, 0.0f, 1.0f) *
+           sinf(js->ang * ((float)M_PI / 180.0f));
+}
+
+static void read_player_input(int p, Input *in)
+{
+    const WPADData *wd;
+    float steer = 0.0f;
+    int tilt_ok = 1;
+
+    memset(in, 0, sizeof(*in));
+
+    /* Wiimote (sideways grip) */
+    in->accel = (wheld[p] & (WPAD_BUTTON_2 | WPAD_BUTTON_A)) != 0;
+    in->brake = (wheld[p] & WPAD_BUTTON_1) != 0;
+    in->hop   = (wheld[p] & WPAD_BUTTON_B) != 0;
+    in->item  = (wheld[p] & (WPAD_BUTTON_MINUS |
+                             WPAD_CLASSIC_BUTTON_MINUS)) != 0;
+    if (wheld[p] & (WPAD_BUTTON_UP | WPAD_BUTTON_LEFT))
+        steer += 1.0f;
+    if (wheld[p] & (WPAD_BUTTON_DOWN | WPAD_BUTTON_RIGHT))
+        steer -= 1.0f;
+
+    /* Wiimote expansions */
+    wd = WPAD_Data(p);
+    if (wd) {
+        if (wd->exp.type == WPAD_EXP_NUNCHUK) {
+            steer -= stick_x(&wd->exp.nunchuk.js);
+            if (wheld[p] & (WPAD_NUNCHUK_BUTTON_C | WPAD_NUNCHUK_BUTTON_Z))
+                in->hop = 1;
+            in->brake |= (wheld[p] & WPAD_BUTTON_B) != 0;
+            tilt_ok = 0;
+        } else if (wd->exp.type == WPAD_EXP_CLASSIC) {
+            steer -= stick_x(&wd->exp.classic.ljs);
+            if (wheld[p] & WPAD_CLASSIC_BUTTON_LEFT)  steer += 1.0f;
+            if (wheld[p] & WPAD_CLASSIC_BUTTON_RIGHT) steer -= 1.0f;
+            in->accel |= (wheld[p] & (WPAD_CLASSIC_BUTTON_A |
+                                      WPAD_CLASSIC_BUTTON_X)) != 0;
+            in->brake |= (wheld[p] & (WPAD_CLASSIC_BUTTON_B |
+                                      WPAD_CLASSIC_BUTTON_Y)) != 0;
+            in->hop   |= (wheld[p] & (WPAD_CLASSIC_BUTTON_FULL_R |
+                                      WPAD_CLASSIC_BUTTON_FULL_L |
+                                      WPAD_CLASSIC_BUTTON_ZR |
+                                      WPAD_CLASSIC_BUTTON_ZL)) != 0;
+            tilt_ok = 0;
+        }
+        if (tilt_ok) {
+            float tilt = TILT_SIGN * -wd->orient.pitch;
+            if (fabsf(tilt) > 7.0f)
+                steer += game_clampf(tilt / 45.0f, -1.0f, 1.0f);
+        }
+    }
+
+    /* GameCube controller (= Xbox pads in Dolphin) */
+    {
+        s8 sx = PAD_StickX(p);
+        if (sx > 18 || sx < -18)
+            steer -= game_clampf((float)sx / 90.0f, -1.0f, 1.0f);
+        in->accel |= (gheld[p] & (PAD_BUTTON_A | PAD_BUTTON_X)) != 0;
+        in->brake |= (gheld[p] & PAD_BUTTON_B) != 0;
+        in->hop   |= (gheld[p] & (PAD_TRIGGER_R | PAD_TRIGGER_L)) != 0;
+        in->item  |= (gheld[p] & PAD_BUTTON_Y) != 0;
+    }
+
+    /* USB keyboard (player 1 only) */
+    if (p == 0) {
+        if (key_left)  steer += 1.0f;
+        if (key_right) steer -= 1.0f;
+        in->accel |= key_accel;
+        in->brake |= key_brake;
+        in->hop   |= key_drift;
+        in->item  |= key_item;
+    }
+
+    in->steer = game_clampf(steer, -1.0f, 1.0f);
+}
+
+/* menu edges, driven by player 1's devices */
+static int menu_confirm(void)
+{
+    return (wdown[0] & (WPAD_BUTTON_2 | WPAD_BUTTON_A |
+                        WPAD_CLASSIC_BUTTON_A)) ||
+           (gdown[0] & (PAD_BUTTON_A | PAD_BUTTON_START)) ||
+           key_confirm_edge;
+}
+
+static int menu_back(void)
+{
+    return (wdown[0] & (WPAD_BUTTON_1 | WPAD_BUTTON_B |
+                        WPAD_CLASSIC_BUTTON_B)) ||
+           (gdown[0] & PAD_BUTTON_B) ||
+           key_back_edge;
+}
+
+static int menu_delta(void)
+{
+    int d = 0;
+    if (wdown[0] & (WPAD_BUTTON_UP | WPAD_BUTTON_LEFT |
+                    WPAD_CLASSIC_BUTTON_LEFT))
+        d -= 1;
+    if (wdown[0] & (WPAD_BUTTON_DOWN | WPAD_BUTTON_RIGHT |
+                    WPAD_CLASSIC_BUTTON_RIGHT))
+        d += 1;
+    if (gdown[0] & PAD_BUTTON_LEFT)  d -= 1;
+    if (gdown[0] & PAD_BUTTON_RIGHT) d += 1;
+    if (key_left && (frame_no % 12) == 0)  d -= 1;
+    if (key_right && (frame_no % 12) == 0) d += 1;
+    return d;
+}
+
+static int race_to_menu_pressed(void)
+{
+    int p;
+    for (p = 0; p < MAX_HUMANS; p++) {
+        if (wdown[p] & (WPAD_BUTTON_PLUS | WPAD_CLASSIC_BUTTON_PLUS))
+            return 1;
+        if (!(gheld[p] & PAD_TRIGGER_Z) && (gdown[p] & PAD_BUTTON_START))
+            return 1;
+    }
+    return key_menu_edge;
+}
+
+/* ------------------------------------------------------------------ */
+/* Audio: tiny procedural synth over ASND                              */
+/* ------------------------------------------------------------------ */
+
+#define ENGINE_CYCLE 256
+#define NOISE_LEN    4096
+#define BEEP_LEN     8192
+
+static s16 *engine_buf, *noise_buf, *beep_buf;
+static int audio_ok = 0;
+
+static void audio_init(void)
+{
+    int i;
+
+    ASND_Init();
+    ASND_Pause(0);
+
+    engine_buf = (s16 *)memalign(32, ENGINE_CYCLE * sizeof(s16));
+    noise_buf  = (s16 *)memalign(32, NOISE_LEN * sizeof(s16));
+    beep_buf   = (s16 *)memalign(32, BEEP_LEN * sizeof(s16));
+    if (!engine_buf || !noise_buf || !beep_buf)
+        return;
+
+    /* engine: one cycle of a buzzy square + sub harmonic */
+    for (i = 0; i < ENGINE_CYCLE; i++) {
+        float ph = (float)i / ENGINE_CYCLE;
+        float v = (ph < 0.5f ? 1.0f : -1.0f) * 0.55f +
+                  sinf(ph * 2.0f * (float)M_PI) * 0.30f +
+                  sinf(ph * 4.0f * (float)M_PI) * 0.15f;
+        engine_buf[i] = (s16)(v * 9000.0f);
+    }
+    /* white-ish noise for tire squeal / whoosh */
+    {
+        unsigned seed = 22222u;
+        for (i = 0; i < NOISE_LEN; i++) {
+            seed = seed * 1664525u + 1013904223u;
+            noise_buf[i] = (s16)((int)(seed >> 16) - 32768) / 3;
+        }
+    }
+    DCFlushRange(engine_buf, ENGINE_CYCLE * sizeof(s16));
+    DCFlushRange(noise_buf, NOISE_LEN * sizeof(s16));
+
+    ASND_SetInfiniteVoice(0, VOICE_MONO_16BIT, 12000, 0,
+                          engine_buf, ENGINE_CYCLE * sizeof(s16), 0, 0);
+    ASND_SetInfiniteVoice(1, VOICE_MONO_16BIT, 32000, 0,
+                          noise_buf, NOISE_LEN * sizeof(s16), 0, 0);
+    audio_ok = 1;
+}
+
+static void audio_beep(float freq, int ms, int vol)
+{
+    int n = 48 * ms;
+    int i;
+    if (!audio_ok) return;
+    if (n > BEEP_LEN) n = BEEP_LEN;
+    for (i = 0; i < n; i++) {
+        float env = 1.0f - (float)i / (float)n;
+        beep_buf[i] = (s16)(sinf(2.0f * (float)M_PI * freq * i / 48000.0f) *
+                            10000.0f * env);
+    }
+    DCFlushRange(beep_buf, n * sizeof(s16));
+    ASND_SetVoice(2, VOICE_MONO_16BIT, 48000, 0, beep_buf,
+                  n * (s32)sizeof(s16), vol, vol, NULL);
+}
+
+static void audio_update(void)
+{
+    const Kart *k = &game.karts[0];
+    float v;
+    int pitch, vol;
+
+    if (!audio_ok) return;
+
+    if (app_state != APP_RACE) {
+        ASND_ChangeVolumeVoice(0, 0, 0);
+        ASND_ChangeVolumeVoice(1, 0, 0);
+        return;
+    }
+
+    /* engine follows P1's speed; revs rise and fall with velocity */
+    v = fabsf(k->speed);
+    pitch = (int)(ENGINE_CYCLE * (34.0f + v * 4.4f));      /* Hz * cycle */
+    if (k->boost_t > 0.0f) pitch = (int)(pitch * 1.15f);
+    if (pitch > 140000) pitch = 140000;
+    vol = 70 + (int)(v * 2.2f);
+    if (vol > 170) vol = 170;
+    ASND_ChangePitchVoice(0, pitch);
+    ASND_ChangeVolumeVoice(0, vol, vol);
+
+    /* tire squeal from slip */
+    vol = (int)(k->slip * 170.0f);
+    if (vol < 12) vol = 0;
+    ASND_ChangeVolumeVoice(1, vol, vol);
+}
+
+/* ------------------------------------------------------------------ */
+/* Scenery                                                             */
+/* ------------------------------------------------------------------ */
+
+#define MAX_TREES 28
+static float tree_x[MAX_TREES], tree_z[MAX_TREES], tree_y[MAX_TREES];
 static int n_trees = 0;
 
-static void place_scenery(void)
+static void place_scenery(const Track *t)
 {
-    /* deterministic pseudo-random candidates over the track's bounds,
-     * keeping only spots well away from the road */
-    const Track *t = &game.track;
     int i;
-    unsigned seed = 12345u;
+    unsigned seed = 12345u + (unsigned)t->id * 777u;
 
     n_trees = 0;
-    for (i = 0; i < 200 && n_trees < MAX_TREES; i++) {
-        float fx, fz, lat, frac;
+    for (i = 0; i < 240 && n_trees < MAX_TREES; i++) {
+        float fx, fz, lat, frac, y;
         int seg;
         seed = seed * 1664525u + 1013904223u;
         fx = t->min_x - 30.0f +
@@ -72,17 +383,21 @@ static void place_scenery(void)
         seed = seed * 1664525u + 1013904223u;
         fz = t->min_z - 30.0f +
              (t->max_z - t->min_z + 60.0f) * ((seed >> 8) & 0xffff) / 65535.0f;
-        track_locate(t, fx, fz, -1, &seg, &frac, &lat);
-        if (fabsf(lat) > t->wall_half + 5.0f) {
+        track_locate(t, fx, fz, -1, &seg, &frac, &lat, &y);
+        if (fabsf(lat) > t->wall_half + 4.0f &&
+            fabsf(lat) < t->wall_half + 26.0f) {
             tree_x[n_trees] = fx;
             tree_z[n_trees] = fz;
+            tree_y[n_trees] = y - 0.12f * (fabsf(lat) - t->wall_half);
+            if (tree_y[n_trees] < t->min_y - 2.0f)
+                tree_y[n_trees] = t->min_y - 2.0f;
             n_trees++;
         }
     }
 }
 
 /* ------------------------------------------------------------------ */
-/* Low-level draw helpers (world space, view matrix already loaded)    */
+/* Low-level draw helpers                                              */
 /* ------------------------------------------------------------------ */
 
 static void quad(float ax, float ay, float az,
@@ -107,60 +422,55 @@ static u8 shade(u8 c, float f)
     return (u8)v;
 }
 
-/* Axis-aligned-in-local-space box, rotated by yaw around Y, with fake
- * directional shading per face. hfw/hh/hlat are half-extents along the
- * forward / up / lateral axes. */
-static void draw_box(float cx, float cy, float cz, float yaw,
+/* box rotated by yaw (about Y) then pitched (nose up positive) */
+static void draw_box(float cx, float cy, float cz, float yaw, float pitch,
                      float hfw, float hh, float hlat,
                      u8 r, u8 g, u8 b)
 {
-    float fx = cosf(yaw), fz = sinf(yaw);   /* forward  */
-    float lx = -fz,       lz = fx;          /* lateral (left) */
+    float cf = cosf(yaw), sf = sinf(yaw);
+    float cp = cosf(pitch), sp = sinf(pitch);
+    float fx = cf * cp, fy = sp, fz = sf * cp;      /* forward */
+    float lx = -sf,     ly = 0.0f, lz = cf;          /* lateral (left) */
+    float ux = -sp * cf, uy = cp, uz = -sp * sf;     /* up */
     float corner[8][3];
     int i;
 
     for (i = 0; i < 8; i++) {
-        float sf = (i & 1) ? 1.0f : -1.0f;   /* forward sign  */
-        float sl = (i & 2) ? 1.0f : -1.0f;   /* lateral sign  */
-        float su = (i & 4) ? 1.0f : -1.0f;   /* up sign       */
-        corner[i][0] = cx + fx * hfw * sf + lx * hlat * sl;
-        corner[i][1] = cy + hh * su;
-        corner[i][2] = cz + fz * hfw * sf + lz * hlat * sl;
+        float s_f = (i & 1) ? 1.0f : -1.0f;
+        float s_l = (i & 2) ? 1.0f : -1.0f;
+        float s_u = (i & 4) ? 1.0f : -1.0f;
+        corner[i][0] = cx + fx * hfw * s_f + lx * hlat * s_l + ux * hh * s_u;
+        corner[i][1] = cy + fy * hfw * s_f + ly * hlat * s_l + uy * hh * s_u;
+        corner[i][2] = cz + fz * hfw * s_f + lz * hlat * s_l + uz * hh * s_u;
     }
 
     {
-        /* face shading from the light direction */
-        float s_top   = 0.55f + 0.45f * LY;
-        float s_front = 0.55f + 0.45f * fmaxf(0.0f,  fx * LX + fz * LZ);
-        float s_back  = 0.55f + 0.45f * fmaxf(0.0f, -fx * LX - fz * LZ);
+        float s_top   = 0.55f + 0.45f * fmaxf(0.0f, ux * LX + uy * LY + uz * LZ);
+        float s_front = 0.55f + 0.45f * fmaxf(0.0f,  fx * LX + fy * LY + fz * LZ);
+        float s_back  = 0.55f + 0.45f * fmaxf(0.0f, -fx * LX - fy * LY - fz * LZ);
         float s_left  = 0.55f + 0.45f * fmaxf(0.0f,  lx * LX + lz * LZ);
         float s_right = 0.55f + 0.45f * fmaxf(0.0f, -lx * LX - lz * LZ);
 
-        /* top: corners with su=+1 -> indices 4,5,7,6 */
         quad(corner[4][0], corner[4][1], corner[4][2],
              corner[5][0], corner[5][1], corner[5][2],
              corner[7][0], corner[7][1], corner[7][2],
              corner[6][0], corner[6][1], corner[6][2],
              shade(r, s_top), shade(g, s_top), shade(b, s_top), 255);
-        /* front (+fwd): indices 1,3,7,5 */
         quad(corner[1][0], corner[1][1], corner[1][2],
              corner[3][0], corner[3][1], corner[3][2],
              corner[7][0], corner[7][1], corner[7][2],
              corner[5][0], corner[5][1], corner[5][2],
              shade(r, s_front), shade(g, s_front), shade(b, s_front), 255);
-        /* back (-fwd): 0,4,6,2 */
         quad(corner[0][0], corner[0][1], corner[0][2],
              corner[4][0], corner[4][1], corner[4][2],
              corner[6][0], corner[6][1], corner[6][2],
              corner[2][0], corner[2][1], corner[2][2],
              shade(r, s_back), shade(g, s_back), shade(b, s_back), 255);
-        /* left (+lat): 2,6,7,3 */
         quad(corner[2][0], corner[2][1], corner[2][2],
              corner[6][0], corner[6][1], corner[6][2],
              corner[7][0], corner[7][1], corner[7][2],
              corner[3][0], corner[3][1], corner[3][2],
              shade(r, s_left), shade(g, s_left), shade(b, s_left), 255);
-        /* right (-lat): 0,1,5,4 */
         quad(corner[0][0], corner[0][1], corner[0][2],
              corner[1][0], corner[1][1], corner[1][2],
              corner[5][0], corner[5][1], corner[5][2],
@@ -193,28 +503,31 @@ static void draw_cone(float cx, float cy_base, float cz,
 /* 3D scene                                                            */
 /* ------------------------------------------------------------------ */
 
-static void draw_track(void)
+static void draw_track(const Track *t)
 {
-    const Track *t = &game.track;
     const float RW = t->road_half;
-    const float ROAD_Y = 0.05f;
     int i;
 
-    /* grass */
-    quad(t->min_x - 80.0f, 0.0f, t->min_z - 80.0f,
-         t->max_x + 80.0f, 0.0f, t->min_z - 80.0f,
-         t->max_x + 80.0f, 0.0f, t->max_z + 80.0f,
-         t->min_x - 80.0f, 0.0f, t->max_z + 80.0f,
-         58, 142, 60, 255);
+    /* valley floor */
+    {
+        u8 r = t->alpine ? 84 : 58, g = t->alpine ? 120 : 142,
+           b = t->alpine ? 70 : 60;
+        float gy = t->min_y - (t->alpine ? 8.0f : 0.02f);
+        quad(t->min_x - 120.0f, gy, t->min_z - 120.0f,
+             t->max_x + 120.0f, gy, t->min_z - 120.0f,
+             t->max_x + 120.0f, gy, t->max_z + 120.0f,
+             t->min_x - 120.0f, gy, t->max_z + 120.0f,
+             r, g, b, 255);
+    }
 
     for (i = 0; i < t->n; i++) {
         int in = (i + 1) % t->n;
         float l0x = -t->dz[i],  l0z = t->dx[i];
         float l1x = -t->dz[in], l1z = t->dx[in];
+        float y0 = t->py[i] + 0.06f, y1 = t->py[in] + 0.06f;
         u8 r, g, b;
 
         if (track_is_pad_seg(t, i)) {
-            /* boost pad: pulsing orange */
             float pulse = 0.85f + 0.15f * sinf((float)frame_no * 0.2f);
             r = shade(245, pulse); g = shade(150, pulse); b = 30;
         } else if (i & 1) {
@@ -224,49 +537,97 @@ static void draw_track(void)
         }
 
         /* road surface */
-        quad(t->px[i]  + l0x * RW, ROAD_Y, t->pz[i]  + l0z * RW,
-             t->px[in] + l1x * RW, ROAD_Y, t->pz[in] + l1z * RW,
-             t->px[in] - l1x * RW, ROAD_Y, t->pz[in] - l1z * RW,
-             t->px[i]  - l0x * RW, ROAD_Y, t->pz[i]  - l0z * RW,
+        quad(t->px[i]  + l0x * RW, y0, t->pz[i]  + l0z * RW,
+             t->px[in] + l1x * RW, y1, t->pz[in] + l1z * RW,
+             t->px[in] - l1x * RW, y1, t->pz[in] - l1z * RW,
+             t->px[i]  - l0x * RW, y0, t->pz[i]  - l0z * RW,
              r, g, b, 255);
 
-        /* curbs */
+        /* curbs / shoulder stripe */
         if (i & 1) { r = 210; g = 40; b = 40; }
         else       { r = 235; g = 235; b = 235; }
-        quad(t->px[i]  + l0x * (RW + 0.9f), ROAD_Y, t->pz[i]  + l0z * (RW + 0.9f),
-             t->px[in] + l1x * (RW + 0.9f), ROAD_Y, t->pz[in] + l1z * (RW + 0.9f),
-             t->px[in] + l1x * RW,          ROAD_Y, t->pz[in] + l1z * RW,
-             t->px[i]  + l0x * RW,          ROAD_Y, t->pz[i]  + l0z * RW,
+        quad(t->px[i]  + l0x * (RW + 0.9f), y0, t->pz[i]  + l0z * (RW + 0.9f),
+             t->px[in] + l1x * (RW + 0.9f), y1, t->pz[in] + l1z * (RW + 0.9f),
+             t->px[in] + l1x * RW,          y1, t->pz[in] + l1z * RW,
+             t->px[i]  + l0x * RW,          y0, t->pz[i]  + l0z * RW,
              r, g, b, 255);
-        quad(t->px[i]  - l0x * RW,          ROAD_Y, t->pz[i]  - l0z * RW,
-             t->px[in] - l1x * RW,          ROAD_Y, t->pz[in] - l1z * RW,
-             t->px[in] - l1x * (RW + 0.9f), ROAD_Y, t->pz[in] - l1z * (RW + 0.9f),
-             t->px[i]  - l0x * (RW + 0.9f), ROAD_Y, t->pz[i]  - l0z * (RW + 0.9f),
+        quad(t->px[i]  - l0x * RW,          y0, t->pz[i]  - l0z * RW,
+             t->px[in] - l1x * RW,          y1, t->pz[in] - l1z * RW,
+             t->px[in] - l1x * (RW + 0.9f), y1, t->pz[in] - l1z * (RW + 0.9f),
+             t->px[i]  - l0x * (RW + 0.9f), y0, t->pz[i]  - l0z * (RW + 0.9f),
              r, g, b, 255);
+
+        if (t->alpine) {
+            /* mountainside skirts falling away from the shoulder */
+            float e0 = RW + 0.9f, e1 = RW + 12.0f, e2 = RW + 34.0f;
+            float d1 = 7.0f, d2 = 22.0f;
+            int side;
+            for (side = -1; side <= 1; side += 2) {
+                float s = (float)side;
+                u8 rr = 122, gg = 108, bb = 92;   /* rock */
+                quad(t->px[i]  + l0x * e0 * s, y0 - 0.02f,
+                     t->pz[i]  + l0z * e0 * s,
+                     t->px[in] + l1x * e0 * s, y1 - 0.02f,
+                     t->pz[in] + l1z * e0 * s,
+                     t->px[in] + l1x * e1 * s, y1 - d1,
+                     t->pz[in] + l1z * e1 * s,
+                     t->px[i]  + l0x * e1 * s, y0 - d1,
+                     t->pz[i]  + l0z * e1 * s,
+                     rr, gg, bb, 255);
+                rr = 96; gg = 104; bb = 78;       /* scrub below */
+                quad(t->px[i]  + l0x * e1 * s, y0 - d1,
+                     t->pz[i]  + l0z * e1 * s,
+                     t->px[in] + l1x * e1 * s, y1 - d1,
+                     t->pz[in] + l1z * e1 * s,
+                     t->px[in] + l1x * e2 * s, y1 - d2,
+                     t->pz[in] + l1z * e2 * s,
+                     t->px[i]  + l0x * e2 * s, y0 - d2,
+                     t->pz[i]  + l0z * e2 * s,
+                     rr, gg, bb, 255);
+            }
+            /* guardrails at the barrier line */
+            {
+                float w = t->wall_half - 0.2f;
+                u8 rr = 225, gg = 228, bb = 232;
+                if (i & 1) { rr = 180; gg = 184; bb = 190; }
+                quad(t->px[i]  + l0x * w, y0 + 0.15f, t->pz[i]  + l0z * w,
+                     t->px[in] + l1x * w, y1 + 0.15f, t->pz[in] + l1z * w,
+                     t->px[in] + l1x * w, y1 + 0.75f, t->pz[in] + l1z * w,
+                     t->px[i]  + l0x * w, y0 + 0.75f, t->pz[i]  + l0z * w,
+                     rr, gg, bb, 255);
+                quad(t->px[i]  - l0x * w, y0 + 0.15f, t->pz[i]  - l0z * w,
+                     t->px[in] - l1x * w, y1 + 0.15f, t->pz[in] - l1z * w,
+                     t->px[in] - l1x * w, y1 + 0.75f, t->pz[in] - l1z * w,
+                     t->px[i]  - l0x * w, y0 + 0.75f, t->pz[i]  - l0z * w,
+                     rr, gg, bb, 255);
+            }
+        }
     }
 
-    /* start/finish: checkered strip over segment 0 */
+    /* start/finish checkers */
     {
         int in = 1;
         float l0x = -t->dz[0], l0z = t->dx[0];
         float l1x = -t->dz[in], l1z = t->dx[in];
         int cx, cz;
-        for (cz = 0; cz < 2; cz++) {           /* along the road    */
-            for (cx = 0; cx < 6; cx++) {       /* across the road   */
+        for (cz = 0; cz < 2; cz++) {
+            for (cx = 0; cx < 6; cx++) {
                 float w0 = -RW + 2.0f * RW * (float)cx / 6.0f;
                 float w1 = -RW + 2.0f * RW * (float)(cx + 1) / 6.0f;
                 float f0 = (float)cz / 2.0f, f1 = (float)(cz + 1) / 2.0f;
                 float ax = t->px[0] + (t->px[in] - t->px[0]) * f0;
                 float az = t->pz[0] + (t->pz[in] - t->pz[0]) * f0;
+                float ay = t->py[0] + (t->py[in] - t->py[0]) * f0 + 0.09f;
                 float bx = t->px[0] + (t->px[in] - t->px[0]) * f1;
                 float bz = t->pz[0] + (t->pz[in] - t->pz[0]) * f1;
+                float by = t->py[0] + (t->py[in] - t->py[0]) * f1 + 0.09f;
                 float lax = l0x + (l1x - l0x) * f0, laz = l0z + (l1z - l0z) * f0;
                 float lbx = l0x + (l1x - l0x) * f1, lbz = l0z + (l1z - l0z) * f1;
                 u8 c = ((cx + cz) & 1) ? 235 : 25;
-                quad(ax + lax * w0, 0.08f, az + laz * w0,
-                     bx + lbx * w0, 0.08f, bz + lbz * w0,
-                     bx + lbx * w1, 0.08f, bz + lbz * w1,
-                     ax + lax * w1, 0.08f, az + laz * w1,
+                quad(ax + lax * w0, ay, az + laz * w0,
+                     bx + lbx * w0, by, bz + lbz * w0,
+                     bx + lbx * w1, by, bz + lbz * w1,
+                     ax + lax * w1, ay, az + laz * w1,
                      c, c, c, 255);
             }
         }
@@ -276,138 +637,207 @@ static void draw_track(void)
     {
         float yaw = atan2f(t->dz[0], t->dx[0]);
         float lx = -t->dz[0], lz = t->dx[0];
-        draw_box(t->px[0] + lx * 6.8f, 2.75f, t->pz[0] + lz * 6.8f, yaw,
+        float by = t->py[0];
+        draw_box(t->px[0] + lx * (RW + 1.8f), by + 2.75f,
+                 t->pz[0] + lz * (RW + 1.8f), yaw, 0.0f,
                  0.4f, 2.75f, 0.4f, 225, 225, 230);
-        draw_box(t->px[0] - lx * 6.8f, 2.75f, t->pz[0] - lz * 6.8f, yaw,
+        draw_box(t->px[0] - lx * (RW + 1.8f), by + 2.75f,
+                 t->pz[0] - lz * (RW + 1.8f), yaw, 0.0f,
                  0.4f, 2.75f, 0.4f, 225, 225, 230);
-        draw_box(t->px[0], 5.9f, t->pz[0], yaw,
-                 0.3f, 0.55f, 7.2f, 200, 30, 30);
+        draw_box(t->px[0], by + 5.9f, t->pz[0], yaw, 0.0f,
+                 0.3f, 0.55f, RW + 2.2f, 200, 30, 30);
     }
 
-    /* trees and far mountains */
-    for (i = 0; i < n_trees; i++) {
-        draw_box(tree_x[i], 0.6f, tree_z[i], 0.0f, 0.25f, 0.6f, 0.25f,
-                 110, 75, 40);
-        draw_cone(tree_x[i], 1.2f, tree_z[i], 1.7f, 3.2f, 30, 130, 45);
+    /* item boxes: floating spinning cubes, hidden while respawning */
+    {
+        int rrow, b;
+        for (rrow = 0; rrow < t->n_items; rrow++) {
+            int seg = t->item_seg[rrow];
+            float lx = -t->dz[seg], lz = t->dx[seg];
+            for (b = 0; b < 3; b++) {
+                float blat = ((float)b - 1.0f) * 0.55f * RW;
+                float pulse;
+                if (app_state == APP_RACE &&
+                    game.item_respawn[rrow][b] > 0.0f)
+                    continue;
+                pulse = 0.8f + 0.2f * sinf((float)frame_no * 0.11f + b);
+                draw_box(t->px[seg] + lx * blat,
+                         t->py[seg] + 1.0f,
+                         t->pz[seg] + lz * blat,
+                         (float)frame_no * 0.05f + (float)b, 0.0f,
+                         0.45f, 0.45f, 0.45f,
+                         shade(70, pulse), shade(200, pulse),
+                         shade(215, pulse));
+            }
+        }
     }
-    draw_cone(t->min_x - 60.0f, 0.0f, t->min_z - 55.0f, 34.0f, 26.0f, 130, 130, 145);
-    draw_cone(t->max_x + 60.0f, 0.0f, t->min_z - 45.0f, 40.0f, 32.0f, 120, 120, 135);
-    draw_cone(t->max_x + 55.0f, 0.0f, t->max_z + 55.0f, 30.0f, 22.0f, 135, 135, 150);
-    draw_cone(t->min_x - 55.0f, 0.0f, t->max_z + 50.0f, 38.0f, 30.0f, 125, 125, 140);
+
+    /* trees and far peaks */
+    for (i = 0; i < n_trees; i++) {
+        draw_box(tree_x[i], tree_y[i] + 0.6f, tree_z[i], 0.0f, 0.0f,
+                 0.25f, 0.6f, 0.25f, 110, 75, 40);
+        draw_cone(tree_x[i], tree_y[i] + 1.2f, tree_z[i], 1.7f, 3.4f,
+                  t->alpine ? 24 : 30, t->alpine ? 100 : 130, 45);
+    }
+    {
+        float base = t->min_y - (t->alpine ? 8.0f : 0.0f);
+        float hs = t->alpine ? 2.2f : 1.0f;
+        draw_cone(t->min_x - 70.0f, base, t->min_z - 65.0f, 40.0f,
+                  30.0f * hs, 130, 130, 145);
+        draw_cone(t->max_x + 70.0f, base, t->min_z - 55.0f, 46.0f,
+                  38.0f * hs, 120, 120, 135);
+        draw_cone(t->max_x + 65.0f, base, t->max_z + 65.0f, 36.0f,
+                  26.0f * hs, 135, 135, 150);
+        draw_cone(t->min_x - 65.0f, base, t->max_z + 60.0f, 44.0f,
+                  34.0f * hs, 125, 125, 140);
+    }
 }
 
-static void draw_kart(const Kart *k, const u8 col[3])
+static void draw_kart(const Track *t, const Kart *k, const u8 col[3])
 {
-    float yaw = k->heading + (k->drifting ? (float)k->drifting * 0.35f : 0.0f)
-                + k->steer_vis * 0.06f;
+    float yaw = k->heading + (k->drifting ? (float)k->drifting * 0.30f : 0.0f)
+                + k->steer_vis * 0.05f + k->slip * 0.10f *
+                  (k->steer_vis > 0.0f ? -1.0f : 1.0f);
+    float dirdot = cosf(k->heading) * t->dx[k->seg] +
+                   sinf(k->heading) * t->dz[k->seg];
+    float pitch = atanf(t->slope[k->seg] * dirdot);
     float fx = cosf(yaw), fz = sinf(yaw);
     float lx = -fz, lz = fx;
+    float by = k->y;
     int w;
 
     /* shadow */
-    quad(k->x + fx * 1.3f + lx * 0.85f, 0.10f, k->z + fz * 1.3f + lz * 0.85f,
-         k->x + fx * 1.3f - lx * 0.85f, 0.10f, k->z + fz * 1.3f - lz * 0.85f,
-         k->x - fx * 1.3f - lx * 0.85f, 0.10f, k->z - fz * 1.3f - lz * 0.85f,
-         k->x - fx * 1.3f + lx * 0.85f, 0.10f, k->z - fz * 1.3f + lz * 0.85f,
+    quad(k->x + fx * 1.3f + lx * 0.85f, by + 0.10f,
+         k->z + fz * 1.3f + lz * 0.85f,
+         k->x + fx * 1.3f - lx * 0.85f, by + 0.10f,
+         k->z + fz * 1.3f - lz * 0.85f,
+         k->x - fx * 1.3f - lx * 0.85f, by + 0.10f,
+         k->z - fz * 1.3f - lz * 0.85f,
+         k->x - fx * 1.3f + lx * 0.85f, by + 0.10f,
+         k->z - fz * 1.3f + lz * 0.85f,
          0, 0, 0, 90);
 
-    /* body + cab */
-    draw_box(k->x, 0.42f, k->z, yaw, 1.10f, 0.28f, 0.65f,
-             col[0], col[1], col[2]);
-    draw_box(k->x - fx * 0.25f, 0.92f, k->z - fz * 0.25f, yaw,
+    draw_box(k->x, by + 0.42f, k->z, yaw, pitch,
+             1.10f, 0.28f, 0.65f, col[0], col[1], col[2]);
+    draw_box(k->x - fx * 0.25f, by + 0.92f, k->z - fz * 0.25f, yaw, pitch,
              0.30f, 0.26f, 0.30f, 40, 40, 45);
 
-    /* wheels: front pair steers visually */
     for (w = 0; w < 4; w++) {
-        float sf = (w < 2) ? 1.0f : -1.0f;
-        float sl = (w & 1) ? 1.0f : -1.0f;
+        float s_f = (w < 2) ? 1.0f : -1.0f;
+        float s_l = (w & 1) ? 1.0f : -1.0f;
         float wyaw = yaw + ((w < 2) ? k->steer_vis * 0.45f : 0.0f);
-        draw_box(k->x + fx * 0.85f * sf + lx * 0.72f * sl, 0.30f,
-                 k->z + fz * 0.85f * sf + lz * 0.72f * sl,
-                 wyaw, 0.30f, 0.30f, 0.14f, 25, 25, 28);
+        draw_box(k->x + fx * 0.85f * s_f + lx * 0.72f * s_l, by + 0.30f,
+                 k->z + fz * 0.85f * s_f + lz * 0.72f * s_l,
+                 wyaw, 0.0f, 0.30f, 0.30f, 0.14f, 25, 25, 28);
     }
 
-    /* boost flame */
     if (k->boost_t > 0.0f) {
-        float flick = 0.7f + 0.3f * ((frame_no & 2) ? 1.0f : 0.4f);
-        float len = 1.1f * flick;
+        float len = 1.1f * (0.7f + 0.3f * ((frame_no & 2) ? 1.0f : 0.4f));
         u8 fr = 255, fg = (frame_no & 2) ? 170 : 110;
         GX_Begin(GX_TRIANGLES, GX_VTXFMT0, 3);
-        GX_Position3f32(k->x - fx * 1.15f + lx * 0.35f, 0.45f,
+        GX_Position3f32(k->x - fx * 1.15f + lx * 0.35f, by + 0.45f,
                         k->z - fz * 1.15f + lz * 0.35f);
         GX_Color4u8(fr, fg, 20, 230);
-        GX_Position3f32(k->x - fx * 1.15f - lx * 0.35f, 0.45f,
+        GX_Position3f32(k->x - fx * 1.15f - lx * 0.35f, by + 0.45f,
                         k->z - fz * 1.15f - lz * 0.35f);
         GX_Color4u8(fr, fg, 20, 230);
-        GX_Position3f32(k->x - fx * (1.15f + len), 0.42f,
+        GX_Position3f32(k->x - fx * (1.15f + len), by + 0.42f,
                         k->z - fz * (1.15f + len));
         GX_Color4u8(255, 240, 90, 200);
         GX_End();
     }
 
-    /* drift sparks at the rear wheels */
-    if (k->drifting && k->drift_charge > 0.35f) {
+    /* smoke / sparks when sliding hard */
+    if (k->slip > 0.35f && fabsf(k->speed) > 5.0f) {
         u8 sr, sg, sb;
         float jx = 0.15f * sinf((float)frame_no * 1.7f);
-        if (k->drift_charge > 2.2f)      { sr = 255; sg = 120; sb = 30; }
-        else if (k->drift_charge > 1.0f) { sr = 255; sg = 200; sb = 60; }
-        else                             { sr = 90;  sg = 160; sb = 255; }
+        if (k->drifting && k->drift_charge > 1.2f) {
+            sr = 255; sg = 150; sb = 40;
+        } else {
+            sr = 200; sg = 200; sb = 205;
+        }
         for (w = 0; w < 2; w++) {
-            float sl = w ? 1.0f : -1.0f;
-            float sx = k->x - fx * 1.0f + lx * (0.75f * sl) + jx;
-            float sz = k->z - fz * 1.0f + lz * (0.75f * sl) - jx;
-            quad(sx - 0.14f, 0.16f, sz - 0.14f,
-                 sx + 0.14f, 0.16f, sz - 0.14f,
-                 sx + 0.14f, 0.16f, sz + 0.14f,
-                 sx - 0.14f, 0.16f, sz + 0.14f,
-                 sr, sg, sb, 230);
+            float s_l = w ? 1.0f : -1.0f;
+            float sx = k->x - fx * 1.0f + lx * (0.75f * s_l) + jx;
+            float sz = k->z - fz * 1.0f + lz * (0.75f * s_l) - jx;
+            quad(sx - 0.16f, by + 0.16f, sz - 0.16f,
+                 sx + 0.16f, by + 0.16f, sz - 0.16f,
+                 sx + 0.16f, by + 0.16f, sz + 0.16f,
+                 sx - 0.16f, by + 0.16f, sz + 0.16f,
+                 sr, sg, sb, 200);
         }
     }
 }
 
-static void draw_scene(void)
+static void viewport_rect(int p, int n, float *vx, float *vy,
+                          float *vw, float *vh)
+{
+    float W = (float)rmode->fbWidth, H = (float)rmode->efbHeight;
+    if (n <= 1) {
+        *vx = 0; *vy = 0; *vw = W; *vh = H;
+    } else if (n == 2) {
+        *vx = 0; *vw = W; *vh = H * 0.5f;
+        *vy = (p == 0) ? 0 : H * 0.5f;
+    } else {
+        *vw = W * 0.5f; *vh = H * 0.5f;
+        *vx = (p & 1) ? W * 0.5f : 0;
+        *vy = (p >= 2) ? H * 0.5f : 0;
+    }
+}
+
+static void draw_scene_for_player(int p)
 {
     Mtx view;
     Mtx44 persp;
     guVector cam, up, look;
-    const Kart *p = &game.karts[0];
-    float fwx = cosf(p->heading), fwz = sinf(p->heading);
-    float tgt_x = p->x - fwx * 8.5f;
-    float tgt_y = 3.4f;
-    float tgt_z = p->z - fwz * 8.5f;
+    const Track *t = &game.track;
+    const Kart *k = &game.karts[p];
+    float fwx = cosf(k->heading), fwz = sinf(k->heading);
+    float tgt_x = k->x - fwx * 9.0f;
+    float tgt_y = k->y + 3.6f;
+    float tgt_z = k->z - fwz * 9.0f;
     float blend = 1.0f - powf(0.006f, 1.0f / 60.0f);
+    float vx, vy, vw, vh;
     int i;
 
-    /* smoothed chase camera */
-    cam_x += (tgt_x - cam_x) * blend;
-    cam_y += (tgt_y - cam_y) * blend;
-    cam_z += (tgt_z - cam_z) * blend;
+    cam_x[p] += (tgt_x - cam_x[p]) * blend;
+    cam_y[p] += (tgt_y - cam_y[p]) * blend;
+    cam_z[p] += (tgt_z - cam_z[p]) * blend;
 
-    cam.x = cam_x;  cam.y = cam_y;  cam.z = cam_z;
-    up.x  = 0.0f;   up.y  = 1.0f;   up.z  = 0.0f;
-    look.x = p->x + fwx * 4.0f;
-    look.y = 1.1f;
-    look.z = p->z + fwz * 4.0f;
+    /* keep the camera above the road surface behind the kart */
+    {
+        int seg; float frac, lat, sy;
+        track_locate(t, cam_x[p], cam_z[p], k->seg, &seg, &frac, &lat, &sy);
+        if (cam_y[p] < sy + 1.6f)
+            cam_y[p] = sy + 1.6f;
+    }
 
-    guPerspective(persp, 58.0f,
-                  (f32)rmode->fbWidth / (f32)rmode->efbHeight, 0.5f, 700.0f);
+    cam.x = cam_x[p];  cam.y = cam_y[p];  cam.z = cam_z[p];
+    up.x  = 0.0f;      up.y  = 1.0f;      up.z  = 0.0f;
+    look.x = k->x + fwx * 4.0f;
+    look.y = k->y + 1.2f;
+    look.z = k->z + fwz * 4.0f;
+
+    viewport_rect(p, game.cfg.n_humans, &vx, &vy, &vw, &vh);
+    GX_SetViewport(vx, vy, vw, vh, 0.0f, 1.0f);
+    GX_SetScissor((u32)vx, (u32)vy, (u32)vw, (u32)vh);
+
+    guPerspective(persp, 58.0f, vw / vh, 0.5f, 900.0f);
     GX_LoadProjectionMtx(persp, GX_PERSPECTIVE);
     guLookAt(view, &cam, &up, &look);
     GX_LoadPosMtxImm(view, GX_PNMTX0);
 
     GX_SetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
 
-    draw_track();
+    draw_track(t);
     for (i = 0; i < NUM_KARTS; i++)
-        draw_kart(&game.karts[i], kart_colors[i]);
+        draw_kart(t, &game.karts[i], kart_colors[i]);
 }
 
 /* ------------------------------------------------------------------ */
-/* HUD: 7-segment glyphs drawn with quads                              */
+/* HUD: 7-segment glyphs                                               */
 /* ------------------------------------------------------------------ */
 
-/* segment bits: a=1 b=2 c=4 d=8 e=16 f=32 g=64 (a top, clockwise,
- * g middle) */
 static int glyph_mask(char c)
 {
     switch (c) {
@@ -415,12 +845,14 @@ static int glyph_mask(char c)
     case '3': return 79;   case '4': return 102;  case '5': return 109;
     case '6': return 125;  case '7': return 7;    case '8': return 127;
     case '9': return 111;
-    case 'A': return 119;  case 'D': return 94;   case 'E': return 121;
-    case 'F': return 113;  case 'G': return 61;   case 'H': return 118;
-    case 'I': return 48;   case 'L': return 56;   case 'N': return 84;
-    case 'O': return 63;   case 'P': return 115;  case 'R': return 80;
-    case 'S': return 109;  case 'T': return 120;  case 'U': return 62;
-    default:  return 0;    /* space and unknown */
+    case 'A': return 119;  case 'B': return 124;  case 'C': return 57;
+    case 'D': return 94;   case 'E': return 121;  case 'F': return 113;
+    case 'G': return 61;   case 'H': return 118;  case 'I': return 48;
+    case 'L': return 56;   case 'N': return 84;   case 'O': return 63;
+    case 'P': return 115;  case 'R': return 80;   case 'S': return 109;
+    case 'T': return 120;  case 'U': return 62;   case 'Y': return 110;
+    case '-': return 64;
+    default:  return 0;
     }
 }
 
@@ -441,52 +873,67 @@ static void hud_glyph(float x, float y, float w, float h, char c,
     float t = w * 0.22f;
     int m;
 
+    if (c == '.') {
+        hud_rect(x, y + h - t, t, t, r, g, b, a);
+        return;
+    }
     if (c == '/') {
         GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
-        GX_Position3f32(x + w - t, y,         -5.0f); GX_Color4u8(r, g, b, a);
-        GX_Position3f32(x + w,     y,         -5.0f); GX_Color4u8(r, g, b, a);
-        GX_Position3f32(x + t,     y + h,     -5.0f); GX_Color4u8(r, g, b, a);
-        GX_Position3f32(x,         y + h,     -5.0f); GX_Color4u8(r, g, b, a);
+        GX_Position3f32(x + w - t, y,     -5.0f); GX_Color4u8(r, g, b, a);
+        GX_Position3f32(x + w,     y,     -5.0f); GX_Color4u8(r, g, b, a);
+        GX_Position3f32(x + t,     y + h, -5.0f); GX_Color4u8(r, g, b, a);
+        GX_Position3f32(x,         y + h, -5.0f); GX_Color4u8(r, g, b, a);
         GX_End();
         return;
     }
 
     m = glyph_mask(c);
-    if (m & 1)   hud_rect(x + t, y, w - 2.0f * t, t, r, g, b, a);           /* a */
-    if (m & 2)   hud_rect(x + w - t, y + t * 0.5f, t, h * 0.5f - t, r, g, b, a); /* b */
+    if (m & 1)   hud_rect(x + t, y, w - 2.0f * t, t, r, g, b, a);
+    if (m & 2)   hud_rect(x + w - t, y + t * 0.5f, t, h * 0.5f - t, r, g, b, a);
     if (m & 4)   hud_rect(x + w - t, y + h * 0.5f + t * 0.5f, t,
-                          h * 0.5f - t, r, g, b, a);                        /* c */
-    if (m & 8)   hud_rect(x + t, y + h - t, w - 2.0f * t, t, r, g, b, a);   /* d */
+                          h * 0.5f - t, r, g, b, a);
+    if (m & 8)   hud_rect(x + t, y + h - t, w - 2.0f * t, t, r, g, b, a);
     if (m & 16)  hud_rect(x, y + h * 0.5f + t * 0.5f, t, h * 0.5f - t,
-                          r, g, b, a);                                      /* e */
-    if (m & 32)  hud_rect(x, y + t * 0.5f, t, h * 0.5f - t, r, g, b, a);    /* f */
+                          r, g, b, a);
+    if (m & 32)  hud_rect(x, y + t * 0.5f, t, h * 0.5f - t, r, g, b, a);
     if (m & 64)  hud_rect(x + t, y + h * 0.5f - t * 0.5f, w - 2.0f * t, t,
-                          r, g, b, a);                                      /* g */
+                          r, g, b, a);
 }
 
 static void hud_text(float x, float y, float cw, float ch, const char *s,
                      u8 r, u8 g, u8 b, u8 a)
 {
     while (*s) {
-        hud_glyph(x, y, cw, ch, *s, r, g, b, a);
-        x += cw * 1.35f;
+        if (*s == '.') {
+            hud_glyph(x, y, cw, ch, *s, r, g, b, a);
+            x += cw * 0.55f;
+        } else {
+            hud_glyph(x, y, cw, ch, *s, r, g, b, a);
+            x += cw * 1.35f;
+        }
         s++;
     }
 }
 
-static void draw_minimap(void)
+static float hud_text_width(float cw, const char *s)
 {
-    const Track *t = &game.track;
+    float w = 0.0f;
+    while (*s) {
+        w += (*s == '.') ? cw * 0.55f : cw * 1.35f;
+        s++;
+    }
+    return w;
+}
+
+static void draw_minimap(const Track *t, int with_karts,
+                         float ox, float oy, float size)
+{
     float span_x = t->max_x - t->min_x;
     float span_z = t->max_z - t->min_z;
     float span = (span_x > span_z) ? span_x : span_z;
-    float scale = 100.0f / span;
-    float ox = (float)rmode->fbWidth - 130.0f;
-    float oy = (float)rmode->efbHeight - 140.0f;
+    float scale = size / span;
     int i;
 
-    /* Track outline. Map world x -> screen x, world z -> screen y
-     * (mirrored so the map matches the on-screen driving direction). */
     GX_SetLineWidth(14, GX_TO_ZERO);
     GX_Begin(GX_LINESTRIP, GX_VTXFMT0, (u16)(t->n + 1));
     for (i = 0; i <= t->n; i++) {
@@ -497,84 +944,106 @@ static void draw_minimap(void)
     }
     GX_End();
 
+    if (!with_karts)
+        return;
     for (i = NUM_KARTS - 1; i >= 0; i--) {
         const Kart *k = &game.karts[i];
         float mx = ox + (k->x - t->min_x) * scale;
         float my = oy + (t->max_z - k->z) * scale;
-        float s = k->is_player ? 5.0f : 4.0f;
+        float s = (k->human >= 0) ? 5.0f : 4.0f;
         hud_rect(mx - s * 0.5f, my - s * 0.5f, s, s,
-                 kart_colors[i][0], kart_colors[i][1], kart_colors[i][2], 255);
+                 kart_colors[i][0], kart_colors[i][1], kart_colors[i][2],
+                 255);
     }
 }
 
-static void draw_hud(void)
+static void hud_ortho_fullscreen(void)
 {
     Mtx44 ortho;
     Mtx ident;
-    const Kart *p = &game.karts[0];
-    char buf[8];
     float W = (float)rmode->fbWidth;
     float H = (float)rmode->efbHeight;
 
+    GX_SetViewport(0.0f, 0.0f, W, H, 0.0f, 1.0f);
+    GX_SetScissor(0, 0, rmode->fbWidth, rmode->efbHeight);
     guOrtho(ortho, 0.0f, H, 0.0f, W, 0.0f, 300.0f);
     GX_LoadProjectionMtx(ortho, GX_ORTHOGRAPHIC);
     guMtxIdentity(ident);
     GX_LoadPosMtxImm(ident, GX_PNMTX0);
     GX_SetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
+}
 
-    /* lap counter, top-left: LAP n/3 */
+static void draw_player_hud(int p)
+{
+    const Kart *k = &game.karts[p];
+    char buf[24];
+    float vx, vy, vw, vh;
+
+    viewport_rect(p, game.cfg.n_humans, &vx, &vy, &vw, &vh);
+
+    /* lap */
     {
-        int lap_disp = p->lap + 1;
+        int lap_disp = k->lap + 1;
         if (lap_disp < 1) lap_disp = 1;
         if (lap_disp > RACE_LAPS) lap_disp = RACE_LAPS;
-        hud_text(28.0f, 28.0f, 13.0f, 22.0f, "LAP", 255, 255, 255, 220);
-        buf[0] = (char)('0' + lap_disp);
-        buf[1] = '/';
-        buf[2] = (char)('0' + RACE_LAPS);
-        buf[3] = '\0';
-        hud_text(96.0f, 28.0f, 13.0f, 22.0f, buf, 255, 255, 255, 220);
+        snprintf(buf, sizeof(buf), "L%d/%d", lap_disp, RACE_LAPS);
+        hud_text(vx + 14.0f, vy + 12.0f, 11.0f, 19.0f, buf,
+                 255, 255, 255, 220);
     }
+    /* position */
+    snprintf(buf, sizeof(buf), "P%d", k->rank);
+    hud_text(vx + vw - 60.0f, vy + 12.0f, 13.0f, 22.0f, buf,
+             255, 220, 60, 240);
 
-    /* position, top-right (left of minimap column) */
-    {
-        hud_text(W - 208.0f, 28.0f, 13.0f, 22.0f, "POS", 255, 255, 255, 220);
-        buf[0] = (char)('0' + p->rank);
-        buf[1] = '\0';
-        hud_text(W - 138.0f, 24.0f, 17.0f, 28.0f, buf, 255, 220, 60, 240);
+    /* speed, km/h */
+    snprintf(buf, sizeof(buf), "%d", (int)(fabsf(k->speed) * 3.6f));
+    hud_text(vx + 14.0f, vy + vh - 40.0f, 13.0f, 24.0f, buf,
+             k->boost_t > 0.0f ? 255 : 235,
+             k->boost_t > 0.0f ? 150 : 235,
+             k->boost_t > 0.0f ? 30 : 235, 235);
+
+    /* item slot */
+    if (k->item_held)
+        hud_text(vx + vw - 88.0f, vy + vh - 36.0f, 10.0f, 17.0f, "NITRO",
+                 90, 220, 235, 235);
+
+    /* drift charge */
+    if (k->drifting) {
+        float cfrac = game_clampf(k->drift_charge / 1.2f, 0.0f, 1.0f);
+        u8 cr = 90, cg = 160, cb = 255;
+        if (cfrac >= 1.0f) { cr = 255; cg = 150; cb = 40; }
+        hud_rect(vx + 14.0f, vy + vh - 12.0f, 90.0f, 6.0f, 15, 15, 20, 160);
+        hud_rect(vx + 15.0f, vy + vh - 11.0f, 88.0f * cfrac, 4.0f,
+                 cr, cg, cb, 230);
     }
+}
 
-    /* speed bar + drift charge, bottom-left */
-    {
-        float vfrac = fabsf(p->speed) / (KART_VMAX * KART_BOOST_MULT);
-        if (vfrac > 1.0f) vfrac = 1.0f;
-        hud_rect(26.0f, H - 46.0f, 154.0f, 16.0f, 15, 15, 20, 160);
-        if (p->boost_t > 0.0f)
-            hud_rect(28.0f, H - 44.0f, 150.0f * vfrac, 12.0f,
-                     255, 150, 30, 230);
-        else
-            hud_rect(28.0f, H - 44.0f, 150.0f * vfrac, 12.0f,
-                     90, 220, 90, 230);
+static void draw_race_hud(void)
+{
+    float W = (float)rmode->fbWidth;
+    float H = (float)rmode->efbHeight;
+    char buf[24];
+    int p;
 
-        if (p->drifting) {
-            float cfrac = p->drift_charge / 2.2f;
-            u8 cr = 90, cg = 160, cb = 255;
-            if (cfrac > 1.0f) { cfrac = 1.0f; cr = 255; cg = 120; cb = 30; }
-            else if (p->drift_charge > 1.0f) { cr = 255; cg = 200; cb = 60; }
-            hud_rect(26.0f, H - 66.0f, 154.0f, 10.0f, 15, 15, 20, 160);
-            hud_rect(28.0f, H - 64.0f, 150.0f * cfrac, 6.0f, cr, cg, cb, 230);
-        }
-    }
+    hud_ortho_fullscreen();
 
-    draw_minimap();
+    for (p = 0; p < game.cfg.n_humans; p++)
+        draw_player_hud(p);
 
-    /* countdown / GO */
+    /* minimap: corner in 1P, spare quadrant in 3P */
+    if (game.cfg.n_humans == 1)
+        draw_minimap(&game.track, 1, W - 130.0f, H - 140.0f, 100.0f);
+    else if (game.cfg.n_humans == 3)
+        draw_minimap(&game.track, 1, W * 0.5f + 60.0f, H * 0.5f + 40.0f,
+                     150.0f);
+
+    /* countdown / go */
     if (game.state == STATE_COUNTDOWN) {
         float c = game.countdown - 0.2f;
         if (c > 0.0f) {
             int n = (int)ceilf(c);
             if (n > 3) n = 3;
-            buf[0] = (char)('0' + n);
-            buf[1] = '\0';
+            snprintf(buf, sizeof(buf), "%d", n);
             hud_text(W * 0.5f - 40.0f, H * 0.5f - 70.0f, 80.0f, 130.0f,
                      buf, 255, 230, 60, 240);
         }
@@ -583,168 +1052,229 @@ static void draw_hud(void)
                  "GO", 120, 255, 120, 240);
     }
 
-    /* player finished: results overlay */
     if (game.state == STATE_FINISHED) {
         hud_rect(0.0f, 0.0f, W, H, 0, 0, 20, 110);
-        hud_text(W * 0.5f - 198.0f, H * 0.5f - 100.0f, 52.0f, 86.0f,
-                 "FINISH", 255, 255, 255, 240);
-        hud_text(W * 0.5f - 66.0f, H * 0.5f + 20.0f, 40.0f, 66.0f,
-                 "P", 255, 220, 60, 240);
-        buf[0] = (char)('0' + game.karts[0].final_rank);
-        buf[1] = '\0';
-        hud_text(W * 0.5f + 4.0f, H * 0.5f + 20.0f, 40.0f, 66.0f,
-                 buf, 255, 220, 60, 240);
+        hud_text(W * 0.5f - hud_text_width(42.0f, "FINISH") * 0.5f,
+                 H * 0.5f - 130.0f, 42.0f, 70.0f, "FINISH",
+                 255, 255, 255, 240);
+        for (p = 0; p < game.cfg.n_humans; p++) {
+            snprintf(buf, sizeof(buf), "P%d   %d   %.1fS",
+                     p + 1, game.karts[p].final_rank,
+                     game.karts[p].finish_time);
+            hud_text(W * 0.5f - 130.0f, H * 0.5f - 30.0f + 34.0f * p,
+                     15.0f, 26.0f, buf,
+                     kart_colors[p][0], kart_colors[p][1],
+                     kart_colors[p][2], 240);
+        }
+        hud_text(W * 0.5f - hud_text_width(11.0f, "PRESS  ") * 0.5f,
+                 H - 60.0f, 11.0f, 18.0f, "PRESS  ",
+                 200, 200, 210, 200);
+        /* '+' drawn as two bars */
+        hud_rect(W * 0.5f + 52.0f, H - 53.0f, 14.0f, 4.0f,
+                 200, 200, 210, 200);
+        hud_rect(W * 0.5f + 57.0f, H - 58.0f, 4.0f, 14.0f,
+                 200, 200, 210, 200);
     }
 }
 
 /* ------------------------------------------------------------------ */
-/* Input: Wiimote (tilt / D-pad), Nunchuk, Classic Controller,        */
-/* GameCube pad (= Xbox pads in Dolphin) and USB keyboard              */
+/* Menus                                                               */
 /* ------------------------------------------------------------------ */
 
-static int keyboard_ok = 0;
-static u8 key_left, key_right, key_accel, key_brake, key_drift;
-
-static void restart_race(void)
+static void menu_update_track_preview(void)
 {
-    game_init(&game);
-    place_scenery();
+    if (menu_track_loaded != sel_track) {
+        track_init(&menu_track, sel_track);
+        menu_track_loaded = sel_track;
+    }
 }
 
-/* signed x deflection (-1..1, right positive) of a wiiuse joystick */
-static float stick_x(const joystick_t *js)
+static void draw_menu(void)
 {
-    if (js->mag < 0.2f)
-        return 0.0f;
-    return game_clampf(js->mag, 0.0f, 1.0f) *
-           sinf(js->ang * ((float)M_PI / 180.0f));
+    float W = (float)rmode->fbWidth;
+    float H = (float)rmode->efbHeight;
+    char buf[32];
+
+    hud_ortho_fullscreen();
+
+    hud_rect(0.0f, 0.0f, W, H, 18, 24, 40, 255);
+    hud_text(W * 0.5f - hud_text_width(30.0f, "WIIKART") * 0.5f, 34.0f,
+             30.0f, 50.0f, "WIIKART", 230, 40, 40, 255);
+
+    if (menu_screen == 0) {
+        hud_text(W * 0.5f - hud_text_width(16.0f, "PLAYERS") * 0.5f,
+                 150.0f, 16.0f, 27.0f, "PLAYERS", 235, 235, 235, 255);
+        snprintf(buf, sizeof(buf), "-  %d  -", sel_players);
+        hud_text(W * 0.5f - hud_text_width(22.0f, buf) * 0.5f, 210.0f,
+                 22.0f, 37.0f, buf, 255, 220, 60, 255);
+    } else if (menu_screen == 1) {
+        menu_update_track_preview();
+        hud_text(60.0f, 140.0f, 13.0f, 22.0f, "TRACK", 235, 235, 235, 255);
+        snprintf(buf, sizeof(buf), "- %s -", track_name(sel_track));
+        hud_text(60.0f, 180.0f, 15.0f, 25.0f, buf, 255, 220, 60, 255);
+        snprintf(buf, sizeof(buf), "LENGTH %d", (int)menu_track.total_len);
+        hud_text(60.0f, 240.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
+        snprintf(buf, sizeof(buf), "RISE   %d",
+                 (int)(menu_track.max_y - menu_track.min_y));
+        hud_text(60.0f, 268.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
+        if (sel_track != TRACK_CLASSIC)
+            hud_text(60.0f, 296.0f, 10.0f, 17.0f, "COLORADO PASS",
+                     150, 190, 230, 255);
+        draw_minimap(&menu_track, 0, W - 220.0f, 160.0f, 170.0f);
+    } else {
+        int p = menu_screen - 2;
+        const KartSpec *s = &kart_specs[sel_spec[p] % SPEC_COUNT];
+        snprintf(buf, sizeof(buf), "P%d CAR", p + 1);
+        hud_text(60.0f, 130.0f, 13.0f, 22.0f, buf,
+                 kart_colors[p][0], kart_colors[p][1], kart_colors[p][2],
+                 255);
+        snprintf(buf, sizeof(buf), "- %s -", s->name);
+        hud_text(60.0f, 168.0f, 15.0f, 25.0f, buf, 255, 220, 60, 255);
+
+        snprintf(buf, sizeof(buf), "HP    %d", (int)s->power_hp);
+        hud_text(60.0f, 220.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
+        snprintf(buf, sizeof(buf), "CURB  %d", (int)s->mass_kg);
+        hud_text(60.0f, 246.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
+        snprintf(buf, sizeof(buf), "0-100 %.1fS", spec_accel_time(s));
+        hud_text(60.0f, 272.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
+        snprintf(buf, sizeof(buf), "TOP   %d", (int)spec_top_speed(s));
+        hud_text(60.0f, 298.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
+        snprintf(buf, sizeof(buf), "100-0 %d", (int)s->brake_dist_100);
+        hud_text(60.0f, 324.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
+        snprintf(buf, sizeof(buf), "GRIP  %.2fG", s->lat_g);
+        hud_text(60.0f, 350.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
+        snprintf(buf, sizeof(buf), "DIRT  %d", (int)(s->offroad_grip * 100.0f));
+        hud_text(60.0f, 376.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
+
+        /* car preview: colored box on a plinth */
+        hud_rect(W - 240.0f, 250.0f, 170.0f, 60.0f,
+                 kart_colors[p][0], kart_colors[p][1], kart_colors[p][2],
+                 255);
+        hud_rect(W - 240.0f, 310.0f, 170.0f, 10.0f, 30, 34, 48, 255);
+    }
+
+    hud_text(W * 0.5f - hud_text_width(9.0f, "2 SELECT   1 BACK") * 0.5f,
+             H - 42.0f, 9.0f, 15.0f, "2 SELECT   1 BACK",
+             160, 165, 180, 220);
 }
 
-static void poll_keyboard(void)
+static void start_race(void)
 {
-    keyboard_event ev;
+    GameConfig cfg;
+    int p;
 
-    if (!keyboard_ok)
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.track_id = sel_track;
+    cfg.n_humans = sel_players;
+    for (p = 0; p < MAX_HUMANS; p++)
+        cfg.spec[p] = sel_spec[p] % SPEC_COUNT;
+
+    game_init(&game, &cfg);
+    place_scenery(&game.track);
+    for (p = 0; p < MAX_HUMANS; p++) {
+        Kart *k = &game.karts[p < cfg.n_humans ? p : 0];
+        cam_x[p] = k->x - cosf(k->heading) * 9.0f;
+        cam_y[p] = k->y + 3.6f;
+        cam_z[p] = k->z - sinf(k->heading) * 9.0f;
+        rumble_t[p] = 0.0f;
+    }
+    app_state = APP_RACE;
+    audio_beep(660.0f, 90, 160);
+}
+
+static void menu_frame(void)
+{
+    int d = menu_delta();
+
+    if (menu_screen == 0) {
+        sel_players += d;
+        if (sel_players < 1) sel_players = MAX_HUMANS;
+        if (sel_players > MAX_HUMANS) sel_players = 1;
+        if (menu_confirm()) { menu_screen = 1; audio_beep(880.0f, 60, 140); }
+    } else if (menu_screen == 1) {
+        sel_track = ((sel_track + d) % TRACK_COUNT + TRACK_COUNT)
+                    % TRACK_COUNT;
+        if (menu_confirm()) { menu_screen = 2; audio_beep(880.0f, 60, 140); }
+        else if (menu_back()) { menu_screen = 0; }
+    } else {
+        int p = menu_screen - 2;
+        sel_spec[p] = ((sel_spec[p] + d) % SPEC_COUNT + SPEC_COUNT)
+                      % SPEC_COUNT;
+        if (menu_confirm()) {
+            audio_beep(880.0f, 60, 140);
+            if (p + 1 < sel_players)
+                menu_screen++;
+            else
+                start_race();
+        } else if (menu_back()) {
+            menu_screen--;
+        }
+    }
+
+    if (d)
+        audio_beep(440.0f, 35, 90);
+
+    draw_menu();
+}
+
+/* ------------------------------------------------------------------ */
+/* Race frame                                                          */
+/* ------------------------------------------------------------------ */
+
+static int prev_countdown_n = -1;
+
+static void race_frame(float dt)
+{
+    Input in[MAX_HUMANS];
+    int p;
+
+    for (p = 0; p < MAX_HUMANS; p++)
+        read_player_input(p, &in[p]);
+
+    if (race_to_menu_pressed()) {
+        app_state = APP_MENU;
+        menu_screen = 0;
         return;
-    while (KEYBOARD_GetEvent(&ev)) {
-        u8 held;
-        if (ev.type == KEYBOARD_DISCONNECTED) {
-            key_left = key_right = key_accel = key_brake = key_drift = 0;
-            continue;
-        }
-        if (ev.type != KEYBOARD_PRESSED && ev.type != KEYBOARD_RELEASED)
-            continue;
-        held = (ev.type == KEYBOARD_PRESSED);
-        switch (ev.symbol) {
-        case KS_Left:                       key_left = held;  break;
-        case KS_Right:                      key_right = held; break;
-        case KS_Up: case KS_x: case KS_X:   key_accel = held; break;
-        case KS_Down: case KS_z: case KS_Z: key_brake = held; break;
-        case KS_space:
-        case KS_Shift_L: case KS_Shift_R:   key_drift = held; break;
-        case KS_Return: case KS_r: case KS_R:
-            if (held) restart_race();
-            break;
-        case KS_Escape:
-            if (held) exit(0);
-            break;
-        default:
-            break;
-        }
     }
-}
 
-static void read_input(Input *in)
-{
-    u32 held, down;
-    u32 gheld, gdown;
-    const WPADData *wd;
-    float steer = 0.0f;
-    int tilt_ok = 1;
+    game_update(&game, in, dt);
 
-    WPAD_ScanPads();
-    PAD_ScanPads();
-    poll_keyboard();
+    /* countdown beeps */
+    if (game.state == STATE_COUNTDOWN) {
+        int n = (int)ceilf(game.countdown - 0.2f);
+        if (n != prev_countdown_n && n >= 1 && n <= 3)
+            audio_beep(440.0f, 120, 170);
+        prev_countdown_n = n;
+    } else if (prev_countdown_n != -1) {
+        audio_beep(880.0f, 260, 190);
+        prev_countdown_n = -1;
+    }
 
-    held = WPAD_ButtonsHeld(0);
-    down = WPAD_ButtonsDown(0);
-    gheld = PAD_ButtonsHeld(0);
-    gdown = PAD_ButtonsDown(0);
-
-    if ((down & (WPAD_BUTTON_HOME | WPAD_CLASSIC_BUTTON_HOME)) ||
-        ((gheld & PAD_TRIGGER_Z) && (gdown & PAD_BUTTON_START)))
-        exit(0);
-    if ((down & (WPAD_BUTTON_PLUS | WPAD_CLASSIC_BUTTON_PLUS)) ||
-        (!(gheld & PAD_TRIGGER_Z) && (gdown & PAD_BUTTON_START)))
-        restart_race();
-
-    memset(in, 0, sizeof(*in));
-
-    /* --- Wiimote buttons (sideways grip) --- */
-    in->accel = (held & (WPAD_BUTTON_2 | WPAD_BUTTON_A)) != 0;
-    in->brake = (held & WPAD_BUTTON_1) != 0;
-    in->hop   = (held & WPAD_BUTTON_B) != 0;
-
-    /* D-pad steering. Held sideways, the pad's UP points left; also
-     * accept LEFT/RIGHT for normal grip. Positive steer = turn left. */
-    if (held & (WPAD_BUTTON_UP | WPAD_BUTTON_LEFT))
-        steer += 1.0f;
-    if (held & (WPAD_BUTTON_DOWN | WPAD_BUTTON_RIGHT))
-        steer -= 1.0f;
-
-    /* --- Wiimote expansions --- */
-    wd = WPAD_Data(0);
-    if (wd) {
-        if (wd->exp.type == WPAD_EXP_NUNCHUK) {
-            /* stick steers; C or Z drifts; A/B on the remote as usual */
-            steer -= stick_x(&wd->exp.nunchuk.js);
-            if (held & (WPAD_NUNCHUK_BUTTON_C | WPAD_NUNCHUK_BUTTON_Z))
-                in->hop = 1;
-            in->brake |= (held & WPAD_BUTTON_B) != 0;
-            tilt_ok = 0;
-        } else if (wd->exp.type == WPAD_EXP_CLASSIC) {
-            steer -= stick_x(&wd->exp.classic.ljs);
-            if (held & (WPAD_CLASSIC_BUTTON_LEFT))  steer += 1.0f;
-            if (held & (WPAD_CLASSIC_BUTTON_RIGHT)) steer -= 1.0f;
-            in->accel |= (held & (WPAD_CLASSIC_BUTTON_A |
-                                  WPAD_CLASSIC_BUTTON_X)) != 0;
-            in->brake |= (held & (WPAD_CLASSIC_BUTTON_B |
-                                  WPAD_CLASSIC_BUTTON_Y)) != 0;
-            in->hop   |= (held & (WPAD_CLASSIC_BUTTON_FULL_R |
-                                  WPAD_CLASSIC_BUTTON_FULL_L |
-                                  WPAD_CLASSIC_BUTTON_ZR |
-                                  WPAD_CLASSIC_BUTTON_ZL)) != 0;
-            tilt_ok = 0;
+    /* per-player rumble + effect sounds (P1 sounds only) */
+    for (p = 0; p < game.cfg.n_humans; p++) {
+        const Kart *k = &game.karts[p];
+        if (k->just_boosted || k->hit_wall || k->got_item)
+            rumble_t[p] = 0.18f;
+        if (p == 0) {
+            if (k->got_item)      audio_beep(1320.0f, 90, 150);
+            if (k->just_boosted)  audio_beep(220.0f, 200, 170);
+            if (k->hit_wall)      audio_beep(110.0f, 120, 190);
         }
-
-        /* Tilt steering (remote held sideways, no expansion): raising
-         * the nose steers left, like a steering wheel. 7 deg deadzone. */
-        if (tilt_ok) {
-            float tilt = TILT_SIGN * -wd->orient.pitch;
-            if (fabsf(tilt) > 7.0f)
-                steer += game_clampf(tilt / 45.0f, -1.0f, 1.0f);
+        if (rumble_t[p] > 0.0f) {
+            rumble_t[p] -= dt;
+            WPAD_Rumble(p, 1);
+            PAD_ControlMotor(p, PAD_MOTOR_RUMBLE);
+        } else {
+            WPAD_Rumble(p, 0);
+            PAD_ControlMotor(p, PAD_MOTOR_STOP);
         }
     }
 
-    /* --- GameCube controller (Dolphin: map an Xbox/any pad to
-     * "GameCube Controller Port 1 > Standard Controller") --- */
-    {
-        s8 sx = PAD_StickX(0);
-        if (sx > 18 || sx < -18)
-            steer -= game_clampf((float)sx / 90.0f, -1.0f, 1.0f);
-        in->accel |= (gheld & (PAD_BUTTON_A | PAD_BUTTON_X)) != 0;
-        in->brake |= (gheld & PAD_BUTTON_B) != 0;
-        in->hop   |= (gheld & (PAD_TRIGGER_R | PAD_TRIGGER_L)) != 0;
-    }
+    for (p = 0; p < game.cfg.n_humans; p++)
+        draw_scene_for_player(p);
 
-    /* --- USB keyboard (Dolphin: Config > Wii > Connect USB Keyboard) */
-    if (key_left)  steer += 1.0f;
-    if (key_right) steer -= 1.0f;
-    in->accel |= key_accel;
-    in->brake |= key_brake;
-    in->hop   |= key_drift;
-
-    in->steer = game_clampf(steer, -1.0f, 1.0f);
+    /* blank the unused quadrant in 3P before HUD overlays it */
+    draw_race_hud();
 }
 
 /* ------------------------------------------------------------------ */
@@ -754,7 +1284,7 @@ static void read_input(Input *in)
 int main(void)
 {
     void *gp_fifo;
-    GXColor sky = { 110, 170, 235, 255 };
+    GXColor sky = { 120, 175, 235, 255 };
     f32 yscale;
     u32 xfbHeight;
     float dt;
@@ -762,6 +1292,9 @@ int main(void)
     VIDEO_Init();
     WPAD_Init();
     WPAD_SetDataFormat(WPAD_CHAN_0, WPAD_FMT_BTNS_ACC);
+    WPAD_SetDataFormat(WPAD_CHAN_1, WPAD_FMT_BTNS_ACC);
+    WPAD_SetDataFormat(WPAD_CHAN_2, WPAD_FMT_BTNS_ACC);
+    WPAD_SetDataFormat(WPAD_CHAN_3, WPAD_FMT_BTNS_ACC);
     PAD_Init();
     if (KEYBOARD_Init(NULL) >= 0)
         keyboard_ok = 1;
@@ -822,37 +1355,21 @@ int main(void)
     GX_SetAlphaUpdate(GX_FALSE);
     GX_SetColorUpdate(GX_TRUE);
 
-    /* fixed timestep from the video standard */
+    audio_init();
+
     dt = 1.0f / 60.0f;
     if ((rmode->viTVMode >> 2) == VI_PAL)
         dt = 1.0f / 50.0f;
 
-    game_init(&game);
-    place_scenery();
-    cam_x = game.karts[0].x - cosf(game.karts[0].heading) * 8.5f;
-    cam_y = 3.4f;
-    cam_z = game.karts[0].z - sinf(game.karts[0].heading) * 8.5f;
-
     while (1) {
-        Input in;
+        poll_all_inputs();
 
-        read_input(&in);
-        game_update(&game, &in, dt);
+        if (app_state == APP_MENU)
+            menu_frame();
+        else
+            race_frame(dt);
 
-        /* rumble on boosts and wall hits */
-        if (game.karts[0].just_boosted || game.karts[0].hit_wall)
-            rumble_t = 0.18f;
-        if (rumble_t > 0.0f) {
-            rumble_t -= dt;
-            WPAD_Rumble(0, 1);
-            PAD_ControlMotor(PAD_CHAN0, PAD_MOTOR_RUMBLE);
-        } else {
-            WPAD_Rumble(0, 0);
-            PAD_ControlMotor(PAD_CHAN0, PAD_MOTOR_STOP);
-        }
-
-        draw_scene();
-        draw_hud();
+        audio_update();
 
         GX_DrawDone();
 
