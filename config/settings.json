@@ -40,6 +40,27 @@
     "overcommit_seconds": 1.15,
     "overcommit_overshoot_m": 1.10
   },
+  "camera": {
+    "_comment": "Distances in meters, rates per second. Each smoothing value is the fraction of the remaining error still left one second later: smaller is quicker, 0 snaps.",
+    "distance_m": 9.0,
+    "height_m": 3.6,
+    "min_height_above_road_m": 1.6,
+    "look_ahead_m": 6.0,
+    "look_ahead_per_mps": 0.30,
+    "look_ahead_max_m": 22.0,
+    "look_height_m": 1.2,
+    "look_min_height_m": 0.8,
+    "follow_smoothing": 0.006,
+    "look_smoothing": 0.0015,
+    "reverse_deadzone_mps": 1.2,
+    "reverse_full_mps": 6.0,
+    "reverse_orbit_rate_deg_per_s": 150.0,
+    "reverse_smoothing": 0.02,
+    "pitch_influence": 0.65,
+    "pitch_smoothing": 0.05,
+    "pitch_min_deg": -20.0,
+    "pitch_max_deg": 20.0
+  },
   "respawn": {
     "_comment": "Invincibility is visible driving time after the black hold and fade have completed.",
     "visible_fall_seconds": 1.10,

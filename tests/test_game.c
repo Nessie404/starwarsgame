@@ -4,7 +4,7 @@
  *
  *   gcc -std=c99 -O2 -Wall -Werror -Isource \
  *       tests/test_game.c source/game.c source/track.c source/config.c \
- *       -lm -o wiikart-test
+ *       source/camera.c -lm -o wiikart-test
  */
 #include <math.h>
 #include <stdio.h>
@@ -12,6 +12,7 @@
 #include <string.h>
 #include "game.h"
 #include "config.h"
+#include "camera.h"
 
 static int failures = 0;
 
@@ -1786,6 +1787,384 @@ static void test_ai_can_fall(void)
           "aggressive strategies never paid for an overcommit");
 }
 
+
+/* ------------------------------------------------------------------ */
+/* Chase camera                                                        */
+/* ------------------------------------------------------------------ */
+
+/* is the camera in front of the car, or behind it? positive = in front */
+static float camera_ahead_of(const CameraState *c, const Kart *k)
+{
+    return (c->x - k->x) * cosf(k->heading) + (c->z - k->z) * sinf(k->heading);
+}
+
+/* how far ahead of the car the aim point sits, along the car's nose */
+static float camera_aim_ahead_of(const CameraState *c, const Kart *k)
+{
+    return (c->look_x - k->x) * cosf(k->heading) +
+           (c->look_z - k->z) * sinf(k->heading);
+}
+
+static void camera_settle(CameraState *c, const GameSettings *s,
+                          const Kart *k, const Track *t, float seconds)
+{
+    int f, n = (int)(seconds * 60.0f);
+    for (f = 0; f < n; f++)
+        camera_update(c, s, k, t, 1.0f / 60.0f);
+}
+
+/*
+ * Reversing swings the view round to the nose so you are looking where
+ * the car is actually going, and driving forward again brings it back.
+ */
+static void test_camera_reverse_swing(void)
+{
+    GameSettings s;
+    Track t;
+    CameraState c;
+    Kart k;
+    float ahead_fwd, ahead_rev, aim_rev, back_after;
+
+    game_settings_defaults(&s);
+    track_init_with_settings(&t, TRACK_CLASSIC, &s);
+    memset(&k, 0, sizeof(k));
+    k.x = t.px[20]; k.z = t.pz[20]; k.y = t.py[20];
+    k.heading = atan2f(t.dz[20], t.dx[20]);
+    k.seg = 20;
+
+    k.speed = 20.0f;
+    camera_reset(&c, &s, &k, &t);
+    camera_settle(&c, &s, &k, &t, 2.0f);
+    ahead_fwd = camera_ahead_of(&c, &k);
+    CHECK(ahead_fwd < -2.0f,
+          "driving forward, the camera should sit behind the car (%.1f m)",
+          ahead_fwd);
+    CHECK(camera_aim_ahead_of(&c, &k) > 1.0f,
+          "driving forward, the camera should look up the road");
+
+    /* now reverse, hard enough to be past the dead zone */
+    k.speed = -8.0f;
+    camera_settle(&c, &s, &k, &t, 4.0f);
+    ahead_rev = camera_ahead_of(&c, &k);
+    aim_rev = camera_aim_ahead_of(&c, &k);
+    printf("camera: %.1f m behind going forward, %.1f m ahead reversing, "
+           "aim %.1f m\n", -ahead_fwd, ahead_rev, aim_rev);
+    CHECK(ahead_rev > 2.0f,
+          "reversing, the camera should swing round to the nose (%.1f m)",
+          ahead_rev);
+    CHECK(aim_rev < -1.0f,
+          "reversing, the camera should look back down the road (%.1f m)",
+          aim_rev);
+    CHECK(c.orbit > 2.6f, "reverse orbit only reached %.2f rad", c.orbit);
+
+    /* and back to normal once the car is going forward again */
+    k.speed = 14.0f;
+    camera_settle(&c, &s, &k, &t, 4.0f);
+    back_after = camera_ahead_of(&c, &k);
+    CHECK(c.orbit < 0.15f,
+          "the camera did not come back (orbit %.2f rad)", c.orbit);
+    CHECK(back_after < -2.0f,
+          "the camera did not return behind the car (%.1f m)", back_after);
+}
+
+/*
+ * Crossing through zero must not snap the view round, and sitting on the
+ * edge of the dead zone must not set it hunting: a car rocking back and
+ * forth at walking pace is the worst case for both.
+ */
+static void test_camera_no_snap_or_hunt(void)
+{
+    GameSettings s;
+    Track t;
+    CameraState c;
+    Kart k;
+    int f;
+    float prev, worst_step = 0.0f, max_orbit = 0.0f;
+    int direction_changes = 0, last_sign = 0;
+
+    game_settings_defaults(&s);
+    track_init_with_settings(&t, TRACK_CLASSIC, &s);
+    memset(&k, 0, sizeof(k));
+    k.x = t.px[20]; k.z = t.pz[20]; k.y = t.py[20];
+    k.heading = atan2f(t.dz[20], t.dx[20]);
+    k.seg = 20;
+    k.speed = 0.0f;
+    camera_reset(&c, &s, &k, &t);
+
+    /* rock across zero and along the dead-zone edge for ten seconds */
+    for (f = 0; f < 600; f++) {
+        float phase = (float)f / 60.0f;
+        k.speed = sinf(phase * 3.0f) * (s.cam_reverse_deadzone_mps + 0.15f);
+        prev = c.orbit;
+        camera_update(&c, &s, &k, &t, 1.0f / 60.0f);
+        if (fabsf(c.orbit - prev) > worst_step)
+            worst_step = fabsf(c.orbit - prev);
+        if (c.orbit > max_orbit)
+            max_orbit = c.orbit;
+        if (fabsf(c.orbit - prev) > 1.0e-4f) {
+            int sign = (c.orbit > prev) ? 1 : -1;
+            if (last_sign != 0 && sign != last_sign)
+                direction_changes++;
+            last_sign = sign;
+        }
+    }
+    printf("camera near zero: largest step %.3f rad/frame, peak orbit "
+           "%.3f rad, %d direction changes\n", worst_step, max_orbit,
+           direction_changes);
+    CHECK(worst_step <= s.cam_reverse_orbit_rate_dps * (3.14159265f / 180.0f)
+                        / 60.0f + 1.0e-4f,
+          "the camera moved %.3f rad in one frame, past its rate limit",
+          worst_step);
+    CHECK(max_orbit < 0.6f,
+          "rocking around the dead zone swung the camera %.2f rad", max_orbit);
+    CHECK(direction_changes < 40,
+          "the camera hunted back and forth %d times", direction_changes);
+}
+
+/*
+ * On a climb and a descent the camera should tilt with the road — enough
+ * to keep a consistent view of it — without ever aiming into the pavement
+ * or losing the road over a crest.
+ */
+static void test_camera_follows_road_pitch(void)
+{
+    GameSettings s;
+    Track t;
+    int seg, climb_seg = -1, drop_seg = -1, i;
+    float pitch_flat = 0.0f, pitch_climb = 0.0f, pitch_drop = 0.0f;
+    float steepest_up = 0.0f, steepest_down = 0.0f;
+    Kart k;
+    CameraState c;
+
+    game_settings_defaults(&s);
+    track_init_with_settings(&t, TRACK_MONARCH, &s);
+
+    for (i = 0; i < t.n; i++) {
+        if (t.slope[i] > steepest_up)   { steepest_up = t.slope[i];   climb_seg = i; }
+        if (t.slope[i] < steepest_down) { steepest_down = t.slope[i]; drop_seg = i; }
+    }
+    CHECK(climb_seg >= 0 && drop_seg >= 0, "no gradient found on MONARCH");
+
+    for (i = 0; i < 3; i++) {
+        float view;
+        seg = (i == 0) ? 0 : (i == 1 ? climb_seg : drop_seg);
+        /* a flat-ish reference for i == 0: pick the shallowest segment */
+        if (i == 0) {
+            int j; float best = 1.0e9f;
+            for (j = 0; j < t.n; j++)
+                if (fabsf(t.slope[j]) < best) { best = fabsf(t.slope[j]); seg = j; }
+        }
+        memset(&k, 0, sizeof(k));
+        k.x = t.px[seg]; k.z = t.pz[seg]; k.y = t.py[seg];
+        k.heading = atan2f(t.dz[seg], t.dx[seg]);
+        k.seg = seg;
+        k.speed = 18.0f;
+        camera_reset(&c, &s, &k, &t);
+        camera_settle(&c, &s, &k, &t, 3.0f);
+        view = camera_view_pitch(&c);
+        if (i == 0) pitch_flat = view;
+        else if (i == 1) pitch_climb = view;
+        else pitch_drop = view;
+
+        CHECK(c.y > k.y - 0.5f,
+              "camera sank below the car on segment %d (%.1f vs %.1f)",
+              seg, c.y, k.y);
+        CHECK(fabsf(view) < 1.0f,
+              "camera view pitch %.2f rad on segment %d is extreme",
+              view, seg);
+        CHECK(camera_aim_ahead_of(&c, &k) > 1.0f,
+              "camera lost the road ahead on segment %d", seg);
+    }
+
+    printf("camera pitch: flat %+.1f deg, climb %+.1f deg (grade %+.0f%%), "
+           "descent %+.1f deg (grade %+.0f%%)\n",
+           pitch_flat * 57.2958f, pitch_climb * 57.2958f, steepest_up * 100.0f,
+           pitch_drop * 57.2958f, steepest_down * 100.0f);
+
+    /* uphill the view tilts up relative to flat, downhill it tilts down */
+    CHECK(pitch_climb < pitch_flat - 0.02f,
+          "the camera did not tilt up for a %.0f%% climb (%.2f vs %.2f rad)",
+          steepest_up * 100.0f, pitch_climb, pitch_flat);
+    CHECK(pitch_drop > pitch_flat + 0.02f,
+          "the camera did not tilt down for a %.0f%% descent (%.2f vs %.2f)",
+          steepest_down * 100.0f, pitch_drop, pitch_flat);
+}
+
+/*
+ * Drive whole laps of every circuit and watch the camera: it must stay
+ * above the ground, keep the car's direction of travel in front of it,
+ * and never produce a number that is not a number.
+ */
+static void test_camera_stays_sane_everywhere(void)
+{
+    int id;
+    for (id = 0; id < TRACK_COUNT; id++) {
+        Game g;
+        GameConfig cfg = default_cfg(id);
+        Input in[MAX_HUMANS];
+        CameraState c;
+        int f;
+        float lowest = 1.0e9f, worst_pitch = 0.0f;
+
+        game_init(&g, &cfg);
+        g.state = STATE_RACING;
+        idle_inputs(in);
+        in[0].accel = 1;
+        camera_reset(&c, &g.settings, &g.karts[0], &g.track);
+
+        for (f = 0; f < 60 * 90; f++) {
+            int seg;
+            float frac, lat, ground;
+            game_update(&g, in, 1.0f / 60.0f);
+            camera_update(&c, &g.settings, &g.karts[0], &g.track,
+                          1.0f / 60.0f);
+            if (f % 7 == 0)                    /* steer about a bit */
+                in[0].steer = sinf((float)f / 90.0f);
+            track_locate(&g.track, c.x, c.z, g.karts[0].seg, &seg, &frac,
+                         &lat, &ground);
+            if (c.y - ground < lowest)
+                lowest = c.y - ground;
+            if (fabsf(camera_view_pitch(&c)) > fabsf(worst_pitch))
+                worst_pitch = camera_view_pitch(&c);
+            CHECK(!isnan(c.x) && !isnan(c.y) && !isnan(c.z) &&
+                  !isnan(c.look_x) && !isnan(c.look_y) && !isnan(c.look_z),
+                  "%s: camera went NaN at frame %d", track_name(id), f);
+            if (isnan(c.x))
+                break;
+        }
+        printf("camera on %-9s lowest %.2f m over the ground, worst view "
+               "pitch %+.1f deg\n", track_name(id), lowest,
+               worst_pitch * 57.2958f);
+        CHECK(lowest > g.settings.cam_min_height_m - 0.05f,
+              "%s: camera got %.2f m off the ground, floor is %.2f",
+              track_name(id), lowest, g.settings.cam_min_height_m);
+        CHECK(fabsf(worst_pitch) < 1.2f,
+              "%s: camera view pitch reached %.2f rad", track_name(id),
+              worst_pitch);
+    }
+}
+
+/*
+ * Being picked up and put back at a checkpoint is a teleport, not a
+ * drive: the camera has to start again there rather than streak across
+ * the mountain to catch up.
+ */
+static void test_camera_snaps_after_respawn(void)
+{
+    GameSettings s;
+    Track t;
+    Kart k;
+    CameraState c;
+    float gap;
+    int far_seg;
+
+    game_settings_defaults(&s);
+    track_init_with_settings(&t, TRACK_MONARCH, &s);
+    memset(&k, 0, sizeof(k));
+    k.x = t.px[10]; k.z = t.pz[10]; k.y = t.py[10];
+    k.heading = atan2f(t.dz[10], t.dx[10]);
+    k.seg = 10;
+    k.speed = 20.0f;
+    camera_reset(&c, &s, &k, &t);
+    camera_settle(&c, &s, &k, &t, 2.0f);
+
+    far_seg = t.n / 2;                 /* halfway round the circuit */
+    k.x = t.px[far_seg]; k.z = t.pz[far_seg]; k.y = t.py[far_seg];
+    k.heading = atan2f(t.dz[far_seg], t.dx[far_seg]);
+    k.seg = far_seg;
+    k.speed = 0.0f;
+    camera_update(&c, &s, &k, &t, 1.0f / 60.0f);
+
+    gap = sqrtf((c.x - k.x) * (c.x - k.x) + (c.z - k.z) * (c.z - k.z));
+    printf("camera after a respawn: %.1f m from the car in one frame "
+           "(distance setting %.1f)\n", gap, s.cam_distance_m);
+    CHECK(gap < s.cam_distance_m * 1.6f,
+          "the camera was left %.1f m behind after a respawn", gap);
+    CHECK(camera_aim_ahead_of(&c, &k) > 1.0f,
+          "the camera was not looking up the road after a respawn");
+}
+
+/* Look-ahead grows with speed and stops at its configured cap. */
+static void test_camera_look_ahead_scales(void)
+{
+    GameSettings s;
+    Track t;
+    Kart k;
+    CameraState c;
+    float slow, fast, flat_out;
+
+    game_settings_defaults(&s);
+    track_init_with_settings(&t, TRACK_CLASSIC, &s);
+    memset(&k, 0, sizeof(k));
+    k.x = t.px[20]; k.z = t.pz[20]; k.y = t.py[20];
+    k.heading = atan2f(t.dz[20], t.dx[20]);
+    k.seg = 20;
+
+    k.speed = 5.0f;
+    camera_reset(&c, &s, &k, &t);
+    camera_settle(&c, &s, &k, &t, 2.0f);
+    slow = camera_aim_ahead_of(&c, &k);
+
+    k.speed = 40.0f;
+    camera_settle(&c, &s, &k, &t, 2.0f);
+    fast = camera_aim_ahead_of(&c, &k);
+
+    k.speed = 400.0f;               /* absurd, to prove the cap holds */
+    camera_settle(&c, &s, &k, &t, 2.0f);
+    flat_out = camera_aim_ahead_of(&c, &k);
+
+    printf("camera look-ahead: %.1f m at 5 m/s, %.1f m at 40 m/s, "
+           "%.1f m flat out (cap %.1f)\n", slow, fast, flat_out,
+           s.cam_look_ahead_max_m);
+    CHECK(fast > slow + 2.0f,
+          "look-ahead did not grow with speed (%.1f -> %.1f m)", slow, fast);
+    CHECK(flat_out <= s.cam_look_ahead_max_m + 0.5f,
+          "look-ahead blew past its %.1f m cap (%.1f m)",
+          s.cam_look_ahead_max_m, flat_out);
+}
+
+/* The camera block in settings.json is real, and bad values are refused. */
+static void test_camera_settings_json(void)
+{
+    GameSettings s;
+    char error[128];
+    const char *tuned =
+        "{\"camera\":{\"distance_m\":14.0,\"pitch_influence\":0.25,"
+        "\"reverse_full_mps\":9.0}}";
+    const char *broken =
+        "{\"camera\":{\"distance_m\":900.0}}";
+    const char *backwards =
+        "{\"camera\":{\"reverse_deadzone_mps\":8.0,\"reverse_full_mps\":4.0}}";
+
+    game_settings_defaults(&s);
+    CHECK(config_load_settings_file(&s, "config/settings.json", error,
+                                    (int)sizeof(error)),
+          "the shipped settings.json failed to load: %s", error);
+    CHECK(s.cam_distance_m > 0.0f && s.cam_pitch_max_deg > 0.0f,
+          "the shipped settings.json left the camera block empty");
+
+    game_settings_defaults(&s);
+    CHECK(config_load_settings_text(&s, tuned, error, (int)sizeof(error)),
+          "a camera tune was rejected: %s", error);
+    CHECK(fabsf(s.cam_distance_m - 14.0f) < 0.001f &&
+          fabsf(s.cam_pitch_influence - 0.25f) < 0.001f,
+          "the camera tune did not take effect");
+    CHECK(fabsf(s.cam_height_m - 3.6f) < 0.001f,
+          "tuning one camera value clobbered the others");
+
+    game_settings_defaults(&s);
+    CHECK(!config_load_settings_text(&s, broken, error, (int)sizeof(error)),
+          "a 900 m camera distance was accepted");
+    CHECK(fabsf(s.cam_distance_m - 9.0f) < 0.001f,
+          "a rejected camera block was applied anyway (%.1f m)",
+          s.cam_distance_m);
+
+    game_settings_defaults(&s);
+    CHECK(!config_load_settings_text(&s, backwards, error,
+                                     (int)sizeof(error)),
+          "a dead zone above the full-swing speed was accepted");
+}
+
 int main(void)
 {
     test_json_configuration();
@@ -1825,6 +2204,13 @@ int main(void)
     test_ai_shift_styles();
     test_ai_can_fall();
     test_player_model_learns();
+    test_camera_reverse_swing();
+    test_camera_no_snap_or_hunt();
+    test_camera_follows_road_pitch();
+    test_camera_look_ahead_scales();
+    test_camera_snaps_after_respawn();
+    test_camera_stays_sane_everywhere();
+    test_camera_settings_json();
 
     if (failures) {
         printf("%d FAILURE(S)\n", failures);

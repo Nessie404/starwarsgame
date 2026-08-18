@@ -19,10 +19,12 @@
 #include <wiiuse/wpad.h>
 #include <wiikeyboard/keyboard.h>   /* pulls in wsksymdef.h keysyms */
 #include <asndlib.h>
+#include <ogc/conf.h>
 #include <fat.h>
 
 #include "game.h"
 #include "config.h"
+#include "camera.h"
 
 #define DEFAULT_FIFO_SIZE (256 * 1024)
 
@@ -58,7 +60,7 @@ static Track menu_track;
 static int menu_track_loaded = -1;
 
 /* per-player camera + rumble */
-static float cam_x[MAX_HUMANS], cam_y[MAX_HUMANS], cam_z[MAX_HUMANS];
+static CameraState cam[MAX_HUMANS];
 static float rumble_t[MAX_HUMANS];
 static float controller_lost_t;      /* grace timer for a dropped pad    */
 static int prev_countdown_n = -1;    /* last countdown number beeped     */
@@ -1251,6 +1253,22 @@ static void draw_kart(const Track *t, const Kart *k)
     }
 }
 
+/*
+ * Display aspect of one player's viewport. The pixels are square, so the
+ * viewport's own shape is the answer at 4:3; on a 16:9 set every pixel is
+ * displayed 4/3 wider, and the projection has to say so or the picture is
+ * simply stretched.
+ */
+static int video_widescreen;
+
+static float view_aspect(float vw, float vh)
+{
+    float a = vw / vh;
+    if (video_widescreen)
+        a *= (16.0f / 9.0f) / (4.0f / 3.0f);
+    return a;
+}
+
 static void viewport_rect(int p, int n, float *vx, float *vy,
                           float *vw, float *vh)
 {
@@ -1267,46 +1285,32 @@ static void viewport_rect(int p, int n, float *vx, float *vy,
     }
 }
 
-static void draw_scene_for_player(int p)
+static void draw_scene_for_player(int p, float dt)
 {
     Mtx view;
     Mtx44 persp;
-    guVector cam, up, look;
+    guVector eye, up, look;
     const Track *t = &game.track;
     const Kart *k = &game.karts[p];
-    float fwx = cosf(k->heading), fwz = sinf(k->heading);
-    float tgt_x = k->x - fwx * 9.0f;
-    float tgt_y = k->y + 3.6f;
-    float tgt_z = k->z - fwz * 9.0f;
-    float blend = 1.0f - powf(0.006f, 1.0f / 60.0f);
     float vx, vy, vw, vh;
     int i;
 
-    cam_x[p] += (tgt_x - cam_x[p]) * blend;
-    cam_y[p] += (tgt_y - cam_y[p]) * blend;
-    cam_z[p] += (tgt_z - cam_z[p]) * blend;
+    /* the camera itself lives in camera.c, where it can be tested */
+    camera_update(&cam[p], &app_settings, k, t, dt);
 
-    /* keep the camera above the road surface behind the kart */
-    {
-        int seg; float frac, lat, sy;
-        track_locate(t, cam_x[p], cam_z[p], k->seg, &seg, &frac, &lat, &sy);
-        if (cam_y[p] < sy + 1.6f)
-            cam_y[p] = sy + 1.6f;
-    }
-
-    cam.x = cam_x[p];  cam.y = cam_y[p];  cam.z = cam_z[p];
-    up.x  = 0.0f;      up.y  = 1.0f;      up.z  = 0.0f;
-    look.x = k->x + fwx * 4.0f;
-    look.y = k->y + 1.2f;
-    look.z = k->z + fwz * 4.0f;
+    eye.x = cam[p].x;   eye.y = cam[p].y;   eye.z = cam[p].z;
+    up.x  = 0.0f;       up.y  = 1.0f;       up.z  = 0.0f;
+    look.x = cam[p].look_x;
+    look.y = cam[p].look_y;
+    look.z = cam[p].look_z;
 
     viewport_rect(p, game.cfg.n_humans, &vx, &vy, &vw, &vh);
     GX_SetViewport(vx, vy, vw, vh, 0.0f, 1.0f);
     GX_SetScissor((u32)vx, (u32)vy, (u32)vw, (u32)vh);
 
-    guPerspective(persp, 58.0f, vw / vh, 0.5f, 900.0f);
+    guPerspective(persp, 58.0f, view_aspect(vw, vh), 0.5f, 900.0f);
     GX_LoadProjectionMtx(persp, GX_PERSPECTIVE);
-    guLookAt(view, &cam, &up, &look);
+    guLookAt(view, &eye, &up, &look);
     GX_LoadPosMtxImm(view, GX_PNMTX0);
 
     GX_SetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
@@ -1314,8 +1318,8 @@ static void draw_scene_for_player(int p)
     draw_track(t, k->seg);
     for (i = 0; i < NUM_KARTS; i++) {
         const Kart *o = &game.karts[i];
-        float ddx = o->x - cam_x[p];
-        float ddz = o->z - cam_z[p];
+        float ddx = o->x - cam[p].x;
+        float ddz = o->z - cam[p].z;
         if (o != k && ddx * ddx + ddz * ddz > 220.0f * 220.0f)
             continue;              /* a speck at this range */
         draw_kart(t, o);
@@ -1939,7 +1943,7 @@ static void draw_garage_scene(int paint_idx)
 
     GX_SetViewport(0.0f, 0.0f, W, H, 0.0f, 1.0f);
     GX_SetScissor(0, 0, rmode->fbWidth, rmode->efbHeight);
-    guPerspective(persp, 40.0f, W / H, 0.3f, 200.0f);
+    guPerspective(persp, 40.0f, view_aspect(W, H), 0.3f, 200.0f);
     GX_LoadProjectionMtx(persp, GX_PERSPECTIVE);
 
     cam.x = 4.4f;  cam.y = 2.35f; cam.z = 5.2f;
@@ -2199,9 +2203,7 @@ static void start_race(void)
     prev_countdown_n = -1;
     for (p = 0; p < MAX_HUMANS; p++) {
         Kart *k = &game.karts[p < cfg.n_humans ? p : 0];
-        cam_x[p] = k->x - cosf(k->heading) * 9.0f;
-        cam_y[p] = k->y + 3.6f;
-        cam_z[p] = k->z - sinf(k->heading) * 9.0f;
+        camera_reset(&cam[p], &app_settings, k, &game.track);
         rumble_t[p] = 0.0f;
         steer_axis_reset(&steer_axis[p]);
     }
@@ -2494,11 +2496,11 @@ static void menu_frame(float dt)
     }
 }
 
-static void draw_race_views(void)
+static void draw_race_views(float dt)
 {
     int p;
     for (p = 0; p < game.cfg.n_humans; p++)
-        draw_scene_for_player(p);
+        draw_scene_for_player(p, dt);
     draw_race_hud();
 }
 
@@ -2522,7 +2524,7 @@ static void race_frame(float dt)
             audio_beep(720.0f, 70, 135);
         }
 
-        draw_race_views();
+        draw_race_views(0.0f);       /* paused: the camera holds too */
         if (race_exit_confirm)
             draw_race_exit_confirmation();
         return;
@@ -2532,7 +2534,7 @@ static void race_frame(float dt)
         race_exit_confirm = 1;
         stop_all_rumble();
         audio_beep(260.0f, 90, 140);
-        draw_race_views();
+        draw_race_views(0.0f);
         draw_race_exit_confirmation();
         return;
     }
@@ -2594,12 +2596,53 @@ static void race_frame(float dt)
     }
 
     /* blank the unused quadrant in 3P before HUD overlays it */
-    draw_race_views();
+    draw_race_views(dt);
 }
 
 /* ------------------------------------------------------------------ */
 /* Setup and main loop                                                 */
 /* ------------------------------------------------------------------ */
+
+/*
+ * Pick the sharpest picture the console can actually send.
+ *
+ * The Wii's framebuffer is 640 wide whatever happens — that is the
+ * hardware, and no software can raise it. What software can do is stop
+ * throwing half of it away: with a component cable and progressive scan
+ * enabled in the Wii's own settings, 480p draws every line every frame
+ * instead of alternating fields, which removes the interlace shimmer and
+ * lets the deflicker filter be turned off, so edges stay crisp instead of
+ * being blurred vertically on purpose.
+ *
+ * (In Dolphin the same choice matters, and on top of it the emulator's
+ * own Internal Resolution setting can render this scene at 1080p or 4K.
+ * See the README.)
+ */
+static void video_setup(void)
+{
+    GXRModeObj *pref = VIDEO_GetPreferredMode(NULL);
+    int progressive = VIDEO_HaveComponentCable() && CONF_GetProgressiveScan() > 0;
+
+    rmode = pref;
+    if (progressive) {
+        switch (pref->viTVMode >> 2) {
+        case VI_NTSC:     rmode = &TVNtsc480Prog;      break;
+        case VI_EURGB60:  rmode = &TVEurgb60Hz480Prog; break;
+        default:          rmode = pref;                break;  /* PAL 576i
+                                                                * and MPAL
+                                                                * stay put */
+        }
+    }
+
+    /*
+     * 16:9 is not a wider framebuffer, it is the same one stretched by the
+     * TV — so the fix is to render a 16:9 field of view instead of letting
+     * a 4:3 image be pulled sideways. Everything round stays round.
+     */
+    video_widescreen = (CONF_GetAspectRatio() == CONF_ASPECT_16_9);
+
+    VIDEO_Configure(rmode);
+}
 
 int main(int argc, char **argv)
 {
@@ -2620,11 +2663,10 @@ int main(int argc, char **argv)
         keyboard_ok = 1;
     load_editable_config(argc, argv);
 
-    rmode = VIDEO_GetPreferredMode(NULL);
+    video_setup();
     frameBuffer[0] = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
     frameBuffer[1] = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
 
-    VIDEO_Configure(rmode);
     VIDEO_SetNextFramebuffer(frameBuffer[fb]);
     VIDEO_SetBlack(FALSE);
     VIDEO_Flush();

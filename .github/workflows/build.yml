@@ -15,7 +15,7 @@ jobs:
         run: |
           gcc -std=c99 -O2 -Wall -Werror -Isource \
               tests/test_game.c source/game.c source/track.c source/config.c \
-              -lm -o wiikart-test
+              source/camera.c -lm -o wiikart-test
           ./wiikart-test
 
   build:

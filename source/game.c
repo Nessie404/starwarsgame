@@ -104,6 +104,24 @@ void game_settings_defaults(GameSettings *s)
     s->ai_overcommit_min_curvature = 0.028f;
     s->ai_overcommit_seconds = 1.15f;
     s->ai_overcommit_overshoot_m = 1.10f;
+    s->cam_distance_m = 9.0f;
+    s->cam_height_m = 3.6f;
+    s->cam_min_height_m = 1.6f;
+    s->cam_look_ahead_m = 6.0f;
+    s->cam_look_ahead_per_mps = 0.30f;
+    s->cam_look_ahead_max_m = 22.0f;
+    s->cam_look_height_m = 1.2f;
+    s->cam_look_min_height_m = 0.8f;
+    s->cam_follow_smoothing = 0.006f;
+    s->cam_look_smoothing = 0.0015f;
+    s->cam_reverse_deadzone_mps = 1.2f;
+    s->cam_reverse_full_mps = 6.0f;
+    s->cam_reverse_orbit_rate_dps = 150.0f;
+    s->cam_reverse_smoothing = 0.02f;
+    s->cam_pitch_influence = 0.65f;
+    s->cam_pitch_smoothing = 0.05f;
+    s->cam_pitch_min_deg = -20.0f;
+    s->cam_pitch_max_deg = 20.0f;
     s->fall_seconds = 1.10f;
     s->respawn_black_seconds = 1.0f;
     s->respawn_fade_seconds = 0.8f;
@@ -161,6 +179,29 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
     FINITE_RANGE(s->push_seconds, 0.1f, 60.0f, "BAD PUSH TIME");
     FINITE_RANGE(s->fresh_tire_grip_mult, 1.0f, 2.0f, "BAD FRESH GRIP");
     FINITE_RANGE(s->fresh_tire_seconds, 0.1f, 60.0f, "BAD FRESH TIME");
+    FINITE_RANGE(s->cam_distance_m, 2.0f, 40.0f, "BAD CAM DISTANCE");
+    FINITE_RANGE(s->cam_height_m, 0.5f, 20.0f, "BAD CAM HEIGHT");
+    FINITE_RANGE(s->cam_min_height_m, 0.2f, 10.0f, "BAD CAM CLEARANCE");
+    FINITE_RANGE(s->cam_look_ahead_m, 0.5f, 60.0f, "BAD CAM LOOH AHEAD");
+    FINITE_RANGE(s->cam_look_ahead_per_mps, 0.0f, 2.0f, "BAD CAM LOOH GAIN");
+    FINITE_RANGE(s->cam_look_ahead_max_m, 1.0f, 120.0f, "BAD CAM LOOH CAP");
+    if (s->cam_look_ahead_max_m < s->cam_look_ahead_m)
+        return settings_error(error, error_cap, "CAM LOOH CAP TOO LOW");
+    FINITE_RANGE(s->cam_look_height_m, -2.0f, 10.0f, "BAD CAM AIM HEIGHT");
+    FINITE_RANGE(s->cam_look_min_height_m, 0.0f, 10.0f, "BAD CAM AIM FLOOR");
+    FINITE_RANGE(s->cam_follow_smoothing, 0.0f, 0.99f, "BAD CAM SMOOTHING");
+    FINITE_RANGE(s->cam_look_smoothing, 0.0f, 0.99f, "BAD CAM AIM SMOOTH");
+    FINITE_RANGE(s->cam_reverse_deadzone_mps, 0.0f, 15.0f, "BAD CAM DEADZONE");
+    FINITE_RANGE(s->cam_reverse_full_mps, 0.1f, 30.0f, "BAD CAM FULL SPEED");
+    if (s->cam_reverse_full_mps <= s->cam_reverse_deadzone_mps)
+        return settings_error(error, error_cap, "CAM DEADZONE TOO HIGH");
+    FINITE_RANGE(s->cam_reverse_orbit_rate_dps, 10.0f, 1080.0f,
+                 "BAD CAM ORBIT RATE");
+    FINITE_RANGE(s->cam_reverse_smoothing, 0.0f, 0.99f, "BAD CAM ORBIT SMOOTH");
+    FINITE_RANGE(s->cam_pitch_influence, 0.0f, 1.50f, "BAD CAM PITCH GAIN");
+    FINITE_RANGE(s->cam_pitch_smoothing, 0.0f, 0.99f, "BAD CAM PITCH SMOOTH");
+    FINITE_RANGE(s->cam_pitch_min_deg, -60.0f, 0.0f, "BAD CAM PITCH FLOOR");
+    FINITE_RANGE(s->cam_pitch_max_deg, 0.0f, 60.0f, "BAD CAM PITCH CEILING");
     FINITE_RANGE(s->ai_skill_mult, 0.50f, 1.30f, "BAD AI SKILL");
     FINITE_RANGE(s->ai_brake_mult, 0.30f, 1.50f, "BAD AI BRAKES");
     FINITE_RANGE(s->ai_unguarded_line_room, 0.20f, 1.40f,

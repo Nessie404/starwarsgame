@@ -757,6 +757,50 @@ int config_load_settings_text(GameSettings *settings, const char *json,
                          &s.ai_overcommit_overshoot_m,
                          error, error_cap))) goto fail;
 
+    obj = object_get(json, tokens, count, 0, "camera");
+    if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
+        set_error(error, error_cap, "CAMERA NEEDS OBJECT");
+        goto fail;
+    }
+    if (obj >= 0 &&
+        (!optional_float(json, tokens, count, obj, "distance_m",
+                         &s.cam_distance_m, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "height_m",
+                         &s.cam_height_m, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "min_height_above_road_m",
+                         &s.cam_min_height_m, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "look_ahead_m",
+                         &s.cam_look_ahead_m, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "look_ahead_per_mps",
+                         &s.cam_look_ahead_per_mps, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "look_ahead_max_m",
+                         &s.cam_look_ahead_max_m, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "look_height_m",
+                         &s.cam_look_height_m, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "look_min_height_m",
+                         &s.cam_look_min_height_m, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "follow_smoothing",
+                         &s.cam_follow_smoothing, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "look_smoothing",
+                         &s.cam_look_smoothing, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "reverse_deadzone_mps",
+                         &s.cam_reverse_deadzone_mps, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "reverse_full_mps",
+                         &s.cam_reverse_full_mps, error, error_cap) ||
+         !optional_float(json, tokens, count, obj,
+                         "reverse_orbit_rate_deg_per_s",
+                         &s.cam_reverse_orbit_rate_dps, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "reverse_smoothing",
+                         &s.cam_reverse_smoothing, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "pitch_influence",
+                         &s.cam_pitch_influence, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "pitch_smoothing",
+                         &s.cam_pitch_smoothing, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "pitch_min_deg",
+                         &s.cam_pitch_min_deg, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "pitch_max_deg",
+                         &s.cam_pitch_max_deg, error, error_cap))) goto fail;
+
     obj = object_get(json, tokens, count, 0, "respawn");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
         set_error(error, error_cap, "RESPAWN NEEDS OBJECT");

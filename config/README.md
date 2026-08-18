@@ -51,12 +51,51 @@ This file exposes the main tuning surfaces:
 - tire and power-up multipliers;
 - AI pace, braking, safe-road use, and overcommit behavior;
 - cliff fall, blackout, fade, invincibility, and flash timing;
+- the chase camera (see below);
 - per-track width, plan scale, elevation, and optional fixed lap count.
 
 For a track, `laps: 0` means automatic. A positive lap count is an explicit
 override (up to 20), independent of the automatic minimum and maximum.
 Width/scale/elevation values are multipliers, so `1.10` means ten percent
 more than the built-in geometry.
+
+### The `camera` block
+
+Distances are meters and rates are per second. Every `*_smoothing` value is
+the fraction of the remaining error still left one second later, which is
+frame-rate independent: smaller is quicker, and `0` snaps.
+
+| Key | Default | What it does |
+|---|---|---|
+| `distance_m` | 9.0 | How far behind the car the camera sits |
+| `height_m` | 3.6 | How high above it |
+| `min_height_above_road_m` | 1.6 | Clearance it will not go below, whatever the ground does |
+| `look_ahead_m` | 6.0 | How far up the road it aims when stopped |
+| `look_ahead_per_mps` | 0.30 | Extra meters of aim per m/s of speed |
+| `look_ahead_max_m` | 22.0 | Cap on the above |
+| `look_height_m` | 1.2 | Height of the aim point above the car |
+| `look_min_height_m` | 0.8 | Keeps the aim point off the pavement |
+| `follow_smoothing` | 0.006 | How loosely the camera body follows |
+| `look_smoothing` | 0.0015 | How loosely the aim point follows |
+| `reverse_deadzone_mps` | 1.2 | Reverse speed below which the view is left alone |
+| `reverse_full_mps` | 6.0 | Reverse speed at which it has fully swung to the nose |
+| `reverse_orbit_rate_deg_per_s` | 150 | Hard limit on how fast it may swing |
+| `reverse_smoothing` | 0.02 | How eagerly it chases the swing |
+| `pitch_influence` | 0.65 | How much of the road's pitch it copies (0 = stays level) |
+| `pitch_smoothing` | 0.05 | How much a bump is allowed to nod the camera |
+| `pitch_min_deg` | -20 | Furthest it may tilt up |
+| `pitch_max_deg` | 20 | Furthest it may tilt down |
+
+Reversing swings the camera round to the nose so the view faces the way the
+car is actually going, and driving forward brings it back. The dead zone and
+the rate limit are what stop a car rocking around a standstill from spinning
+the view, so raise `reverse_deadzone_mps` if you want to reverse further
+before the view moves at all, and lower `reverse_orbit_rate_deg_per_s` if
+the swing feels abrupt.
+
+`reverse_full_mps` must be above `reverse_deadzone_mps`, and
+`look_ahead_max_m` at or above `look_ahead_m`; the file is rejected as a
+whole if either is not true, and the built-in camera stays active.
 
 ## `controls.json`
 

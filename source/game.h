@@ -251,6 +251,30 @@ struct GameSettings {
     float ai_overcommit_seconds;
     float ai_overcommit_overshoot_m;
 
+    /*
+     * Chase camera. Distances are meters, rates per second, and every
+     * "smoothing" is the fraction of the remaining error still left one
+     * second later (small = quick, 0 = snap).
+     */
+    float cam_distance_m;
+    float cam_height_m;
+    float cam_min_height_m;          /* clearance over the ground below  */
+    float cam_look_ahead_m;
+    float cam_look_ahead_per_mps;    /* extra look-ahead with speed      */
+    float cam_look_ahead_max_m;
+    float cam_look_height_m;
+    float cam_look_min_height_m;     /* keeps the aim off the pavement   */
+    float cam_follow_smoothing;
+    float cam_look_smoothing;
+    float cam_reverse_deadzone_mps;  /* below this, reversing is ignored */
+    float cam_reverse_full_mps;      /* fully swung round by this speed  */
+    float cam_reverse_orbit_rate_dps;
+    float cam_reverse_smoothing;
+    float cam_pitch_influence;       /* 0 = level, 1 = follows the road  */
+    float cam_pitch_smoothing;
+    float cam_pitch_min_deg;         /* negative = allowed to look up    */
+    float cam_pitch_max_deg;
+
     /* cliff recovery */
     float fall_seconds;
     float respawn_black_seconds;

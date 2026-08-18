@@ -1,4 +1,4 @@
-# WiiKart 1.3.0
+# WiiKart 1.4.0
 
 An original racing game built as **Nintendo Wii homebrew**. It compiles to
 a real Wii executable (`wiikart.dol`) that runs in the
@@ -18,9 +18,9 @@ on the [v0.1 release](https://github.com/Nessie404/starwarsgame/releases/tag/v0.
 
 See [CHANGELOG.md](CHANGELOG.md) for the release-by-release inventory and
 [TODO.md](TODO.md) for proposed future work that is explicitly not part of
-v1.3.0.
+v1.4.0.
 
-Version 1.3.0 is a semi-sim mountain racer: pick a car in the garage —
+Version 1.4.0 is a semi-sim mountain racer: pick a car in the garage —
 its gearbox, tires and paint, all defined by real-world performance
 numbers — then race a **field of eleven AI drivers who each race
 differently, shift differently, learn from their mistakes, and adapt to
@@ -56,6 +56,10 @@ hairpins.
   keyboard/Xbox/Dolphin input translator, wider roads, intentionally
   fallible aggressive AI, a longer and harder Monarch, and a staged
   blackout/fade/invincibility recovery after a cliff fall.
+- **v1.4.0** — a rebuilt chase camera that swings round to the nose when
+  you reverse, follows the road over crests and down descents, and is
+  configurable end to end; plus 480p progressive output and true 16:9
+  rendering instead of a stretched 4:3 picture.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -186,6 +190,28 @@ hairpins.
   **W** is the throttle, **S** the brake (arrow keys mirror all four).
 - **Wii Remote (emulated or real):** sideways grip, tilt to steer —
   Nunchuk and Classic Controller also work.
+
+### Getting a sharper picture
+
+The Wii's framebuffer is 640 pixels wide and no software can change that —
+it is the video hardware. What v1.4.0 does is stop throwing half of it
+away, and stop stretching what is left:
+
+- **Progressive scan.** With a component cable and progressive scan enabled
+  in the Wii's own settings, WiiKart now selects a 480p mode instead of
+  480i, so every line is drawn every frame. No interlace shimmer on the
+  guardrails, and no deflicker blur applied on purpose to hide it. In
+  Dolphin, enable **Config → Wii → Aspect Ratio / Progressive Scan (480p)**
+  to get the same mode.
+- **Real 16:9.** If the console is set to widescreen, WiiKart renders a
+  16:9 field of view rather than letting a 4:3 image be pulled sideways by
+  the TV. Wheels stay round. There is no need for Dolphin's "widescreen
+  hack" — set the emulated Wii to 16:9 and the game does it properly.
+- **In Dolphin, go further.** **Graphics → General → Internal Resolution**
+  renders this scene at 2x, 4x, or higher — 1080p, 1440p, 4K — and
+  **Graphics → Enhancements** adds anti-aliasing and anisotropic
+  filtering. That is where the big visual win is on a PC, and none of it
+  costs anything on the Wii itself.
 
 ## Running on a real Wii
 
@@ -395,6 +421,17 @@ translation. Recovery tests now verify the black hold, fade, five visible
 seconds of invincibility, collision immunity, and continued drivability.
 The deterministic Monarch stress run also proves that aggressive AI can
 overcommit and fall while the full field can still finish every circuit.
+
+v1.4.0 puts the chase camera in its own module so its behaviour is
+testable rather than something you have to see to believe: that reversing
+swings the view round to the nose and driving forward brings it back, that
+rocking around a standstill neither snaps it nor sets it hunting (measured
+at 0.005 rad per frame against a 2.5 rad/s limit), that it tilts up for a
+17% climb and down for a 19% descent, that look-ahead grows with speed and
+stops at its cap, that a checkpoint respawn re-places it instead of letting
+it streak across the mountain, and that over 90 seconds of driving on every
+circuit it never drops below its ground clearance, never aims more than
+15 degrees off level, and never produces a NaN.
 
 ## Ideas for later
 

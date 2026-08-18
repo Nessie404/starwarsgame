@@ -1,30 +1,40 @@
 # WiiKart future work
 
-These are design targets for releases after v1.3.0. They are deliberately
-not implemented in v1.3.0; details may change after testing, because apparently
-cars, mountains, and tires all object to being reduced to one convenient
-slider.
+These are design targets for releases after v1.4.0. Details may change after
+testing, because apparently cars, mountains, and tires all object to being
+reduced to one convenient slider.
 
-## High priority: camera
+## Camera — done in v1.4.0
 
-- [ ] Add a smooth reversing camera. As reverse speed increases, orbit the
+The whole camera block shipped in v1.4.0, in `source/camera.c` with host
+tests in `tests/test_game.c` and settings in the `camera` block of
+`config/settings.json`.
+
+- [x] Add a smooth reversing camera. As reverse speed increases, orbit the
   chase camera progressively toward the front of the car so the view looks in
   the direction the car is actually backing. Use speed-based interpolation,
   damping, and a small dead zone so crossing through zero does not snap the
   camera 180 degrees or make it hunt back and forth.
-- [ ] Return the camera smoothly to its normal forward chase position as the
+- [x] Return the camera smoothly to its normal forward chase position as the
   car slows in reverse or begins moving forward again.
-- [ ] Make camera pitch follow the road/car pitch enough to preserve a
+- [x] Make camera pitch follow the road/car pitch enough to preserve a
   consistent viewing angle on climbs, crests, and descents. Smooth the response
   so every small surface change does not become an involuntary camera nod.
-- [ ] Clamp pitch and vertical movement so the camera never settles too low,
+- [x] Clamp pitch and vertical movement so the camera never settles too low,
   points mostly into the pavement on a descent, or loses the road over a crest.
-- [ ] Keep the car's direction of travel and useful road-ahead area visible at
+- [x] Keep the car's direction of travel and useful road-ahead area visible at
   all times. Add speed-sensitive look-ahead while preserving terrain avoidance
   and a readable amount of horizon.
-- [ ] Expose reverse-orbit speed, smoothing, pitch influence, pitch limits,
+- [x] Expose reverse-orbit speed, smoothing, pitch influence, pitch limits,
   height, distance, and look-ahead as documented camera settings rather than
   burying the final feel in constants.
+
+Left for later, now that the camera has somewhere to live:
+
+- [ ] Optional cockpit and bumper views, sharing the same pitch and
+  look-ahead settings.
+- [ ] Let the camera lead into corners slightly rather than only along the
+  car's nose.
 
 ## Roads, passes, and conditions
 

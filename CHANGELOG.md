@@ -4,6 +4,40 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.4.0] - 2026-08-18
+
+### Added
+
+- Rebuilt chase camera, now its own tested module rather than a few lines
+  inside the renderer:
+  - reversing past a dead zone swings the view round toward the nose so it
+    looks where the car is actually going, rate-limited and smoothed so
+    crossing through zero can neither snap it round nor set it hunting;
+  - driving forward again brings it back the same way;
+  - the camera copies a configurable share of the road's pitch, so climbs,
+    crests and descents keep a consistent viewing angle instead of showing
+    a wall of pavement or a lot of sky;
+  - pitch, height and ground clearance are clamped, and look-ahead grows
+    with speed up to a cap;
+  - a checkpoint respawn re-places the camera instead of letting it streak
+    across the mountain after the car.
+- A `camera` block in `settings.json` exposing all of the above — distance,
+  height, clearance, look-ahead and its speed gain and cap, aim height and
+  floor, follow and aim smoothing, reverse dead zone, full-swing speed,
+  orbit rate and smoothing, pitch influence, pitch smoothing, and pitch
+  limits — documented in `config/README.md`.
+
+### Changed
+
+- Video output selects 480p progressive when a component cable is present
+  and progressive scan is enabled, instead of always taking the interlaced
+  mode: every line is drawn every frame, with no deflicker blur.
+- Widescreen consoles now get a true 16:9 projection rather than a 4:3
+  image stretched sideways by the TV. Split-screen viewports are corrected
+  the same way.
+- The camera holds still while the leave-race confirmation is up, matching
+  the frozen simulation.
+
 ## [1.3.0] - 2026-08-17
 
 ### Added
@@ -72,6 +106,7 @@ artifacts and their longer descriptions remain available on the
   strategies, learning, driver adaptation, Berthoud and Loveland Pass, and
   motorsport-style power-ups.
 
+[1.4.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.4.0
 [1.3.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.3.0
 [1.2.1]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.2.1
 [1.2.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.2.0
