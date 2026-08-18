@@ -35,7 +35,11 @@ jobs:
 
           # Interim CI builds and the mis-numbered v1.0.0 are superseded
           # by v1.0, which the build workflow publishes.
-          for tag in build-1 build-3 build-4 build-5 build-6 build-7 v1.0.0; do
+          # v1.1 is superseded by v1.1.0, which is built from the commit
+          # that actually produced its binary (the v1.1 tag pointed at the
+          # commit before the steering fix, while its zip was the fixed
+          # build — confusing, so it goes).
+          for tag in build-1 build-3 build-4 build-5 build-6 build-7 v1.0.0 v1.1; do
             if gh release view "$tag" >/dev/null 2>&1; then
               gh release delete "$tag" --yes --cleanup-tag
             fi

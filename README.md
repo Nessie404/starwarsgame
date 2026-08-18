@@ -1,4 +1,4 @@
-# WiiKart 1.1
+# WiiKart 1.1.0
 
 An original racing game built as **Nintendo Wii homebrew**. It compiles to
 a real Wii executable (`wiikart.dol`) that runs in the
@@ -9,19 +9,21 @@ Wii hardware through the Homebrew Channel.
 [latest release](https://github.com/Nessie404/starwarsgame/releases/latest),
 unzip, and open `wiikart.dol` in Dolphin.
 
-Version 1.1 is a semi-sim mountain racer: pick a car in the garage —
+Version 1.1.0 is a semi-sim mountain racer: pick a car in the garage —
 defined by real-world performance numbers — then race 3 laps against a
 **field of eleven AI drivers who each race differently, learn from their
 mistakes, and adapt to you**, over three circuits including two stylized
 Colorado passes with real grades, switchbacks and gravity. Think arcade
 fun with a driving model that expects you to brake for the hairpins.
 
-**Version history:** v0.1 was the original arcade kart racer; v1.0 was the
-driving-model rewrite (physics, garage, WASD, Colorado passes); v1.1 adds
+**Version history:** v0.1 was the original arcade kart racer (v0.1.1 adds
+sound, WASD and the steering fix); v1.0 was the driving-model rewrite
+(physics, garage, WASD, Colorado passes) and v1.0.1 fixes its inverted
+steering; v1.1.0 adds
 the twelve-car field with individual strategies, learning and adaptation,
 rebuilds Berthoud as a 19-corner technical circuit, swaps nitro and boost
-pads for motorsport power-ups, and removes the remaining arcade cheats.
-v1.1 also **fixes inverted steering** — left really is left now.
+pads for motorsport power-ups, removes the remaining arcade cheats, and
+**fixes inverted steering** — left really is left now, on every device.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
