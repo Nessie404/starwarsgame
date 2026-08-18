@@ -1,0 +1,740 @@
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+index faba5d9..b0ea811 100644
+--- a/.github/workflows/build.yml
++++ b/.github/workflows/build.yml
+@@ -62,6 +62,10 @@ jobs:
+             copy the "apps" folder to your SD card, launch from the
+             Homebrew Channel.
+ 
++          Controls (USB keyboard): W = gas, S = brake, A = steer left,
++          D = steer right, Space/Shift = drift, R = restart, Esc = quit.
++          In Dolphin enable Config > Wii > Connect USB Keyboard.
++
+           Controls (Wii Remote sideways): tilt or D-pad = steer,
+           2/A = gas, 1 = brake, hold B = drift (release for boost),
+           + = restart, HOME = quit.
+diff --git a/Makefile b/Makefile
+index 909e076..9cdebcc 100644
+--- a/Makefile
++++ b/Makefile
+@@ -34,7 +34,7 @@ LDFLAGS	=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
+ #---------------------------------------------------------------------------------
+ # any extra libraries we wish to link with the project
+ #---------------------------------------------------------------------------------
+-LIBS	:=	-lwiiuse -lbte -logc -lm
++LIBS	:=	-lwiikeyboard -lwiiuse -lbte -lasnd -logc -lm
+ 
+ #---------------------------------------------------------------------------------
+ # list of directories containing libraries, this must be the top level containing
+diff --git a/README.md b/README.md
+index 209ac1e..23c2278 100644
+--- a/README.md
++++ b/README.md
+@@ -1,4 +1,4 @@
+-# WiiKart
++# WiiKart 0.1.1
+ 
+ An original Mario-Kart-style arcade racer built as **Nintendo Wii homebrew**.
+ It compiles to a real Wii executable (`wiikart.dol`) that runs in the
+@@ -9,6 +9,11 @@ Race 3 laps around a circuit against 4 AI drivers, with Mario-Kart-style
+ drifting, mini-turbos, boost pads, rubber-band AI, a chase camera, minimap
+ and tilt steering with the Wii Remote held sideways.
+ 
++Version 0.1.1 adds **procedural sound** (an engine note that follows your
++speed, 3-2-1 countdown beeps, a GO chime and a boost sting, all
++synthesized at runtime — no sound files) and **WASD steering from a USB
++keyboard**: **W** gas, **S** brake, **A** left, **D** right.
++
+ > **Note on Nintendo content:** this is 100% original homebrew. It contains
+ > no Nintendo code or assets and does not require (or include) any game disc
+ > or ROM. Emulating the actual *Mario Kart Wii* game requires a disc image
+@@ -32,6 +37,10 @@ Remote → Configure**): map the buttons below to your keyboard/gamepad, and
+ map *Tilt* if you want motion steering, or just steer with the D-pad
+ mappings.
+ 
++Prefer WASD? Turn on **Config → Wii → Connect USB Keyboard** and the game
++reads your real keyboard directly — no key mapping needed. Sound comes out
++of Dolphin's normal audio backend; nothing to configure.
++
+ ## Running on a real Wii
+ 
+ 1. Build the Homebrew Channel layout: `make dist`
+@@ -39,7 +48,24 @@ mappings.
+    `SD:/apps/wiikart/boot.dol` (plus `meta.xml` and `icon.png`).
+ 3. Launch **WiiKart** from the Homebrew Channel.
+ 
+-## Controls (Wii Remote held sideways, like Mario Kart Wii)
++## Controls
++
++### USB keyboard (WASD)
++
++| Key                  | Action                                     |
++|----------------------|--------------------------------------------|
++| **W** (or ↑)         | Accelerate                                 |
++| **S** (or ↓)         | Brake / reverse                            |
++| **A** (or ←)         | Steer left                                 |
++| **D** (or →)         | Steer right                                |
++| **Space** or **Shift** | Hold while turning to drift; release for a mini-turbo |
++| **R**                | Restart the race                           |
++| **Esc**              | Quit to loader                             |
++
++Works on a real Wii with a USB keyboard plugged in, and in Dolphin with
++**Config → Wii → Connect USB Keyboard** enabled.
++
++### Wii Remote held sideways, like Mario Kart Wii
+ 
+ | Input            | Action                                    |
+ |------------------|-------------------------------------------|
+@@ -54,6 +80,22 @@ mappings.
+ Orange pads on the road give a speed boost. Grass is slow — unless you're
+ boosting. Drift sparks go blue → yellow → orange as your mini-turbo charges.
+ 
++## Sound
++
++All audio is synthesized at runtime through libogc's ASND — there are no
++sound assets in the repo:
++
++- **Engine:** one cycle of a buzzy square-plus-harmonics waveform played
++  as an infinite voice, whose sample rate and volume are retuned every
++  frame from the player kart's speed (and pushed up a little while a
++  boost is running).
++- **Countdown:** a 440 Hz beep on each of 3, 2, 1, then a longer 880 Hz
++  chime on GO.
++- **Boost:** a low 220 Hz sting whenever you pick up a boost pad or cash
++  in a drift mini-turbo.
++
++If the audio buffers cannot be allocated the game simply runs silently.
++
+ ## Building
+ 
+ You need devkitPro's **devkitPPC** toolchain (`wii-dev` package group).
+@@ -79,7 +121,8 @@ so you can download a ready-to-run binary from the Actions tab.
+ source/game.h     shared types and the simulation API
+ source/track.c    circuit geometry (Catmull-Rom spline), locate/progress
+ source/game.c     kart physics, drifting, boost, AI, laps, ranking
+-source/main.c     Wii platform layer: GX 3D renderer, HUD, Wiimote input
++source/main.c     Wii platform layer: GX 3D renderer, HUD, ASND audio,
++                  Wiimote + USB keyboard input
+ tests/            host-side tests for the simulation (plain gcc, no Wii SDK)
+ hbc/              Homebrew Channel metadata (meta.xml, icon.png)
+ tools/            run-dolphin.sh launcher
+@@ -95,10 +138,17 @@ gcc -std=c99 -O2 -Wall -Werror -Isource \
+ ```
+ 
+ The tests simulate whole AI races headlessly and check track geometry, lap
+-counting, ranking, drift boosts and physics stability.
++counting, ranking, drift boosts, physics stability, and the steering sign
++convention. That last one is measured the way a player sees it: the test
++computes the chase camera's right axis, `(-sin h, 0, cos h)`, drives the
++kart for 0.75 s and projects how far it actually travelled across the
++screen — a negative `Input.steer` (the **A** key) has to move the kart
++left on screen, a positive one (**D**) right, and the two have to be
++mirror images. Asserting only that the heading changed is what let this
++sign slip through before.
+ 
+ ## Ideas for later
+ 
+-- Engine/skid audio via ASND
++- Tire-squeal and collision audio to go with the engine note
+ - More circuits and a track selector
+ - Items, and split-screen multiplayer for up to 4 Wii Remotes
+diff --git a/hbc/meta.xml b/hbc/meta.xml
+index c294bbb..342ea70 100644
+--- a/hbc/meta.xml
++++ b/hbc/meta.xml
+@@ -2,8 +2,8 @@
+ <app version="1">
+   <name>WiiKart</name>
+   <coder>kaz</coder>
+-  <version>1.0</version>
++  <version>0.1.1</version>
+   <release_date>20260817000000</release_date>
+   <short_description>Arcade kart racing</short_description>
+-  <long_description>An original arcade kart racer: 3 laps against 4 AI drivers, with drifting, mini-turbos and boost pads. Hold the Wii Remote sideways and tilt to steer. Runs on the Wii via the Homebrew Channel and in the Dolphin emulator.</long_description>
++  <long_description>An original arcade kart racer: 3 laps against 4 AI drivers, with drifting, mini-turbos, boost pads and procedural engine/countdown audio. Hold the Wii Remote sideways and tilt to steer, or plug in a USB keyboard and drive with WASD (A left, D right). Runs on the Wii via the Homebrew Channel and in the Dolphin emulator.</long_description>
+ </app>
+diff --git a/source/game.c b/source/game.c
+index a9c7e7a..a1a3519 100644
+--- a/source/game.c
++++ b/source/game.c
+@@ -28,7 +28,7 @@ static void kart_place_on_grid(Game *g, Kart *k, int grid_slot)
+ {
+     const Track *t = &g->track;
+     float d0x = t->dx[0], d0z = t->dz[0];
+-    float lx = -d0z, lz = d0x;
++    float lx = -d0z, lz = d0x;   /* lateral basis (+ = right) */
+     int   row = grid_slot;
+     float side = (grid_slot % 2 == 0) ? 1.8f : -1.8f;
+     float back = 5.0f + (float)row * 3.4f;
+@@ -163,7 +163,9 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
+                             -1.5f, 1.5f);
+ 
+     /* --- steering ---
+-     * Turn response peaks at mid speed and softens near top speed. */
++     * Turn response peaks at mid speed and softens near top speed.
++     * Positive steer increases heading, which turns right on screen;
++     * in reverse the same input turns the other way, as on a real kart. */
+     turn_f = fabsf(k->speed) / (6.0f + 0.045f * k->speed * k->speed);
+     k->heading += steer * 2.4f * turn_f * dt * (k->speed < 0.0f ? -1.0f : 1.0f);
+     k->heading = game_angle_wrap(k->heading);
+@@ -184,7 +186,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
+         if (fabsf(lat) > t->wall_half) {
+             float clamped = game_clampf(lat, -t->wall_half, t->wall_half);
+             float excess = lat - clamped;
+-            k->x += t->dz[seg] * excess;   /* -= left * excess */
++            k->x += t->dz[seg] * excess;   /* -= lateral * excess */
+             k->z -= t->dx[seg] * excess;
+             k->speed *= 0.96f;
+             k->hit_wall = 1;
+diff --git a/source/game.h b/source/game.h
+index 30ca5e7..22a73ba 100644
+--- a/source/game.h
++++ b/source/game.h
+@@ -40,7 +40,9 @@ void track_init(Track *t);
+ /* Locate (x,z) relative to the track. hint is the last known segment
+  * (searched +/- a small window); pass -1 to search the whole track.
+  * Outputs: seg = nearest segment index, frac = [0,1) along it,
+- * lat = signed lateral offset (positive = left of driving direction). */
++ * lat = signed lateral offset along the lateral basis (-dz, dx), which
++ * is the chase camera's right axis: positive lat = right of the driving
++ * direction as seen on screen. */
+ void track_locate(const Track *t, float x, float z, int hint,
+                   int *seg, float *frac, float *lat);
+ 
+@@ -59,7 +61,12 @@ int track_is_pad_seg(const Track *t, int seg);
+ #define KART_REVERSE_MAX  8.0f
+ 
+ typedef struct {
+-    float steer;   /* -1 .. 1 (positive turns left, math convention)    */
++    /* Steering: -1 .. 1, POSITIVE TURNS RIGHT. The sim does
++     * `heading += steer * ...`, and increasing heading rotates the kart
++     * toward the chase camera's right axis (see track_locate above), so
++     * positive really is screen-right. Platform layers must map their
++     * left input (A key, D-pad left, left tilt) to negative steer. */
++    float steer;
+     int   accel;
+     int   brake;
+     int   hop;     /* held: drift button                                */
+@@ -67,7 +74,8 @@ typedef struct {
+ 
+ typedef struct {
+     float x, z;
+-    float heading;        /* radians; dir = (cos h, sin h) in (x, z)    */
++    float heading;        /* radians; dir = (cos h, sin h) in (x, z);
++                           * rising heading turns toward screen right   */
+     float speed;          /* signed scalar speed along heading          */
+     float steer_vis;      /* smoothed steer for wheel/body visuals      */
+ 
+@@ -75,7 +83,7 @@ typedef struct {
+     float prog_raw;       /* seg + frac, in [0, n)                      */
+     float total_progress; /* continuous, crosses 0 at start line        */
+     int   lap;            /* floor(total_progress / n); -1 before line  */
+-    float lat;            /* cached signed lateral offset               */
++    float lat;            /* cached lateral offset (+ = right)         */
+ 
+     int   drifting;       /* 0 = no, +1 / -1 = locked drift direction   */
+     float drift_charge;   /* seconds of accumulated drift               */
+diff --git a/source/main.c b/source/main.c
+index e4966a3..40d5c2b 100644
+--- a/source/main.c
++++ b/source/main.c
+@@ -3,7 +3,9 @@
+  *
+  * Everything libogc-specific lives here: video / GX setup, flat-shaded
+  * 3D rendering of the track and karts, the 2D HUD (7-segment glyphs,
+- * minimap) and Wiimote input (held sideways, Mario-Kart-Wii-style).
++ * minimap), procedural ASND audio (engine note, countdown beeps, boost)
++ * and input from the Wiimote (held sideways, Mario-Kart-Wii-style) or a
++ * USB keyboard (WASD: A = left, D = right).
+  *
+  * Runs on real hardware via the Homebrew Channel and in the Dolphin
+  * emulator (File > Open > wiikart.dol).
+@@ -15,6 +17,8 @@
+ #include <malloc.h>
+ #include <gccore.h>
+ #include <wiiuse/wpad.h>
++#include <wiikeyboard/keyboard.h>   /* also provides the KS_* keysyms */
++#include <asndlib.h>
+ 
+ #include "game.h"
+ 
+@@ -23,6 +27,15 @@
+ /* If tilt steering feels inverted on your remote, flip this to -1. */
+ #define TILT_SIGN (+1.0f)
+ 
++/* Steering sign, once and for all: the chase camera looks along the
++ * kart's heading with up = +Y, so its right axis is
++ * cross(forward, up) = (-sin h, 0, cos h) -- exactly the simulation's
++ * lateral basis. Increasing `heading` therefore rotates the kart toward
++ * SCREEN RIGHT, and the sim integrates `heading += steer * ...`, so a
++ * POSITIVE steer value turns RIGHT. Every mapping below obeys that:
++ * A / D-pad-left / left-tilt produce negative steer, D / D-pad-right /
++ * right-tilt produce positive steer. */
++
+ static void *frameBuffer[2] = { NULL, NULL };
+ static GXRModeObj *rmode = NULL;
+ static u32 fb = 0;
+@@ -114,7 +127,7 @@ static void draw_box(float cx, float cy, float cz, float yaw,
+                      u8 r, u8 g, u8 b)
+ {
+     float fx = cosf(yaw), fz = sinf(yaw);   /* forward  */
+-    float lx = -fz,       lz = fx;          /* lateral (left) */
++    float lx = -fz,       lz = fx;          /* lateral (+ = screen right) */
+     float corner[8][3];
+     int i;
+ 
+@@ -132,8 +145,8 @@ static void draw_box(float cx, float cy, float cz, float yaw,
+         float s_top   = 0.55f + 0.45f * LY;
+         float s_front = 0.55f + 0.45f * fmaxf(0.0f,  fx * LX + fz * LZ);
+         float s_back  = 0.55f + 0.45f * fmaxf(0.0f, -fx * LX - fz * LZ);
+-        float s_left  = 0.55f + 0.45f * fmaxf(0.0f,  lx * LX + lz * LZ);
+-        float s_right = 0.55f + 0.45f * fmaxf(0.0f, -lx * LX - lz * LZ);
++        float s_latp  = 0.55f + 0.45f * fmaxf(0.0f,  lx * LX + lz * LZ);
++        float s_latn  = 0.55f + 0.45f * fmaxf(0.0f, -lx * LX - lz * LZ);
+ 
+         /* top: corners with su=+1 -> indices 4,5,7,6 */
+         quad(corner[4][0], corner[4][1], corner[4][2],
+@@ -153,18 +166,18 @@ static void draw_box(float cx, float cy, float cz, float yaw,
+              corner[6][0], corner[6][1], corner[6][2],
+              corner[2][0], corner[2][1], corner[2][2],
+              shade(r, s_back), shade(g, s_back), shade(b, s_back), 255);
+-        /* left (+lat): 2,6,7,3 */
++        /* +lat side (screen right): 2,6,7,3 */
+         quad(corner[2][0], corner[2][1], corner[2][2],
+              corner[6][0], corner[6][1], corner[6][2],
+              corner[7][0], corner[7][1], corner[7][2],
+              corner[3][0], corner[3][1], corner[3][2],
+-             shade(r, s_left), shade(g, s_left), shade(b, s_left), 255);
+-        /* right (-lat): 0,1,5,4 */
++             shade(r, s_latp), shade(g, s_latp), shade(b, s_latp), 255);
++        /* -lat side (screen left): 0,1,5,4 */
+         quad(corner[0][0], corner[0][1], corner[0][2],
+              corner[1][0], corner[1][1], corner[1][2],
+              corner[5][0], corner[5][1], corner[5][2],
+              corner[4][0], corner[4][1], corner[4][2],
+-             shade(r, s_right), shade(g, s_right), shade(b, s_right), 255);
++             shade(r, s_latn), shade(g, s_latn), shade(b, s_latn), 255);
+     }
+ }
+ 
+@@ -596,6 +609,169 @@ static void draw_hud(void)
+     }
+ }
+ 
++/* ------------------------------------------------------------------ */
++/* Audio: a tiny procedural synth over ASND (no sound assets)          */
++/* ------------------------------------------------------------------ */
++
++#define VOICE_ENGINE  0
++#define VOICE_BEEP    1
++#define ENGINE_CYCLE  256      /* samples in one engine cycle          */
++#define BEEP_RATE     48000
++#define BEEP_LEN      12288    /* max beep length: 256 ms at 48 kHz    */
++
++static s16 *engine_buf = NULL;
++static s16 *beep_buf = NULL;
++static int audio_ok = 0;
++static int beep_countdown_n = -1;   /* last countdown digit we beeped  */
++
++static void audio_init(void)
++{
++    int i;
++
++    ASND_Init();
++    ASND_Pause(0);
++
++    engine_buf = (s16 *)memalign(32, ENGINE_CYCLE * sizeof(s16));
++    beep_buf   = (s16 *)memalign(32, BEEP_LEN * sizeof(s16));
++    if (!engine_buf || !beep_buf)
++        return;     /* no audio, but the game still runs */
++
++    /* One cycle of a buzzy kart engine: square wave plus two harmonics.
++     * Played as an infinite voice whose sample rate we retune every
++     * frame, so the note follows the revs. */
++    for (i = 0; i < ENGINE_CYCLE; i++) {
++        float ph = (float)i / (float)ENGINE_CYCLE;
++        float v = (ph < 0.5f ? 1.0f : -1.0f) * 0.55f +
++                  sinf(ph * 2.0f * (float)M_PI) * 0.30f +
++                  sinf(ph * 4.0f * (float)M_PI) * 0.15f;
++        engine_buf[i] = (s16)(v * 9000.0f);
++    }
++    DCFlushRange(engine_buf, ENGINE_CYCLE * sizeof(s16));
++
++    ASND_SetInfiniteVoice(VOICE_ENGINE, VOICE_MONO_16BIT,
++                          ENGINE_CYCLE * 32, 0,
++                          engine_buf, ENGINE_CYCLE * (s32)sizeof(s16), 0, 0);
++    audio_ok = 1;
++}
++
++/* Fire a short decaying sine on the effects voice. Beeps are brief and
++ * one at a time (a new one simply replaces whatever was playing). */
++static void audio_beep(float freq, int ms, int vol)
++{
++    int n = (BEEP_RATE / 1000) * ms;
++    int i;
++
++    if (!audio_ok)
++        return;
++    if (n > BEEP_LEN) n = BEEP_LEN;
++    for (i = 0; i < n; i++) {
++        float env = 1.0f - (float)i / (float)n;
++        beep_buf[i] = (s16)(sinf(2.0f * (float)M_PI * freq *
++                                 (float)i / (float)BEEP_RATE) *
++                            10000.0f * env);
++    }
++    DCFlushRange(beep_buf, (u32)n * sizeof(s16));
++    ASND_SetVoice(VOICE_BEEP, VOICE_MONO_16BIT, BEEP_RATE, 0, beep_buf,
++                  n * (s32)sizeof(s16), vol, vol, NULL);
++}
++
++/* Engine note follows the player kart: pitch and volume rise with
++ * speed, and a boost adds a little extra howl. */
++static void audio_update(void)
++{
++    const Kart *k = &game.karts[0];
++    float v;
++    int pitch, vol;
++
++    if (!audio_ok)
++        return;
++
++    v = fabsf(k->speed);
++    pitch = (int)((float)ENGINE_CYCLE * (32.0f + v * 3.6f));
++    if (k->boost_t > 0.0f)
++        pitch = (int)((float)pitch * 1.15f);
++    if (pitch > 140000) pitch = 140000;
++
++    vol = 70 + (int)(v * 2.6f);
++    if (vol > 170) vol = 170;
++
++    ASND_ChangePitchVoice(VOICE_ENGINE, pitch);
++    ASND_ChangeVolumeVoice(VOICE_ENGINE, vol, vol);
++}
++
++/* Countdown beeps (3, 2, 1) and the higher, longer GO chime. */
++static void audio_race_cues(void)
++{
++    if (game.state == STATE_COUNTDOWN) {
++        int n = (int)ceilf(game.countdown - 0.2f);
++        if (n > 3) n = 3;
++        if (n >= 1 && n != beep_countdown_n)
++            audio_beep(440.0f, 120, 170);
++        beep_countdown_n = n;
++    } else if (beep_countdown_n != -1) {
++        audio_beep(880.0f, 250, 190);
++        beep_countdown_n = -1;
++    }
++
++    /* boost pads and drift mini-turbos both raise just_boosted */
++    if (game.karts[0].just_boosted)
++        audio_beep(220.0f, 200, 170);
++}
++
++/* ------------------------------------------------------------------ */
++/* USB keyboard (WASD; A = left, D = right)                            */
++/* ------------------------------------------------------------------ */
++
++static int keyboard_ok = 0;
++static u8 key_left, key_right, key_accel, key_brake, key_drift;
++static u8 key_restart_edge, key_quit_edge;
++
++static void poll_keyboard(void)
++{
++    keyboard_event ev;
++
++    if (!keyboard_ok)
++        return;
++
++    while (KEYBOARD_GetEvent(&ev)) {
++        int down;
++
++        if (ev.type == KEYBOARD_DISCONNECTED) {
++            key_left = key_right = key_accel = key_brake = key_drift = 0;
++            continue;
++        }
++        if (ev.type != KEYBOARD_PRESSED && ev.type != KEYBOARD_RELEASED)
++            continue;
++
++        down = (ev.type == KEYBOARD_PRESSED);
++        switch (ev.symbol) {
++        case KS_a: case KS_A: case KS_Left:
++            key_left = (u8)down;
++            break;
++        case KS_d: case KS_D: case KS_Right:
++            key_right = (u8)down;
++            break;
++        case KS_w: case KS_W: case KS_Up:
++            key_accel = (u8)down;
++            break;
++        case KS_s: case KS_S: case KS_Down:
++            key_brake = (u8)down;
++            break;
++        case KS_space: case KS_Shift_L: case KS_Shift_R:
++            key_drift = (u8)down;
++            break;
++        case KS_r: case KS_R:
++            if (down) key_restart_edge = 1;
++            break;
++        case KS_Escape:
++            if (down) key_quit_edge = 1;
++            break;
++        default:
++            break;
++        }
++    }
++}
++
+ /* ------------------------------------------------------------------ */
+ /* Input                                                               */
+ /* ------------------------------------------------------------------ */
+@@ -610,31 +786,42 @@ static void read_input(Input *in)
+     held = WPAD_ButtonsHeld(0);
+     down = WPAD_ButtonsDown(0);
+ 
+-    if (down & WPAD_BUTTON_HOME)
++    key_restart_edge = key_quit_edge = 0;
++    poll_keyboard();
++
++    if ((down & WPAD_BUTTON_HOME) || key_quit_edge)
+         exit(0);
+-    if (down & WPAD_BUTTON_PLUS) {
++    if ((down & WPAD_BUTTON_PLUS) || key_restart_edge) {
+         game_init(&game);
+         place_scenery();
++        beep_countdown_n = -1;
+     }
+ 
+     memset(in, 0, sizeof(*in));
+-    in->accel = (held & (WPAD_BUTTON_2 | WPAD_BUTTON_A)) != 0;
+-    in->brake = (held & WPAD_BUTTON_1) != 0;
+-    in->hop   = (held & WPAD_BUTTON_B) != 0;
++    in->accel = (held & (WPAD_BUTTON_2 | WPAD_BUTTON_A)) != 0 || key_accel;
++    in->brake = (held & WPAD_BUTTON_1) != 0 || key_brake;
++    in->hop   = (held & WPAD_BUTTON_B) != 0 || key_drift;
++
++    /* Keyboard steering: A left, D right (arrow keys mirror them).
++     * Positive steer turns right, so left is negative. */
++    if (key_left)
++        steer -= 1.0f;
++    if (key_right)
++        steer += 1.0f;
+ 
+     /* D-pad steering. Held sideways, the pad's UP points left; also
+-     * accept LEFT/RIGHT so normal-grip and Dolphin keyboard users are
+-     * covered. Positive steer = turn left. */
++     * accept LEFT/RIGHT so normal-grip users are covered. Left inputs
++     * give negative steer, right inputs positive. */
+     if (held & (WPAD_BUTTON_UP | WPAD_BUTTON_LEFT))
+-        steer += 1.0f;
+-    if (held & (WPAD_BUTTON_DOWN | WPAD_BUTTON_RIGHT))
+         steer -= 1.0f;
++    if (held & (WPAD_BUTTON_DOWN | WPAD_BUTTON_RIGHT))
++        steer += 1.0f;
+ 
+-    /* Tilt steering (remote held sideways): raising the nose steers
+-     * left, like a steering wheel. 7 degree deadzone. */
++    /* Tilt steering (remote held sideways like a steering wheel):
++     * turning the wheel right steers right. 7 degree deadzone. */
+     wd = WPAD_Data(0);
+     if (wd) {
+-        float tilt = TILT_SIGN * -wd->orient.pitch;
++        float tilt = TILT_SIGN * wd->orient.pitch;  /* + = wheel right */
+         if (fabsf(tilt) > 7.0f)
+             steer += game_clampf(tilt / 45.0f, -1.0f, 1.0f);
+     }
+@@ -657,6 +844,8 @@ int main(void)
+     VIDEO_Init();
+     WPAD_Init();
+     WPAD_SetDataFormat(WPAD_CHAN_0, WPAD_FMT_BTNS_ACC);
++    if (KEYBOARD_Init(NULL) >= 0)
++        keyboard_ok = 1;
+ 
+     rmode = VIDEO_GetPreferredMode(NULL);
+     frameBuffer[0] = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
+@@ -719,6 +908,8 @@ int main(void)
+     if ((rmode->viTVMode >> 2) == VI_PAL)
+         dt = 1.0f / 50.0f;
+ 
++    audio_init();
++
+     game_init(&game);
+     place_scenery();
+     cam_x = game.karts[0].x - cosf(game.karts[0].heading) * 8.5f;
+@@ -731,6 +922,9 @@ int main(void)
+         read_input(&in);
+         game_update(&game, &in, dt);
+ 
++        audio_race_cues();
++        audio_update();
++
+         /* rumble on boosts and wall hits */
+         if (game.karts[0].just_boosted || game.karts[0].hit_wall)
+             rumble_t = 0.18f;
+diff --git a/source/track.c b/source/track.c
+index 3f00f4f..400a944 100644
+--- a/source/track.c
++++ b/source/track.c
+@@ -157,7 +157,9 @@ void track_locate(const Track *t, float x, float z, int hint,
+ 
+     *seg = best;
+     *frac = best_frac;
+-    /* signed lateral: positive on the left of the driving direction */
++    /* Signed lateral along the basis (-dz, dx). That basis is also the
++     * chase camera's right axis, so positive lat is on the RIGHT of the
++     * driving direction as the player sees it. */
+     {
+         float lx = -t->dz[best];
+         float lz =  t->dx[best];
+diff --git a/tests/test_game.c b/tests/test_game.c
+index de0b173..79481d9 100644
+--- a/tests/test_game.c
++++ b/tests/test_game.c
+@@ -49,13 +49,17 @@ static void test_track_geometry(void)
+         CHECK(fabsf(lat) < 0.5f, "lat %.2f on centerline at %d", lat, i);
+     }
+ 
+-    /* locate: a point pushed left of the centerline reports positive lat */
++    /* locate: a point pushed along the lateral basis (-dz, dx) -- the
++     * right of the driving direction -- reports positive lat */
+     {
+         int seg; float frac, lat;
+         float lx = -t.dz[10], lz = t.dx[10];
+         track_locate(&t, t.px[10] + lx * 3.0f, t.pz[10] + lz * 3.0f, -1,
+                      &seg, &frac, &lat);
+-        CHECK(lat > 2.0f && lat < 4.0f, "left offset lat %.2f", lat);
++        CHECK(lat > 2.0f && lat < 4.0f, "right offset lat %.2f", lat);
++        track_locate(&t, t.px[10] - lx * 3.0f, t.pz[10] - lz * 3.0f, -1,
++                     &seg, &frac, &lat);
++        CHECK(lat < -2.0f && lat > -4.0f, "left offset lat %.2f", lat);
+     }
+ }
+ 
+@@ -196,6 +200,120 @@ static void test_lap_counting_and_ranks(void)
+     }
+ }
+ 
++/* ------------------------------------------------------------------ */
++/* Steering polarity, checked the way a player experiences it           */
++/* ------------------------------------------------------------------ */
++
++/* The chase camera in main.c is guLookAt(eye behind the kart, up = +Y,
++ * looking along the heading), so the direction that appears to the RIGHT
++ * on screen is cross(forward, up) = (-sin h, 0, cos h). That is exactly
++ * the lateral basis (-dz, dx) that track_locate uses, which is why
++ * increasing `heading` swings the kart toward screen right, and why
++ * positive Input.steer (`heading += steer * ...` in game.c) must be a
++ * RIGHT turn. */
++static void screen_right_axis(float heading, float *rx, float *rz)
++{
++    *rx = -sinf(heading);
++    *rz =  cosf(heading);
++}
++
++/* Drive the player kart with one steering input for 0.75 s and report
++ * how far it ended up to the camera's right of where it began. Negative
++ * means it went left on screen, positive means right. */
++static float steer_screen_drift(float steer_input)
++{
++    const float dt = 1.0f / 60.0f;
++    Game g;
++    Input in;
++    float x0, z0, h0, rx, rz;
++    int f;
++
++    game_init(&g);
++    memset(&in, 0, sizeof(in));
++    in.accel = 1;
++
++    /* countdown, then a few seconds of straight-line running */
++    for (f = 0; f < 60 * 5; f++)
++        game_update(&g, &in, dt);
++
++    x0 = g.karts[0].x;
++    z0 = g.karts[0].z;
++    h0 = g.karts[0].heading;
++    screen_right_axis(h0, &rx, &rz);
++
++    in.steer = steer_input;
++    for (f = 0; f < 45; f++)
++        game_update(&g, &in, dt);
++
++    return (g.karts[0].x - x0) * rx + (g.karts[0].z - z0) * rz;
++}
++
++static void test_steer_sign(void)
++{
++    float left  = steer_screen_drift(-1.0f);   /* the A key  */
++    float right = steer_screen_drift(+1.0f);   /* the D key  */
++
++    printf("steering: steer -1 drifts %+.2f units across the screen, "
++           "steer +1 %+.2f\n", left, right);
++
++    CHECK(left < -0.5f,
++          "negative steer (A / D-pad left / left tilt) moved the kart "
++          "%+.2f on screen; it should go LEFT, i.e. negative", left);
++    CHECK(right > 0.5f,
++          "positive steer (D / D-pad right / right tilt) moved the kart "
++          "%+.2f on screen; it should go RIGHT, i.e. positive", right);
++    /* Near mirror images: the small residual is track curvature and the
++     * kart's grid offset, so allow 10% of the average excursion. */
++    CHECK(fabsf(left + right) < 0.10f * 0.5f * (fabsf(left) + fabsf(right)),
++          "left and right are not mirror images (%+.2f vs %+.2f)",
++          left, right);
++
++    /* The same relationship has to hold for the lateral bookkeeping the
++     * AI lines and the walls rely on: positive lat is the camera's
++     * right, so a kart pushed to +lat is on the right of the screen. */
++    {
++        Track t;
++        int seg = 10;
++        float rx, rz, lx, lz, proj, frac, lat;
++        int out_seg;
++
++        track_init(&t);
++        screen_right_axis(atan2f(t.dz[seg], t.dx[seg]), &rx, &rz);
++        lx = -t.dz[seg];
++        lz =  t.dx[seg];
++        track_locate(&t, t.px[seg] + lx * 3.0f, t.pz[seg] + lz * 3.0f, -1,
++                     &out_seg, &frac, &lat);
++        proj = (lx * 3.0f) * rx + (lz * 3.0f) * rz;
++        CHECK(lat > 2.0f, "offset along +lateral gave lat %.2f", lat);
++        CHECK(proj > 2.0f,
++              "positive lat is not the camera's right (projection %.2f)",
++              proj);
++    }
++
++    /* And the heading itself: positive steer must raise it (that is the
++     * rotation the camera turns into a right-hand turn). */
++    {
++        const float dt = 1.0f / 60.0f;
++        Game g;
++        Input in;
++        float h0, dh;
++        int f;
++
++        game_init(&g);
++        memset(&in, 0, sizeof(in));
++        in.accel = 1;
++        for (f = 0; f < 60 * 5; f++)
++            game_update(&g, &in, dt);
++        h0 = g.karts[0].heading;
++        in.steer = 1.0f;
++        for (f = 0; f < 45; f++)
++            game_update(&g, &in, dt);
++        dh = game_angle_wrap(g.karts[0].heading - h0);
++        CHECK(dh > 0.05f, "steer +1 changed heading by %+.3f rad "
++              "(must increase)", dh);
++    }
++}
++
+ static void test_drift_gives_boost(void)
+ {
+     Game g;
+@@ -232,6 +350,7 @@ int main(void)
+     test_countdown_holds_karts();
+     test_player_accelerates();
+     test_lap_counting_and_ranks();
++    test_steer_sign();
+     test_drift_gives_boost();
+     test_ai_race_completes();
+ 

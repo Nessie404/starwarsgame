@@ -1,0 +1,260 @@
+diff --git a/README.md b/README.md
+index 285a2ec..fecba3c 100644
+--- a/README.md
++++ b/README.md
+@@ -1,4 +1,4 @@
+-# WiiKart 1.0
++# WiiKart 1.0.1
+ 
+ An original racing game built as **Nintendo Wii homebrew**. It compiles to
+ a real Wii executable (`wiikart.dol`) that runs in the
+@@ -84,6 +84,18 @@ Copy the `apps` folder from `wiikart.zip` onto an SD card (so you have
+ 
+ **Keyboard is WASD by default** — A left, D right, W gas, S brake.
+ 
++> **1.0.1 fixes inverted steering.** In 1.0 every steering control was
++> mirrored: A/left went right and D/right went left, on the keyboard, both
++> sticks and the tilt. The cause was a sign convention: the chase camera's
++> right-hand axis is `cross(forward, up) = (-sin h, 0, cos h)`, which is
++> the same vector as the simulation's lateral basis, so increasing the
++> heading turns the car toward the *right* of the screen — the opposite of
++> what the code's comments claimed. The physics and the AI were
++> self-consistent; only the human input mapping was backwards. Steering
++> polarity now lives in one place (`STEER_LEFT` / `STEER_RIGHT` in
++> `source/game.h`) and a test re-derives the camera axis to prove a left
++> input moves the car left across the screen.
++
+ | Action      | USB keyboard | GameCube pad (Xbox in Dolphin) | Wii Remote (sideways) | + Nunchuk | Classic |
+ |-------------|--------------|--------------------------------|------------------------|-----------|---------|
+ | Steer left / right | **A** / **D** (or ← / →) | Main stick | Tilt or D-pad | Stick | Left stick |
+diff --git a/VERSION b/VERSION
+index d3827e7..7dea76e 100644
+--- a/VERSION
++++ b/VERSION
+@@ -1 +1 @@
+-1.0
++1.0.1
+diff --git a/hbc/meta.xml b/hbc/meta.xml
+index 2ee468e..e702dd8 100644
+--- a/hbc/meta.xml
++++ b/hbc/meta.xml
+@@ -2,7 +2,7 @@
+ <app version="1">
+   <name>WiiKart</name>
+   <coder>kaz</coder>
+-  <version>1.0</version>
++  <version>1.0.1</version>
+   <release_date>20260817000000</release_date>
+   <short_description>Semi-sim mountain racing</short_description>
+   <long_description>Race cars defined by real-world specs (horsepower, stopping distance, lateral grip) over three circuits, including stylized versions of Colorado's Berthoud Pass and Loveland Pass with real grades and gravity. 3 laps against AI, up to 4-player split screen, items, drifting, procedural engine audio. Supports Wii Remote (tilt), Nunchuk, Classic Controller, GameCube pads and USB keyboards. Runs on the Wii via the Homebrew Channel and in the Dolphin emulator.</long_description>
+diff --git a/source/game.h b/source/game.h
+index e4b45b7..0df08fb 100644
+--- a/source/game.h
++++ b/source/game.h
+@@ -65,7 +65,7 @@ const char *track_name(int track_id);
+ /* Locate (x,z) relative to the track. hint = last known segment
+  * (searched +/- a small window); -1 searches everywhere. Outputs
+  * nearest segment, fraction along it, signed lateral offset
+- * (positive = left of travel) and surface elevation at that point. */
++ * (positive = right of travel) and surface elevation at that point. */
+ void track_locate(const Track *t, float x, float z, int hint,
+                   int *seg, float *frac, float *lat, float *y);
+ 
+@@ -99,8 +99,32 @@ extern const KartSpec kart_specs[SPEC_COUNT];
+ #define NUM_KARTS  6
+ #define RACE_LAPS  3
+ 
++/*
++ * STEERING SIGN CONVENTION — read before touching any input code.
++ *
++ * The chase camera is built with guLookAt(eye, up=+Y, look) pointing
++ * along the car's heading, so its right-hand axis is
++ *
++ *     right = cross(forward, up) = (-sin h, 0, cos h)
++ *
++ * which is exactly the lateral basis this simulation uses everywhere
++ * (lx = -dz, lz = dx). So increasing `heading` turns the car toward the
++ * RIGHT of the screen, and the physics does `heading += f(steer)`:
++ *
++ *     steer > 0 steers RIGHT,  steer < 0 steers LEFT
++ *
++ * and positive `lat` is to the RIGHT of the direction of travel. Both
++ * are the opposite of what this file used to claim, which is why the
++ * controls shipped mirrored. Input code must map a "left" control to
++ * STEER_LEFT and a "right" control to STEER_RIGHT rather than writing
++ * signs by hand; test_steer_sign() re-derives the camera axis and checks
++ * the car really moves that way.
++ */
++#define STEER_LEFT  (-1.0f)
++#define STEER_RIGHT (+1.0f)
++
+ typedef struct {
+-    float steer;   /* -1..1, positive = turn left                       */
++    float steer;   /* -1..1; negative = left, positive = right          */
+     int   accel;
+     int   brake;
+     int   hop;     /* handbrake / drift                                 */
+@@ -144,7 +168,7 @@ typedef struct {
+     float prog_raw;
+     float total_progress;
+     int   lap;
+-    float lat;
++    float lat;            /* signed offset, + = right of travel        */
+ 
+     /* driving state */
+     int   spec;           /* index into kart_specs                      */
+diff --git a/source/main.c b/source/main.c
+index f40b6ed..c2874d4 100644
+--- a/source/main.c
++++ b/source/main.c
+@@ -194,23 +194,23 @@ static void read_player_input(int p, Input *in, float dt)
+     in->item  = (wheld[p] & (WPAD_BUTTON_MINUS |
+                              WPAD_CLASSIC_BUTTON_MINUS)) != 0;
+     if (wheld[p] & (WPAD_BUTTON_UP | WPAD_BUTTON_LEFT))
+-        steer += 1.0f;
++        steer += STEER_LEFT;
+     if (wheld[p] & (WPAD_BUTTON_DOWN | WPAD_BUTTON_RIGHT))
+-        steer -= 1.0f;
++        steer += STEER_RIGHT;
+ 
+     /* Wiimote expansions */
+     wd = WPAD_Data(p);
+     if (wd) {
+         if (wd->exp.type == WPAD_EXP_NUNCHUK) {
+-            steer -= stick_x(&wd->exp.nunchuk.js);
++            steer += stick_x(&wd->exp.nunchuk.js) * STEER_RIGHT;
+             if (wheld[p] & (WPAD_NUNCHUK_BUTTON_C | WPAD_NUNCHUK_BUTTON_Z))
+                 in->hop = 1;
+             in->brake |= (wheld[p] & WPAD_BUTTON_B) != 0;
+             tilt_ok = 0;
+         } else if (wd->exp.type == WPAD_EXP_CLASSIC) {
+-            steer -= stick_x(&wd->exp.classic.ljs);
+-            if (wheld[p] & WPAD_CLASSIC_BUTTON_LEFT)  steer += 1.0f;
+-            if (wheld[p] & WPAD_CLASSIC_BUTTON_RIGHT) steer -= 1.0f;
++            steer += stick_x(&wd->exp.classic.ljs) * STEER_RIGHT;
++            if (wheld[p] & WPAD_CLASSIC_BUTTON_LEFT)  steer += STEER_LEFT;
++            if (wheld[p] & WPAD_CLASSIC_BUTTON_RIGHT) steer += STEER_RIGHT;
+             in->accel |= (wheld[p] & (WPAD_CLASSIC_BUTTON_A |
+                                       WPAD_CLASSIC_BUTTON_X)) != 0;
+             in->brake |= (wheld[p] & (WPAD_CLASSIC_BUTTON_B |
+@@ -222,9 +222,12 @@ static void read_player_input(int p, Input *in, float dt)
+             tilt_ok = 0;
+         }
+         if (tilt_ok) {
+-            float tilt = TILT_SIGN * -wd->orient.pitch;
++            /* held sideways, rolling the remote like a wheel shows up
++             * as pitch; tipping it clockwise steers right */
++            float tilt = TILT_SIGN * wd->orient.pitch;
+             if (fabsf(tilt) > 7.0f)
+-                steer += game_clampf(tilt / 45.0f, -1.0f, 1.0f);
++                steer += game_clampf(tilt / 45.0f, -1.0f, 1.0f) *
++                         STEER_RIGHT;
+         }
+     }
+ 
+@@ -232,7 +235,8 @@ static void read_player_input(int p, Input *in, float dt)
+     {
+         s8 sx = PAD_StickX(p);
+         if (sx > 18 || sx < -18)
+-            steer -= game_clampf((float)sx / 90.0f, -1.0f, 1.0f);
++            steer += game_clampf((float)sx / 90.0f, -1.0f, 1.0f) *
++                     STEER_RIGHT;
+         in->accel |= (gheld[p] & (PAD_BUTTON_A | PAD_BUTTON_X)) != 0;
+         in->brake |= (gheld[p] & PAD_BUTTON_B) != 0;
+         in->hop   |= (gheld[p] & (PAD_TRIGGER_R | PAD_TRIGGER_L)) != 0;
+@@ -241,8 +245,8 @@ static void read_player_input(int p, Input *in, float dt)
+ 
+     /* USB keyboard (player 1 only): WASD, A = left, D = right */
+     if (p == 0) {
+-        if (key_left)  steer += 1.0f;
+-        if (key_right) steer -= 1.0f;
++        if (key_left)  steer += STEER_LEFT;
++        if (key_right) steer += STEER_RIGHT;
+         in->accel |= key_accel;
+         in->brake |= key_brake;
+         in->hop   |= key_drift;
+diff --git a/tests/test_game.c b/tests/test_game.c
+index 1bf9c46..84fc28a 100644
+--- a/tests/test_game.c
++++ b/tests/test_game.c
+@@ -383,34 +383,65 @@ static void test_steering_filter(void)
+     }
+ }
+ 
+-/* Steering sign convention: positive steer must turn the car left, so a
+- * left key mapped to +1 actually goes left on screen. */
+-static void test_steer_sign(void)
++/*
++ * Steering sign convention, checked the way the player experiences it.
++ *
++ * The renderer puts the chase camera behind the car with up = +Y looking
++ * along the heading, so guLookAt gives it a right-hand axis of
++ *     right = cross(forward, up) = (-sin h, 0, cos h)
++ * This test re-derives that vector and asserts a STEER_LEFT input moves
++ * the car toward the LEFT of the screen (negative projection onto the
++ * camera's right axis) and STEER_RIGHT toward the right. Only checking
++ * that the heading angle moved is how the controls shipped mirrored, so
++ * do not weaken this back to that.
++ */
++static void screen_right_axis(float heading, float *rx, float *rz)
++{
++    *rx = -sinf(heading);
++    *rz =  cosf(heading);
++}
++
++static float steer_screen_drift(float steer_input)
+ {
+     Game g;
+     GameConfig cfg = default_cfg(TRACK_CLASSIC);
+     Input in[MAX_HUMANS];
+-    float h0, h_left, h_right;
++    float x0, z0, h0, rx, rz;
++    int f;
+ 
+     game_init(&g, &cfg);
+     g.state = STATE_RACING;
+     idle_inputs(in);
+ 
+     teleport(&g, &g.karts[0], 2, 20.0f);
++    x0 = g.karts[0].x;
++    z0 = g.karts[0].z;
+     h0 = g.karts[0].heading;
+-    in[0].steer = 1.0f;
+-    game_update(&g, in, 1.0f / 60.0f);
+-    h_left = game_angle_wrap(g.karts[0].heading - h0);
++    screen_right_axis(h0, &rx, &rz);
+ 
+-    teleport(&g, &g.karts[0], 2, 20.0f);
+-    h0 = g.karts[0].heading;
+-    in[0].steer = -1.0f;
+-    game_update(&g, in, 1.0f / 60.0f);
+-    h_right = game_angle_wrap(g.karts[0].heading - h0);
++    in[0].steer = steer_input;
++    for (f = 0; f < 45; f++)
++        game_update(&g, in, 1.0f / 60.0f);
+ 
+-    CHECK(h_left > 0.0f, "positive steer did not turn left (%.4f)", h_left);
+-    CHECK(h_right < 0.0f, "negative steer did not turn right (%.4f)",
+-          h_right);
++    return (g.karts[0].x - x0) * rx + (g.karts[0].z - z0) * rz;
++}
++
++static void test_steer_sign(void)
++{
++    float left = steer_screen_drift(STEER_LEFT);
++    float right = steer_screen_drift(STEER_RIGHT);
++
++    printf("steering: STEER_LEFT drifts %+.2f m across the screen, "
++           "STEER_RIGHT %+.2f m\n", left, right);
++    CHECK(left < -0.5f,
++          "STEER_LEFT moved the car %+.2f m on screen (should go left)",
++          left);
++    CHECK(right > 0.5f,
++          "STEER_RIGHT moved the car %+.2f m on screen (should go right)",
++          right);
++    CHECK(fabsf(left + right) < 0.35f,
++          "left and right are not mirror images (%+.2f vs %+.2f)",
++          left, right);
+ }
+ 
+ int main(void)

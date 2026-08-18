@@ -1,0 +1,122 @@
+name: release-patch
+
+# Publishes a patch release of an OLDER version line — for example v1.0.1,
+# which is v1.0 plus the steering fix and nothing else.
+#
+# Those releases cannot be built from this branch's HEAD: a v1.0.1 build
+# must not contain the v1.1 work. Rather than carrying a divergent branch,
+# the change is kept as a patch file under patches/ and applied on top of
+# the base tag here, so the published binary really is "that release plus
+# this patch". Run it by hand from the Actions tab.
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_tag:
+        description: 'Tag to build from (e.g. v1.0)'
+        required: true
+      version:
+        description: 'Version to publish (e.g. 1.0.1)'
+        required: true
+      patch:
+        description: 'Patch file, relative to the repo root'
+        required: true
+
+jobs:
+  build:
+    name: Build ${{ inputs.version }} from ${{ inputs.base_tag }}
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitppc:latest
+    steps:
+      - name: Check out this branch (for the patch file)
+        uses: actions/checkout@v4
+        with:
+          path: head
+
+      - name: Check out the base tag (the code being patched)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base_tag }}
+          path: base
+
+      - name: Apply the patch
+        working-directory: base
+        run: |
+          set -eu
+          echo "Applying ../head/${{ inputs.patch }} onto ${{ inputs.base_tag }}"
+          git apply --verbose "../head/${{ inputs.patch }}"
+
+      - name: Host tests
+        working-directory: base
+        run: |
+          gcc -std=c99 -O2 -Wall -Werror -Isource \
+              tests/test_game.c source/game.c source/track.c -lm \
+              -o wiikart-test
+          ./wiikart-test
+
+      - name: Build boot.dol
+        working-directory: base
+        run: make
+
+      - name: Package Homebrew Channel app
+        working-directory: base
+        run: make dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wiikart-${{ inputs.version }}
+          path: |
+            base/wiikart.dol
+            base/dist/
+
+  publish:
+    name: Publish ${{ inputs.version }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wiikart-${{ inputs.version }}
+      - name: Package zip
+        run: |
+          set -eu
+          mkdir pkg
+          cp wiikart.dol pkg/
+          cp -r dist/apps pkg/apps
+          cat > pkg/README.txt <<EOF
+          WiiKart ${{ inputs.version }} — original kart racer for the Wii
+
+          Built from ${{ inputs.base_tag }} plus ${{ inputs.patch }}.
+
+          Play in the Dolphin emulator (https://dolphin-emu.org):
+            File > Open... > wiikart.dol
+
+          Play on a real Wii:
+            copy the "apps" folder to your SD card, launch it from the
+            Homebrew Channel.
+
+          Keyboard: A/D steer (A really is left), W gas, S brake.
+          EOF
+          (cd pkg && zip -r ../wiikart.zip .)
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          TAG="v${{ inputs.version }}"
+          BASE_SHA=$(gh api "repos/$GH_REPO/git/refs/tags/${{ inputs.base_tag }}" -q .object.sha)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" wiikart.zip --clobber
+          else
+            # not marked latest: these are fixes to older lines, and the
+            # newest release should stay the newest
+            gh release create "$TAG" wiikart.zip \
+              --target "$BASE_SHA" \
+              --title "WiiKart $TAG" \
+              --notes "${{ inputs.base_tag }} plus \`${{ inputs.patch }}\`. Download wiikart.zip, unzip, and open wiikart.dol in the Dolphin emulator (or copy the apps folder to an SD card for a real Wii)." \
+              --latest=false
+          fi
+          gh release list
