@@ -127,8 +127,24 @@ jobs:
             # integration" for some tags, while creating the ref directly
             # works; doing it in two steps is also easier to debug.
             if ! gh api "repos/$GH_REPO/git/refs/tags/$TAG" >/dev/null 2>&1; then
-              gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$TAG" \
-                                               -f sha="$BASE_SHA"
+              if ! gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$TAG" \
+                                                    -f sha="$BASE_SHA"; then
+                # Some tag names are refused with "403 Resource not
+                # accessible by integration" (a repository ruleset this
+                # workflow's token cannot bypass) while others go through.
+                # Rather than fail and publish nothing, hang the build off
+                # the base release as an extra asset so the download link
+                # still exists. Print the rulesets to say why.
+                echo "::warning::cannot create refs/tags/$TAG; attaching to ${{ inputs.base_tag }} instead"
+                gh api "repos/$GH_REPO/rulesets" \
+                  -q '.[] | "ruleset: \(.name) target=\(.target) enforcement=\(.enforcement)"' || true
+                ASSET="wiikart-${{ inputs.version }}.zip"
+                mv wiikart.zip "$ASSET"
+                gh release upload "${{ inputs.base_tag }}" "$ASSET" --clobber
+                echo "attached $ASSET to the ${{ inputs.base_tag }} release"
+                gh release list
+                exit 0
+              fi
               echo "created refs/tags/$TAG at $BASE_SHA"
             fi
             # not marked latest: these are fixes to older lines, and the

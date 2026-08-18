@@ -63,9 +63,18 @@ jobs:
             copy the "apps" folder to your SD card, launch from the
             Homebrew Channel.
 
-          Controls (Wii Remote sideways): tilt or D-pad = steer,
-          2/A = gas, 1 = brake, hold B = drift (release for boost),
-          + = restart, HOME = quit.
+          Controls
+            Wii Remote (sideways): tilt or D-pad = steer, 2 = gas,
+              1 = brake, B = power-up, A = confirm, - = back,
+              + = restart, HOME = quit.
+            GameCube / Xbox-style pad: stick = steer, A = gas, B = brake,
+              X = power-up, triggers = shift, START = restart.
+            Keyboard player 1: WASD = drive, E = shift up, Q = shift down,
+              X = power-up, Space = handbrake.
+            Keyboard player 2: IJKL = drive, O = shift up, U = shift down,
+              M = power-up, P = handbrake.
+            Menus: up/down picks a row, left/right changes its value,
+              Enter/A confirms, Esc/- backs out.
           EOF
           (cd pkg && zip -r ../wiikart.zip .)
       - name: Create release
