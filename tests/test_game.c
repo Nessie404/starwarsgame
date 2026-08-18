@@ -1260,6 +1260,277 @@ static void test_cliff_respawn(void)
     CHECK(!isnan(k->x) && !isnan(k->y), "respawn left NaNs behind");
 }
 
+/*
+ * Going over the edge must never be a shortcut. Rebuilding progress as
+ * lap*n + checkpoint looked right but handed out nearly a whole lap when
+ * the car left the road just before the start line: the lap counter ticks
+ * over while it is in the air, and the checkpoint it comes back to is
+ * still on the previous lap. Sweep the segments either side of the line.
+ */
+static void test_respawn_near_the_line(void)
+{
+    int tracks[2];
+    int ti, off;
+    float worst_gain = 0.0f;
+    int worst_seg = -1, worst_track = -1;
+
+    tracks[0] = TRACK_LOVELAND;   /* the two circuits with no barriers */
+    tracks[1] = TRACK_MONARCH;
+
+    for (ti = 0; ti < 2; ti++) {
+        for (off = 1; off <= 12; off++) {
+            Game g;
+            GameConfig cfg = default_cfg(tracks[ti]);
+            Input in[MAX_HUMANS];
+            Kart *k;
+            int seg, f, lap_before, lap_gain = 0, respawned = 0;
+            float prog_before, gain = 0.0f;
+
+            game_init(&g, &cfg);
+            g.state = STATE_RACING;
+            idle_inputs(in);
+            k = &g.karts[0];
+
+            /* already past the shoulder, a few segments short of the line */
+            seg = g.track.n - off;
+            teleport_lat(&g, k, seg, g.track.wall_half + 4.0f, 28.0f);
+            k->last_checkpoint = track_checkpoint_for(&g.track, seg);
+            if (k->last_checkpoint < 0)
+                k->last_checkpoint = 0;
+            /* teleport() moves progress, so bring the lap with it — the
+             * grid position it was placed from is a lap behind */
+            k->lap = (int)floorf(k->total_progress / (float)g.track.n);
+            lap_before = k->lap;
+            prog_before = k->total_progress;
+
+            for (f = 0; f < 60 * 5; f++) {
+                float prev = k->total_progress;
+                int prev_lap = k->lap;
+                game_update(&g, in, 1.0f / 60.0f);
+                if (k->respawned) {
+                    /* what the respawn itself did, on its own frame:
+                     * the slide before it is ordinary travel */
+                    gain = k->total_progress - prev;
+                    lap_gain = k->lap - prev_lap;
+                    respawned = 1;
+                    break;
+                }
+            }
+
+            CHECK(respawned, "%s: car never came back from over the edge "
+                  "at segment %d", track_name(tracks[ti]), seg);
+            CHECK(gain < 1.0f,
+                  "%s: respawn at segment %d gained %.1f segments "
+                  "(%.3f laps) of free progress",
+                  track_name(tracks[ti]), seg, gain,
+                  gain / (float)g.track.n);
+            CHECK(lap_gain <= 0,
+                  "%s: the respawn at segment %d handed out %d lap(s)",
+                  track_name(tracks[ti]), seg, lap_gain);
+            /* the whole episode — slide plus respawn — may only move the
+             * car by the ground it actually covered, nothing like a lap */
+            CHECK(k->total_progress - prog_before < (float)g.track.n * 0.1f,
+                  "%s: falling off at segment %d advanced the car %.1f "
+                  "segments of %d (%.0f%% of a lap)",
+                  track_name(tracks[ti]), seg,
+                  k->total_progress - prog_before, g.track.n,
+                  100.0f * (k->total_progress - prog_before)
+                      / (float)g.track.n);
+            CHECK(k->lap - lap_before <= 1,
+                  "%s: falling off at segment %d gained %d laps",
+                  track_name(tracks[ti]), seg, k->lap - lap_before);
+            CHECK(!k->finished,
+                  "%s: respawn at segment %d finished the race",
+                  track_name(tracks[ti]), seg);
+            if (gain > worst_gain) {
+                worst_gain = gain;
+                worst_seg = seg;
+                worst_track = tracks[ti];
+            }
+        }
+    }
+    printf("respawn near the line: worst progress change %+.2f segments"
+           " (%s segment %d)\n", worst_gain,
+           worst_track >= 0 ? track_name(worst_track) : "-", worst_seg);
+}
+
+/* A negative checkpoint index must be clamped, not used as an index. */
+static void test_respawn_bad_checkpoint(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_MONARCH);
+    Input in[MAX_HUMANS];
+    Kart *k;
+    int f, ok = 0;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    k = &g.karts[0];
+
+    teleport_lat(&g, k, 40, g.track.wall_half + 5.0f, 14.0f);
+    k->last_checkpoint = -3;               /* must not index backwards */
+
+    for (f = 0; f < 60 * 4; f++) {
+        game_update(&g, in, 1.0f / 60.0f);
+        if (k->respawned) { ok = 1; break; }
+    }
+    CHECK(ok, "no respawn with a negative checkpoint index");
+    CHECK(k->seg >= 0 && k->seg < g.track.n,
+          "respawned onto segment %d, off the track", k->seg);
+    CHECK(k->seg == g.track.checkpoint_seg[0],
+          "a negative checkpoint index should clamp to the first one, "
+          "landed at segment %d", k->seg);
+    CHECK(!isnan(k->x) && !isnan(k->z) && !isnan(k->y),
+          "respawn from a bad index left NaNs behind");
+}
+
+/* The drop has to be visible: k->y used to be overwritten with the road
+ * surface on the same frame the fall wrote it, so the car slid along at
+ * road height and then teleported with nothing to see. */
+static void test_fall_is_visible(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_LOVELAND);
+    Input in[MAX_HUMANS];
+    Kart *k;
+    int f;
+    float max_drop = 0.0f;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    k = &g.karts[0];
+    teleport_lat(&g, k, 60, g.track.wall_half + 5.0f, 20.0f);
+
+    for (f = 0; f < 60 * 3; f++) {
+        int seg;
+        float frac, lat, surface;
+        game_update(&g, in, 1.0f / 60.0f);
+        if (k->respawned)
+            break;
+        track_locate(&g.track, k->x, k->z, k->seg, &seg, &frac, &lat,
+                     &surface);
+        if (surface - k->y > max_drop)
+            max_drop = surface - k->y;
+    }
+    printf("cliff drop: car fell %.1f m below the road before respawning\n",
+           max_drop);
+    CHECK(max_drop > 1.0f,
+          "the fall is invisible: car stayed %.2f m below the road",
+          max_drop);
+}
+
+/* Crossing the line must not hand the car to the AI driver, which used to
+ * run it on AI fields a human kart never had: zero skill and zero corner
+ * confidence read as "brake for everything", so a finished player watched
+ * their car stop and then reverse back down the circuit. */
+static void test_finished_human_coasts(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    Kart *k;
+    int f;
+    float v_flag, v_min;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    k = &g.karts[0];
+    teleport(&g, k, 20, 26.0f);
+    in[0].accel = 1;
+    for (f = 0; f < 60; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+
+    k->finished = 1;                 /* flag drops, throttle still down */
+    k->finish_time = g.race_t;
+    v_flag = k->speed;
+    v_min = v_flag;
+    for (f = 0; f < 60 * 6; f++) {
+        game_update(&g, in, 1.0f / 60.0f);
+        if (k->speed < v_min)
+            v_min = k->speed;
+    }
+    printf("finished human: %.1f km/h at the flag, %.1f km/h six seconds "
+           "later (lowest %.1f)\n", v_flag * 3.6f, k->speed * 3.6f,
+           v_min * 3.6f);
+    CHECK(v_min > -0.5f,
+          "a finished car drove backwards (%.2f m/s)", v_min);
+    CHECK(k->speed < v_flag,
+          "a finished car did not slow down (%.2f -> %.2f m/s)",
+          v_flag, k->speed);
+    CHECK(fabsf(k->lat) < g.track.wall_half + 2.0f,
+          "a finished car wandered off the road (lat %.2f)", k->lat);
+}
+
+/* One poisoned number must not freeze the race. Nothing in the Wii layer
+ * is known to produce a NaN, but a single one reaching a position or a
+ * heading would stick there for the rest of the session (and take the
+ * chase camera with it), so the entry points reject them. */
+static void test_nan_hardening(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_BERTHOUD);
+    Input in[MAX_HUMANS];
+    Kart *k;
+    float nan_v = (float)NAN;
+    float x_before, prog_before;
+    int f;
+
+    CHECK(game_clampf(nan_v, -1.0f, 1.0f) == -1.0f,
+          "game_clampf let a NaN through");
+    CHECK(game_clampf((float)INFINITY, -1.0f, 1.0f) == 1.0f,
+          "game_clampf did not clamp infinity");
+    CHECK(!isnan(game_angle_wrap(nan_v)),
+          "game_angle_wrap returned a NaN");
+    CHECK(fabsf(game_angle_wrap(1.0e9f)) <= 3.2f,
+          "game_angle_wrap did not bound a huge angle");
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    k = &g.karts[0];
+    teleport(&g, k, 30, 18.0f);
+    x_before = k->x;
+    prog_before = k->total_progress;
+
+    game_update(&g, in, nan_v);            /* a bad frame time */
+    CHECK(k->x == x_before && k->total_progress == prog_before,
+          "a NaN frame time was allowed to step the race");
+
+    in[0].accel = 1;
+    in[0].steer = nan_v;                   /* a bad steering axis */
+    game_update(&g, in, 1.0f / 60.0f);
+    idle_inputs(in);
+    in[0].accel = 1;
+    for (f = 0; f < 120; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    CHECK(!isnan(k->x) && !isnan(k->z) && !isnan(k->y) &&
+          !isnan(k->heading) && !isnan(k->speed),
+          "one NaN steering frame poisoned the car for good");
+    printf("nan hardening: bad dt ignored, bad steer survived "
+           "(x %.1f speed %.1f)\n", k->x, k->speed);
+}
+
+/* Every track's item rows must fit the array they are written into. */
+static void test_item_rows_fit(void)
+{
+    int id;
+    for (id = 0; id < TRACK_COUNT; id++) {
+        Track t;
+        int i;
+        track_init(&t, id);
+        CHECK(t.n_items >= 0 && t.n_items <= TRACK_MAX_ITEMS,
+              "%s declares %d item rows, max is %d", track_name(id),
+              t.n_items, TRACK_MAX_ITEMS);
+        for (i = 0; i < t.n_items; i++)
+            CHECK(t.item_seg[i] >= 0 && t.item_seg[i] < t.n,
+                  "%s item row %d sits on segment %d of %d",
+                  track_name(id), i, t.item_seg[i], t.n);
+    }
+}
+
 /* A barriered track must still hold cars in rather than dropping them. */
 static void test_guardrails_still_hold(void)
 {
@@ -1353,6 +1624,12 @@ int main(void)
     test_lap_counts();
     test_cliff_respawn();
     test_guardrails_still_hold();
+    test_respawn_near_the_line();
+    test_respawn_bad_checkpoint();
+    test_fall_is_visible();
+    test_finished_human_coasts();
+    test_nan_hardening();
+    test_item_rows_fit();
     test_corner_segmentation();
     test_full_grid_fits();
     test_ai_races_all_tracks();

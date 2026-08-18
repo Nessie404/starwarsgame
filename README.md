@@ -1,4 +1,4 @@
-# WiiKart 1.2.0
+# WiiKart 1.2.1
 
 An original racing game built as **Nintendo Wii homebrew**. It compiles to
 a real Wii executable (`wiikart.dol`) that runs in the
@@ -15,7 +15,7 @@ the original arcade racer as
 on the [v0.1 release](https://github.com/Nessie404/starwarsgame/releases/tag/v0.1)
 (see `patches/README.md` for why 0.1.1 has no tag of its own).
 
-Version 1.2.0 is a semi-sim mountain racer: pick a car in the garage —
+Version 1.2.1 is a semi-sim mountain racer: pick a car in the garage —
 its gearbox, tires and paint, all defined by real-world performance
 numbers — then race a **field of eleven AI drivers who each race
 differently, shift differently, learn from their mistakes, and adapt to
@@ -35,6 +35,12 @@ fun with a driving model that expects you to brake for the hairpins.
   19-corner technical circuit; nitro and boost pads replaced with
   motorsport power-ups; the remaining arcade cheats removed; and
   **inverted steering fixed** — left really is left now, on every device.
+- **v1.2.1** — the stability pass: falling off the edge just before the
+  line no longer hands out most of a free lap, a finished car coasts
+  instead of standing on the brakes and reversing back through the field,
+  keyboard menu keys register every tap, the controller check notices
+  whether a keyboard is actually plugged in, and the drop off a cliff is
+  visible again. Details below.
 - **v1.2.0** — gearboxes and per-driver shifting strategies, two more
   passes (Kenosha and Monarch), guardrails gone from Loveland and
   Monarch, cliffs with Mario-style checkpoint recovery, per-circuit lap
@@ -298,6 +304,27 @@ steepest), for lap counts scaling with circuit length, and for cliff
 recovery: that a car off an unguarded edge falls, comes back at the last
 checkpoint it passed, keeps its lap, gains no free progress, and is
 drivable afterwards — while a barriered track still holds cars in.
+
+v1.2.1 came out of a stability audit and every fix in it is pinned by a
+test that fails without the fix. The worst find was scoring: rebuilding a
+respawning car's progress as `lap * segments + checkpoint` looks right,
+but the lap counter ticks over while the car is in the air, so going over
+the edge in the last two segments before the line returned it to a
+checkpoint a lap behind and credited it with **96% of a lap** — enough to
+win a two-lap race from the middle of lap one. The respawn now moves the
+car by the signed arc it actually gave up, and the test sweeps twelve
+segments either side of the line on both unguarded circuits. The others:
+a finished human kart was falling through to the AI driver and running on
+AI fields it never had (zero skill, zero corner confidence read as "brake
+for everything") so it stopped and reversed back down the circuit at
+21 km/h — it now coasts; the cliff drop was written to `k->y` and
+overwritten with the road height on the same frame, so the car slid along
+at road level and teleported (it now visibly falls ~11 m); a negative
+checkpoint index could read off the front of `checkpoint_seg[]`, since
+`%` keeps the sign of its left operand; and NaN now dies at the door —
+`game_clampf` returns the low bound for it, `game_angle_wrap` bounds its
+input (at 1e9 a float's step exceeds 2*pi, so the loop could never end),
+and a non-finite frame time is refused.
 
 ## Ideas for later
 

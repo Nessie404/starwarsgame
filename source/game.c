@@ -147,15 +147,25 @@ float ai_corner_conf(const Kart *k, const Track *t, int seg)
     return k->corner_conf[c];
 }
 
+/*
+ * Clamping is the choke point every outside number passes through, so it
+ * is also where a NaN has to die: `v < lo` and `v > hi` are both false
+ * for one, and it would otherwise sail through into a position or a
+ * heading and freeze the car (and the camera) for the rest of the race.
+ */
 float game_clampf(float v, float lo, float hi)
 {
-    if (v < lo) return lo;
+    if (!(v >= lo)) return lo;    /* false for NaN as well as for v < lo */
     if (v > hi) return hi;
     return v;
 }
 
 float game_angle_wrap(float a)
 {
+    if (!(a > -1.0e6f && a < 1.0e6f))
+        return 0.0f;              /* NaN, infinity, or an angle so large
+                                   * that one ulp exceeds 2*pi and the
+                                   * loops below could never terminate */
     while (a >  PI_F) a -= 2.0f * PI_F;
     while (a < -PI_F) a += 2.0f * PI_F;
     return a;
@@ -311,6 +321,13 @@ void game_init(Game *g, const GameConfig *cfg)
                              ? GEARBOX_MANUAL : GEARBOX_AUTO;
             k->tire = ((g->cfg.tire[i] % TIRE_COMPOUNDS) + TIRE_COMPOUNDS)
                       % TIRE_COMPOUNDS;
+            /* A human never runs the AI driver, but give it sane values
+             * anyway: memset leaves zero skill and zero confidence, which
+             * read as "brake for everything" if anything ever asks. */
+            k->ai_skill = 1.0f;
+            k->cur_corner = -1;
+            for (r = 0; r < TRACK_MAX_CORNERS; r++)
+                k->corner_conf[r] = 1.0f;
         } else {
             int ai_no = i - g->cfg.n_humans;
             const AIStrategy *st;
@@ -907,7 +924,9 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->prog_raw = newp;
         k->seg = seg;
         k->lat = lat;
-        k->y = y;
+        if (k->fall_t <= 0.0f)
+            k->y = y;          /* on the road; while falling, k->y is the
+                                * height the fall branch is writing */
         k->lap = (int)floorf(k->total_progress / (float)t->n);
 
         /* remember the last checkpoint reached while safely on the road */
@@ -941,9 +960,20 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
 
     /* --- fished out of the void, back at the last checkpoint --- */
     if (k->fall_t > 1.1f) {
-        int cseg = t->checkpoint_seg[k->last_checkpoint %
-                                     (t->n_checkpoints > 0
-                                          ? t->n_checkpoints : 1)];
+        int cp = k->last_checkpoint;
+        int cseg;
+        float back;
+
+        /* `%` keeps the sign of its left operand, so it only guards the
+         * top end; clamp both ways or a negative index reads off the
+         * front of the array. */
+        if (t->n_checkpoints > 0) {
+            if (cp < 0) cp = 0;
+            if (cp >= t->n_checkpoints) cp = t->n_checkpoints - 1;
+            cseg = t->checkpoint_seg[cp];
+        } else {
+            cseg = 0;
+        }
         k->x = t->px[cseg];
         k->z = t->pz[cseg];
         k->y = t->py[cseg];
@@ -957,9 +987,23 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->respawned = 1;
         k->seg = cseg;
         k->lat = 0.0f;
+
+        /* No free progress. Rebuilding total_progress as lap*n + cseg
+         * looks right but is not: the lap counter can tick over while the
+         * car is in the air, and the checkpoint it is being returned to
+         * is then still back on the previous lap — which handed out most
+         * of a free lap for going over the edge just before the line.
+         * Instead move progress by the signed arc actually given up, the
+         * same way the on-track case does, and re-derive the lap from it.
+         */
+        back = (float)cseg - k->prog_raw;
+        if (back >  (float)t->n * 0.5f) back -= (float)t->n;
+        if (back < -(float)t->n * 0.5f) back += (float)t->n;
+        if (back > 0.0f) back = 0.0f;     /* a respawn never gains ground */
+        k->total_progress += back;
         k->prog_raw = (float)cseg;
-        /* no free progress: keep the lap, take the position */
-        k->total_progress = (float)k->lap * (float)t->n + (float)cseg;
+        k->lap = (int)floorf(k->total_progress / (float)t->n);
+        if (k->lap < 0) k->lap = 0;
     }
 
     /* --- deploy a held power-up --- */
@@ -1038,7 +1082,7 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
 {
     int i, r;
 
-    if (dt <= 0.0f) return;
+    if (!(dt > 0.0f)) return;      /* also rejects NaN */
     if (dt > 0.1f) dt = 0.1f;
 
     for (r = 0; r < g->track.n_items; r++)
@@ -1068,8 +1112,18 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
         Input in;
         float scale = 1.0f;
 
-        if (k->human >= 0 && !k->finished) {
-            in = inputs[k->human];
+        if (k->human >= 0) {
+            /* A finished car coasts. It used to fall through to the AI
+             * branch, which then drove it on AI fields a human kart never
+             * had — zero skill and zero corner confidence, i.e. brake for
+             * everything — so a player who crossed the line watched their
+             * car stand on the brakes and reverse back down the circuit
+             * through the cars still racing. */
+            if (k->finished) {
+                memset(&in, 0, sizeof(in));
+            } else {
+                in = inputs[k->human];
+            }
         } else {
             /* ease onto the tactical line rather than darting sideways,
              * and give more room to a human who has been leaning on us */

@@ -54,6 +54,7 @@ static int menu_track_loaded = -1;
 static float cam_x[MAX_HUMANS], cam_y[MAX_HUMANS], cam_z[MAX_HUMANS];
 static float rumble_t[MAX_HUMANS];
 static float controller_lost_t;      /* grace timer for a dropped pad    */
+static int prev_countdown_n = -1;    /* last countdown number beeped     */
 
 /* paint shop: indexes match Kart.paint_idx / GameConfig.paint */
 static const u8 paint_palette[PAINT_COUNT][3] = {
@@ -106,8 +107,13 @@ typedef struct {
 } KeyMap;
 
 static KeyMap keys[2];
-static int keyboard_ok = 0;
+static int keyboard_ok = 0;       /* the driver started */
+static int keyboard_here = 0;     /* ...and a keyboard is actually plugged in */
 static u8 key_confirm_edge, key_back_edge, key_menu_edge;
+/* Menu keys are edges, not held state: sampling `keys[]` every tenth
+ * frame dropped most taps outright and made the menus feel broken. */
+static u8 key_up_edge, key_down_edge, key_left_edge, key_right_edge;
+static float key_repeat_t;        /* held-key auto-repeat timer */
 
 static void poll_keyboard(void)
 {
@@ -117,19 +123,30 @@ static void poll_keyboard(void)
         return;
     while (KEYBOARD_GetEvent(&ev)) {
         u8 held;
+        if (ev.type == KEYBOARD_CONNECTED) {
+            keyboard_here = 1;
+            continue;
+        }
         if (ev.type == KEYBOARD_DISCONNECTED) {
+            keyboard_here = 0;
             memset(keys, 0, sizeof(keys));
             continue;
         }
+        /* a key event can only come from a keyboard that is present */
+        keyboard_here = 1;
         if (ev.type != KEYBOARD_PRESSED && ev.type != KEYBOARD_RELEASED)
             continue;
         held = (ev.type == KEYBOARD_PRESSED);
         switch (ev.symbol) {
         /* ---- player one ---- */
-        case KS_a: case KS_A: case KS_Left:  keys[0].left = held;      break;
-        case KS_d: case KS_D: case KS_Right: keys[0].right = held;     break;
-        case KS_w: case KS_W: case KS_Up:    keys[0].accel = held;     break;
-        case KS_s: case KS_S: case KS_Down:  keys[0].brake = held;     break;
+        case KS_a: case KS_A: case KS_Left:
+            keys[0].left = held;  if (held) key_left_edge = 1;  break;
+        case KS_d: case KS_D: case KS_Right:
+            keys[0].right = held; if (held) key_right_edge = 1; break;
+        case KS_w: case KS_W: case KS_Up:
+            keys[0].accel = held; if (held) key_up_edge = 1;    break;
+        case KS_s: case KS_S: case KS_Down:
+            keys[0].brake = held; if (held) key_down_edge = 1;  break;
         case KS_e: case KS_E:                keys[0].gear_up = held;   break;
         case KS_q: case KS_Q:                keys[0].gear_down = held; break;
         case KS_x: case KS_X:                keys[0].item = held;      break;
@@ -168,6 +185,7 @@ static void poll_all_inputs(void)
     WPAD_ScanPads();
     gc_mask = PAD_ScanPads();
     key_confirm_edge = key_back_edge = key_menu_edge = 0;
+    key_up_edge = key_down_edge = key_left_edge = key_right_edge = 0;
     poll_keyboard();
 
     for (p = 0; p < MAX_HUMANS; p++) {
@@ -298,7 +316,7 @@ static int player_has_device(int p)
 {
     u32 type;
 
-    if (p < 2 && keyboard_ok)
+    if (p < 2 && keyboard_ok && keyboard_here)
         return 1;      /* one keyboard seats two players (WASD + IJKL) */
     if (WPAD_Probe((s32)p, &type) == WPAD_ERR_NONE)
         return 1;
@@ -345,6 +363,18 @@ static int menu_back(void)
            key_back_edge;
 }
 
+/*
+ * Keyboard menu keys are taken as edges, plus a slow auto-repeat once a
+ * key has been held for a moment. They used to be read straight out of
+ * the held-state map on every tenth frame, which meant a normal tap that
+ * began and ended between two of those frames did nothing at all — the
+ * menus looked frozen even though the game was running fine.
+ */
+static int key_repeating(void)
+{
+    return key_repeat_t > 0.32f && (frame_no % 6) == 0;
+}
+
 /* change the highlighted row's value: left/right, or A/D on a keyboard */
 static int menu_dvalue(void)
 {
@@ -353,8 +383,8 @@ static int menu_dvalue(void)
     if (wdown[0] & (WPAD_BUTTON_RIGHT | WPAD_CLASSIC_BUTTON_RIGHT)) d += 1;
     if (gdown[0] & PAD_BUTTON_LEFT)  d -= 1;
     if (gdown[0] & PAD_BUTTON_RIGHT) d += 1;
-    if (keys[0].left && (frame_no % 10) == 0)  d -= 1;
-    if (keys[0].right && (frame_no % 10) == 0) d += 1;
+    if (key_left_edge  || (keys[0].left  && key_repeating())) d -= 1;
+    if (key_right_edge || (keys[0].right && key_repeating())) d += 1;
     return d;
 }
 
@@ -366,8 +396,8 @@ static int menu_dcursor(void)
     if (wdown[0] & (WPAD_BUTTON_DOWN | WPAD_CLASSIC_BUTTON_DOWN)) d += 1;
     if (gdown[0] & PAD_BUTTON_UP)   d -= 1;
     if (gdown[0] & PAD_BUTTON_DOWN) d += 1;
-    if (keys[0].accel && (frame_no % 10) == 0) d -= 1;
-    if (keys[0].brake && (frame_no % 10) == 0) d += 1;
+    if (key_up_edge   || (keys[0].accel && key_repeating())) d -= 1;
+    if (key_down_edge || (keys[0].brake && key_repeating())) d += 1;
     return d;
 }
 
@@ -1328,7 +1358,7 @@ static void draw_race_hud(void)
     }
 
     if (game.state == STATE_FINISHED) {
-        int rank, rows = NUM_KARTS < 8 ? NUM_KARTS : 8;
+        int rank, rows = NUM_KARTS;   /* classify the whole field */
         float y0;
 
         hud_rect(0.0f, 0.0f, W, H, 0, 0, 20, 150);
@@ -1336,11 +1366,11 @@ static void draw_race_hud(void)
                  26.0f, 30.0f, 50.0f, "FINISH", 255, 255, 255, 240);
 
         /* full classification, so you can see which strategy won */
-        y0 = 96.0f;
+        y0 = 92.0f;
         for (rank = 1; rank <= rows; rank++) {
             const Kart *k = kart_at_rank(rank);
             const u8 *c;
-            float y = y0 + (float)(rank - 1) * 25.0f;
+            float y = y0 + (float)(rank - 1) * 22.0f;
             if (!k)
                 continue;
             c = kart_color(k);
@@ -1594,6 +1624,23 @@ static void row_change(const MenuRow *r, int d)
     }
 }
 
+/*
+ * Silence every channel, not just the ones this race used: rumble is
+ * started inside the per-player loop but a race can be left from outside
+ * it (quit, or a controller going away), and a 4-player race followed by
+ * a 1-player race would otherwise leave channels 2-4 buzzing for the rest
+ * of the session.
+ */
+static void stop_all_rumble(void)
+{
+    int p;
+    for (p = 0; p < MAX_HUMANS; p++) {
+        rumble_t[p] = 0.0f;
+        WPAD_Rumble(p, 0);
+        PAD_ControlMotor(p, PAD_MOTOR_STOP);
+    }
+}
+
 static void start_race(void)
 {
     GameConfig cfg;
@@ -1611,6 +1658,10 @@ static void start_race(void)
 
     game_init(&game, &cfg);
     place_scenery(&game.track);
+    stop_all_rumble();
+    controller_lost_t = 0.0f;    /* a dropout banked in a previous race
+                                  * must not shorten this one's grace */
+    prev_countdown_n = -1;
     for (p = 0; p < MAX_HUMANS; p++) {
         Kart *k = &game.karts[p < cfg.n_humans ? p : 0];
         cam_x[p] = k->x - cosf(k->heading) * 9.0f;
@@ -1835,6 +1886,12 @@ static void menu_frame(float dt)
     if (menu_msg_t > 0.0f)
         menu_msg_t -= dt;
 
+    /* how long a menu key has been held, for the auto-repeat */
+    if (keys[0].left || keys[0].right || keys[0].accel || keys[0].brake)
+        key_repeat_t += dt;
+    else
+        key_repeat_t = 0.0f;
+
     build_rows();
     dcur = menu_dcursor();
     dval = menu_dvalue();
@@ -1873,8 +1930,6 @@ static void menu_frame(float dt)
     }
 }
 
-static int prev_countdown_n = -1;
-
 static void race_frame(float dt)
 {
     Input in[MAX_HUMANS];
@@ -1884,6 +1939,7 @@ static void race_frame(float dt)
         read_player_input(p, &in[p], dt);
 
     if (race_to_menu_pressed()) {
+        stop_all_rumble();
         app_state = APP_MENU;
         menu_screen = SCREEN_SETUP;
         menu_row = 0;
@@ -1900,6 +1956,7 @@ static void race_frame(float dt)
         controller_lost_t += dt;
         if (controller_lost_t > 0.75f) {
             controller_lost_t = 0.0f;
+            stop_all_rumble();
             menu_notice("CONTROLLER LOST");
             audio_beep(140.0f, 300, 180);
             app_state = APP_MENU;

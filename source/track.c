@@ -376,7 +376,8 @@ void track_init(Track *t, int track_id)
          i += CHECKPOINT_SPACING)
         t->checkpoint_seg[t->n_checkpoints++] = i;
 
-    t->n_items = d->n_items;
+    t->n_items = d->n_items < TRACK_MAX_ITEMS ? d->n_items
+                                              : TRACK_MAX_ITEMS;
     for (i = 0; i < d->n_items && i < TRACK_MAX_ITEMS; i++)
         t->item_seg[i] = (int)(d->item_frac[i] * (float)t->n) % t->n;
 }
