@@ -107,14 +107,34 @@ jobs:
         run: |
           set -eu
           TAG="v${{ inputs.version }}"
-          BASE_SHA=$(gh api "repos/$GH_REPO/git/refs/tags/${{ inputs.base_tag }}" -q .object.sha)
+          BASE_REF=$(gh api "repos/$GH_REPO/git/refs/tags/${{ inputs.base_tag }}")
+          BASE_SHA=$(echo "$BASE_REF" | jq -r .object.sha)
+          BASE_TYPE=$(echo "$BASE_REF" | jq -r .object.type)
+          echo "base ${{ inputs.base_tag }} -> $BASE_TYPE $BASE_SHA"
+          # An annotated tag points at a tag object, not a commit; a release
+          # target has to be a commit, so peel it.
+          if [ "$BASE_TYPE" = "tag" ]; then
+            BASE_SHA=$(gh api "repos/$GH_REPO/git/tags/$BASE_SHA" -q .object.sha)
+            echo "peeled to commit $BASE_SHA"
+          fi
+
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" wiikart.zip --clobber
           else
+            # Create the tag first and then the release against it. Asking
+            # `gh release create --target` to mint the tag as a side effect
+            # was rejected with "403 Resource not accessible by
+            # integration" for some tags, while creating the ref directly
+            # works; doing it in two steps is also easier to debug.
+            if ! gh api "repos/$GH_REPO/git/refs/tags/$TAG" >/dev/null 2>&1; then
+              gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$TAG" \
+                                               -f sha="$BASE_SHA"
+              echo "created refs/tags/$TAG at $BASE_SHA"
+            fi
             # not marked latest: these are fixes to older lines, and the
             # newest release should stay the newest
             gh release create "$TAG" wiikart.zip \
-              --target "$BASE_SHA" \
+              --verify-tag \
               --title "WiiKart $TAG" \
               --notes "${{ inputs.base_tag }} plus \`${{ inputs.patch }}\`. Download wiikart.zip, unzip, and open wiikart.dol in the Dolphin emulator (or copy the apps folder to an SD card for a real Wii)." \
               --latest=false
