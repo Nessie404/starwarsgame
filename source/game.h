@@ -25,15 +25,19 @@ extern "C" {
 /* Tracks                                                             */
 /* ------------------------------------------------------------------ */
 
-#define TRACK_MAX_POINTS 320
-#define TRACK_MAX_ITEMS  6
-#define TRACK_MAX_CORNERS 48
+#define TRACK_MAX_POINTS 440
+#define TRACK_MAX_ITEMS  8
+#define TRACK_MAX_CORNERS 72
+#define TRACK_MAX_CHECKPOINTS 40
+#define CHECKPOINT_SPACING 12      /* samples between checkpoints      */
 
 enum {
-    TRACK_CLASSIC  = 0,   /* flat speedway with boost pads            */
+    TRACK_CLASSIC  = 0,   /* flat speedway, barriered                 */
     TRACK_BERTHOUD = 1,   /* stylized Berthoud Pass (US-40, Colorado) */
-    TRACK_LOVELAND = 2,   /* stylized Loveland Pass (US-6, Colorado)  */
-    TRACK_COUNT    = 3
+    TRACK_LOVELAND = 2,   /* stylized Loveland Pass (US-6)            */
+    TRACK_KENOSHA  = 3,   /* stylized Kenosha Pass (US-285), long/wide */
+    TRACK_MONARCH  = 4,   /* stylized Monarch Pass (US-50), the hardest */
+    TRACK_COUNT    = 5
 };
 
 typedef struct {
@@ -54,6 +58,13 @@ typedef struct {
     int   item_seg[TRACK_MAX_ITEMS];/* power-up panel rows               */
     int   n_items;
     int   alpine;                   /* 1 = mountain theme (rock skirts)  */
+    int   has_walls;                /* 0 = unguarded drop off the edge   */
+    int   laps;                     /* race distance, set from length    */
+
+    /* Checkpoints, for putting a car that went over the edge back on the
+     * road at the last one it passed. */
+    int   checkpoint_seg[TRACK_MAX_CHECKPOINTS];
+    int   n_checkpoints;
 
     /* Corners, found by walking the curvature profile. AI drivers learn
      * per corner rather than per sample, so "that hairpin" is a thing
@@ -83,7 +94,16 @@ int track_item_row(const Track *t, int seg);   /* -1 or item row index */
 /* ------------------------------------------------------------------ */
 
 #define SPEC_COUNT 4
+#define MAX_GEARS  6
 
+/*
+ * Gearing. Each car has a gearbox whose ratios are expressed as the road
+ * speed at which that gear hits the rev limiter. Engine output then
+ * depends on where in the gear you are: bogging below the torque band
+ * costs power, so does bouncing off the limiter, and the limiter itself
+ * caps speed until you shift up. Shifting takes a moment during which
+ * drive is cut, so short-shifting a hairpin exit is a real decision.
+ */
 typedef struct {
     const char *name;        /* 7-segment-safe                          */
     float mass_kg;           /* curb mass incl. driver                  */
@@ -93,7 +113,25 @@ typedef struct {
     float cd_a;              /* drag area Cd*A, m^2                     */
     float wheelbase;         /* m, sets steering geometry               */
     float offroad_grip;      /* fraction of grip/power kept off road    */
+    int   n_gears;
+    float gear_top[MAX_GEARS];  /* m/s at the limiter in each gear      */
 } KartSpec;
+
+#define SHIFT_TIME    0.18f   /* seconds of cut drive while shifting    */
+#define BOG_FRACTION  0.34f   /* below this much of the gear, it bogs   */
+
+/* engine output multiplier for being at `frac` of the current gear's
+ * band; shared by the simulation, the AI and the tests */
+float gear_power_scale(float frac);
+
+/* customisation the player picks in the garage */
+enum { GEARBOX_AUTO = 0, GEARBOX_MANUAL = 1, GEARBOX_MODES = 2 };
+enum { TIRE_MEDIUM = 0, TIRE_SOFT = 1, TIRE_HARD = 2, TIRE_COMPOUNDS = 3 };
+
+const char *gearbox_name(int mode);
+const char *tire_name(int compound);
+float tire_grip_mult(int compound);
+float tire_drag_mult(int compound);
 
 extern const KartSpec kart_specs[SPEC_COUNT];
 
@@ -103,6 +141,9 @@ extern const KartSpec kart_specs[SPEC_COUNT];
 
 #define MAX_HUMANS 4
 #define NUM_KARTS  12
+/* Fallback lap count; each circuit sets its own in Track.laps so that a
+ * 2 km mountain pass is not the same number of laps as a 555 m speedway
+ * — races then come out at a similar length whichever you pick. */
 #define RACE_LAPS  3
 
 /*
@@ -154,11 +195,13 @@ enum {
 const char *power_name(int power);
 
 typedef struct {
-    float steer;   /* -1..1; negative = left, positive = right          */
+    float steer;     /* -1..1; negative = left, positive = right        */
     int   accel;
     int   brake;
-    int   hop;     /* handbrake / drift                                 */
-    int   item;    /* use held item (edge-detected by the sim)          */
+    int   hop;       /* handbrake                                       */
+    int   item;      /* deploy held power-up (edge-detected by the sim) */
+    int   gear_up;   /* upshift  (edge-detected by the sim)             */
+    int   gear_down; /* downshift                                       */
 } Input;
 
 /* ------------------------------------------------------------------ */
@@ -224,6 +267,13 @@ typedef struct {
     float attack;          /* 0..1 tendency to dive for an overtake     */
     float power_wait;      /* seconds it holds a power-up before using  */
     float power;           /* engine trim                              */
+    /* Shifting style: where in the rev band this driver changes up, how
+     * early it grabs a lower gear on the way into a corner, and how
+     * crisply it does it. A short-shifter rides the torque; a driver who
+     * hangs on to the limiter gets the top end but loses time shifting. */
+    float shift_up_frac;   /* fraction of the gear band to upshift at   */
+    float shift_down_frac; /* below this fraction, take a lower gear    */
+    float shift_delay;     /* extra reaction time before shifting, s    */
 } AIStrategy;
 
 extern const AIStrategy ai_strategies[AI_STRATEGY_COUNT];
@@ -258,6 +308,17 @@ typedef struct {
 
     /* driving state */
     int   spec;           /* index into kart_specs                      */
+    int   gear;           /* 0-based index into the spec's gears        */
+    float shift_t;        /* seconds of shift left (drive cut)          */
+    int   gearbox;        /* GEARBOX_AUTO or GEARBOX_MANUAL             */
+    int   tire;           /* TIRE_* compound                            */
+    float rev_frac;       /* 0..1+ position in the current gear band    */
+    int   prev_up_btn, prev_down_btn;
+
+    /* going over the edge, and getting put back on the road           */
+    int   last_checkpoint;
+    float fall_t;         /* >0 while falling off an unguarded edge     */
+    int   respawned;      /* one-frame flag for the platform layer      */
     int   drifting;       /* handbrake locked in, +1/-1 = direction     */
     float push_t;         /* push-to-pass seconds remaining             */
     float grip_t;         /* fresh-rubber seconds remaining             */
@@ -306,6 +367,8 @@ typedef struct {
     int n_humans;                 /* 1..MAX_HUMANS                     */
     int spec[MAX_HUMANS];         /* chosen car spec per human         */
     int paint[MAX_HUMANS];        /* chosen paint index per human      */
+    int gearbox[MAX_HUMANS];      /* GEARBOX_AUTO / GEARBOX_MANUAL     */
+    int tire[MAX_HUMANS];         /* TIRE_* compound                    */
 } GameConfig;
 
 typedef struct {
@@ -327,6 +390,9 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt);
 /* helpers shared with rendering / tests */
 float game_angle_wrap(float a);
 float game_clampf(float v, float lo, float hi);
+
+/* checkpoint helper, shared with the tests */
+int track_checkpoint_for(const Track *t, int seg);
 
 /* AI helpers exposed for the HUD and the tests */
 const char *ai_strategy_name(int strategy);

@@ -38,17 +38,22 @@ static u32 frame_no = 0;
 /* app flow */
 enum { APP_MENU = 0, APP_RACE = 1 };
 static int app_state = APP_MENU;
-static int menu_screen = 0;          /* 0 players, 1 track, 2.. karts */
+static int menu_screen;              /* SCREEN_SETUP / SCREEN_GARAGE     */
 static int sel_players = 1;
 static int sel_track = 0;
 static int sel_spec[MAX_HUMANS] = { 1, 1, 1, 1 };
 static int sel_paint[MAX_HUMANS] = { 0, 1, 2, 3 };
+static int sel_gearbox[MAX_HUMANS] = { GEARBOX_AUTO, GEARBOX_AUTO,
+                                       GEARBOX_AUTO, GEARBOX_AUTO };
+static int sel_tire[MAX_HUMANS] = { TIRE_MEDIUM, TIRE_MEDIUM,
+                                    TIRE_MEDIUM, TIRE_MEDIUM };
 static Track menu_track;
 static int menu_track_loaded = -1;
 
 /* per-player camera + rumble */
 static float cam_x[MAX_HUMANS], cam_y[MAX_HUMANS], cam_z[MAX_HUMANS];
 static float rumble_t[MAX_HUMANS];
+static float controller_lost_t;      /* grace timer for a dropped pad    */
 
 /* paint shop: indexes match Kart.paint_idx / GameConfig.paint */
 static const u8 paint_palette[PAINT_COUNT][3] = {
@@ -78,20 +83,30 @@ static const float LX = 0.45f, LY = 0.85f, LZ = 0.28f;
 
 static u32 wheld[MAX_HUMANS], wdown[MAX_HUMANS];
 static u32 gheld[MAX_HUMANS], gdown[MAX_HUMANS];
-static int keyboard_ok = 0;
+static u32 gc_mask;      /* connected GameCube pads, from PAD_ScanPads  */
 
 /*
- * Keyboard layout is WASD-first, the way a PC driving game is expected
- * to play: A steers left, D steers right, W is the throttle, S the
- * brake. Arrow keys mirror the same four axes for anyone who prefers
- * them. Steering is fed through the virtual-stick filter, so holding A
- * winds the wheel on smoothly instead of snapping to full lock.
+ * Keyboards. Two players share one keyboard, because libwiikeyboard
+ * merges every attached keyboard into a single event stream — a second
+ * physical keyboard produces the same keysyms, so it cannot be told
+ * apart. Players three and four therefore need pads (an Xbox pad shows
+ * up as a GameCube pad under Dolphin) or Wii Remotes.
  *
- * All steering signs come from STEER_LEFT / STEER_RIGHT in game.h — see
- * the convention comment there. Writing raw +1/-1 here is what made the
- * controls come out mirrored before.
+ *   Player 1: W/A/S/D drive, E up a gear, Q down a gear, X power-up,
+ *             Space handbrake.
+ *   Player 2: I/J/K/L drive, O up a gear, U down a gear, M power-up,
+ *             P handbrake.
+ *
+ * Menus are driven by player 1's WASD, Enter to act on the highlighted
+ * row and Esc to back out. Steering signs always come from STEER_LEFT /
+ * STEER_RIGHT (see game.h) rather than being written by hand here.
  */
-static u8 key_left, key_right, key_accel, key_brake, key_drift, key_item;
+typedef struct {
+    u8 left, right, accel, brake, drift, item, gear_up, gear_down;
+} KeyMap;
+
+static KeyMap keys[2];
+static int keyboard_ok = 0;
 static u8 key_confirm_edge, key_back_edge, key_menu_edge;
 
 static void poll_keyboard(void)
@@ -103,48 +118,42 @@ static void poll_keyboard(void)
     while (KEYBOARD_GetEvent(&ev)) {
         u8 held;
         if (ev.type == KEYBOARD_DISCONNECTED) {
-            key_left = key_right = key_accel = key_brake = 0;
-            key_drift = key_item = 0;
+            memset(keys, 0, sizeof(keys));
             continue;
         }
         if (ev.type != KEYBOARD_PRESSED && ev.type != KEYBOARD_RELEASED)
             continue;
         held = (ev.type == KEYBOARD_PRESSED);
         switch (ev.symbol) {
-        case KS_a: case KS_A: case KS_Left:
-            key_left = held;
-            break;
-        case KS_d: case KS_D: case KS_Right:
-            key_right = held;
-            break;
-        case KS_w: case KS_W: case KS_Up:
-            key_accel = held;
-            break;
-        case KS_s: case KS_S: case KS_Down:
-            key_brake = held;
-            break;
-        case KS_space:
-            key_drift = held;
-            if (held)
-                key_confirm_edge = 1;      /* doubles as menu confirm */
-            break;
-        case KS_Shift_L: case KS_Shift_R:
-            key_drift = held;
-            break;
-        case KS_e: case KS_E:
-            key_item = held;
-            break;
+        /* ---- player one ---- */
+        case KS_a: case KS_A: case KS_Left:  keys[0].left = held;      break;
+        case KS_d: case KS_D: case KS_Right: keys[0].right = held;     break;
+        case KS_w: case KS_W: case KS_Up:    keys[0].accel = held;     break;
+        case KS_s: case KS_S: case KS_Down:  keys[0].brake = held;     break;
+        case KS_e: case KS_E:                keys[0].gear_up = held;   break;
+        case KS_q: case KS_Q:                keys[0].gear_down = held; break;
+        case KS_x: case KS_X:                keys[0].item = held;      break;
+        case KS_space:                       keys[0].drift = held;     break;
+        /* ---- player two ---- */
+        case KS_j: case KS_J:                keys[1].left = held;      break;
+        case KS_l: case KS_L:                keys[1].right = held;     break;
+        case KS_i: case KS_I:                keys[1].accel = held;     break;
+        case KS_k: case KS_K:                keys[1].brake = held;     break;
+        case KS_o: case KS_O:                keys[1].gear_up = held;   break;
+        case KS_u: case KS_U:                keys[1].gear_down = held; break;
+        case KS_m: case KS_M:                keys[1].item = held;      break;
+        case KS_p: case KS_P:                keys[1].drift = held;     break;
+        /* ---- menus and flow ---- */
         case KS_Return:
             if (held) key_confirm_edge = 1;
             break;
-        case KS_q: case KS_Q:
+        case KS_Escape:
+            /* backs out one step; it does not quit, which was an easy way
+             * to lose a race by accident */
             if (held) key_back_edge = 1;
             break;
         case KS_r: case KS_R:
             if (held) key_menu_edge = 1;
-            break;
-        case KS_Escape:
-            if (held) exit(0);
             break;
         default:
             break;
@@ -157,7 +166,7 @@ static void poll_all_inputs(void)
     int p;
 
     WPAD_ScanPads();
-    PAD_ScanPads();
+    gc_mask = PAD_ScanPads();
     key_confirm_edge = key_back_edge = key_menu_edge = 0;
     poll_keyboard();
 
@@ -168,6 +177,7 @@ static void poll_all_inputs(void)
         gdown[p] = PAD_ButtonsDown(p);
     }
 
+    /* quitting is deliberate: HOME, Z+Start, or the EXIT row in the menu */
     if ((wdown[0] & (WPAD_BUTTON_HOME | WPAD_CLASSIC_BUTTON_HOME)) ||
         ((gheld[0] & PAD_TRIGGER_Z) && (gdown[0] & PAD_BUTTON_START)))
         exit(0);
@@ -221,9 +231,7 @@ static void read_player_input(int p, Input *in, float dt)
             in->brake |= (wheld[p] & (WPAD_CLASSIC_BUTTON_B |
                                       WPAD_CLASSIC_BUTTON_Y)) != 0;
             in->hop   |= (wheld[p] & (WPAD_CLASSIC_BUTTON_FULL_R |
-                                      WPAD_CLASSIC_BUTTON_FULL_L |
-                                      WPAD_CLASSIC_BUTTON_ZR |
-                                      WPAD_CLASSIC_BUTTON_ZL)) != 0;
+                                      WPAD_CLASSIC_BUTTON_FULL_L)) != 0;
             tilt_ok = 0;
         }
         if (tilt_ok) {
@@ -243,19 +251,29 @@ static void read_player_input(int p, Input *in, float dt)
                      STEER_RIGHT;
         in->accel |= (gheld[p] & (PAD_BUTTON_A | PAD_BUTTON_X)) != 0;
         in->brake |= (gheld[p] & PAD_BUTTON_B) != 0;
-        in->hop   |= (gheld[p] & (PAD_TRIGGER_R | PAD_TRIGGER_L)) != 0;
+        in->hop   |= (gheld[p] & PAD_BUTTON_B) != 0 &&
+                     (gheld[p] & PAD_TRIGGER_Z) != 0;   /* Z+B handbrake */
         in->item  |= (gheld[p] & PAD_BUTTON_Y) != 0;
     }
 
-    /* USB keyboard (player 1 only): WASD, A = left, D = right */
-    if (p == 0) {
-        if (key_left)  steer += STEER_LEFT;
-        if (key_right) steer += STEER_RIGHT;
-        in->accel |= key_accel;
-        in->brake |= key_brake;
-        in->hop   |= key_drift;
-        in->item  |= key_item;
+    /* USB keyboard: player 1 on WASD, player 2 on IJKL */
+    if (p < 2) {
+        const KeyMap *km = &keys[p];
+        if (km->left)  steer += STEER_LEFT;
+        if (km->right) steer += STEER_RIGHT;
+        in->accel     |= km->accel;
+        in->brake     |= km->brake;
+        in->hop       |= km->drift;
+        in->item      |= km->item;
+        in->gear_up   |= km->gear_up;
+        in->gear_down |= km->gear_down;
     }
+
+    /* pad shoulder buttons shift too, for players on a controller */
+    in->gear_up   |= (gheld[p] & PAD_TRIGGER_R) ? 1 : 0;
+    in->gear_down |= (gheld[p] & PAD_TRIGGER_L) ? 1 : 0;
+    in->gear_up   |= (wheld[p] & WPAD_CLASSIC_BUTTON_ZR) ? 1 : 0;
+    in->gear_down |= (wheld[p] & WPAD_CLASSIC_BUTTON_ZL) ? 1 : 0;
 
     /* every device goes through the virtual stick, so a tapped key and
      * a flicked thumbstick both move the wheel at a believable rate */
@@ -264,11 +282,55 @@ static void read_player_input(int p, Input *in, float dt)
                                   game.karts[p].speed, dt);
 }
 
-/* menu edges, driven by player 1's devices */
-static int menu_confirm(void)
+/* ------------------------------------------------------------------ */
+/* How many players can actually be fielded                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A player is only playable if that player's own device is present:
+ * player 1 may use the USB keyboard, and any player may use the Wii
+ * Remote or the GameCube pad on their own channel. Players are numbered
+ * from one upward, so the fieldable count is the unbroken run starting
+ * at player 1 — two remotes on channels 1 and 3 still only gives one
+ * playable player, because player 2 would have nothing to hold.
+ */
+static int player_has_device(int p)
 {
-    /* Start is deliberately not a confirm: it is the in-race "back to
-     * menu" button, and would otherwise bounce straight back out. */
+    u32 type;
+
+    if (p < 2 && keyboard_ok)
+        return 1;      /* one keyboard seats two players (WASD + IJKL) */
+    if (WPAD_Probe((s32)p, &type) == WPAD_ERR_NONE)
+        return 1;
+    if (gc_mask & (1u << p))
+        return 1;
+    return 0;
+}
+
+static int available_players(void)
+{
+    int n = 0;
+    while (n < MAX_HUMANS && player_has_device(n))
+        n++;
+    return n;
+}
+
+/* ------------------------------------------------------------------ */
+/* Menu buttons, all driven by player 1's devices                      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * "Activate the highlighted row" is deliberately separate from "change a
+ * value" and from "move the cursor". Previously every button press moved
+ * the whole menu forward, so pressing A to look at something jumped past
+ * it; now A only ever acts on the row under the cursor, and rows that
+ * merely hold a setting do nothing at all when activated.
+ *
+ * Start is not an activate: it is the in-race "back to menu" button and
+ * would bounce straight back out.
+ */
+static int menu_activate(void)
+{
     return (wdown[0] & (WPAD_BUTTON_2 | WPAD_BUTTON_A |
                         WPAD_CLASSIC_BUTTON_A)) ||
            (gdown[0] & PAD_BUTTON_A) ||
@@ -283,29 +345,29 @@ static int menu_back(void)
            key_back_edge;
 }
 
-/* horizontal menu movement: change the selected option */
-static int menu_dx(void)
+/* change the highlighted row's value: left/right, or A/D on a keyboard */
+static int menu_dvalue(void)
 {
     int d = 0;
     if (wdown[0] & (WPAD_BUTTON_LEFT | WPAD_CLASSIC_BUTTON_LEFT))  d -= 1;
     if (wdown[0] & (WPAD_BUTTON_RIGHT | WPAD_CLASSIC_BUTTON_RIGHT)) d += 1;
     if (gdown[0] & PAD_BUTTON_LEFT)  d -= 1;
     if (gdown[0] & PAD_BUTTON_RIGHT) d += 1;
-    if (key_left && (frame_no % 10) == 0)  d -= 1;
-    if (key_right && (frame_no % 10) == 0) d += 1;
+    if (keys[0].left && (frame_no % 10) == 0)  d -= 1;
+    if (keys[0].right && (frame_no % 10) == 0) d += 1;
     return d;
 }
 
-/* vertical menu movement: in the garage this changes the paint */
-static int menu_dy(void)
+/* move the cursor between rows: up/down, or W/S on a keyboard */
+static int menu_dcursor(void)
 {
     int d = 0;
     if (wdown[0] & (WPAD_BUTTON_UP | WPAD_CLASSIC_BUTTON_UP))     d -= 1;
     if (wdown[0] & (WPAD_BUTTON_DOWN | WPAD_CLASSIC_BUTTON_DOWN)) d += 1;
     if (gdown[0] & PAD_BUTTON_UP)   d -= 1;
     if (gdown[0] & PAD_BUTTON_DOWN) d += 1;
-    if (key_accel && (frame_no % 10) == 0) d -= 1;
-    if (key_brake && (frame_no % 10) == 0) d += 1;
+    if (keys[0].accel && (frame_no % 10) == 0) d -= 1;
+    if (keys[0].brake && (frame_no % 10) == 0) d += 1;
     return d;
 }
 
@@ -668,8 +730,8 @@ static void draw_track(const Track *t, int viewer_seg)
                      t->pz[i]  + l0z * e2 * s,
                      rr, gg, bb, 255);
             }
-            /* guardrails at the barrier line */
-            {
+            /* guardrails, where this road has them */
+            if (t->has_walls) {
                 float w = t->wall_half - 0.2f;
                 u8 rr = 225, gg = 228, bb = 232;
                 if (i & 1) { rr = 180; gg = 184; bb = 190; }
@@ -683,6 +745,33 @@ static void draw_track(const Track *t, int viewer_seg)
                      t->px[in] - l1x * w, y1 + 0.75f, t->pz[in] - l1z * w,
                      t->px[i]  - l0x * w, y0 + 0.75f, t->pz[i]  - l0z * w,
                      rr, gg, bb, 255);
+            } else {
+                /* No barrier: mark the edge with a stripe and drop the
+                 * ground away sharply, so the cliff reads as a cliff */
+                float w = t->wall_half;
+                int side;
+                for (side = -1; side <= 1; side += 2) {
+                    float sg = (float)side;
+                    u8 er = (i & 1) ? 235 : 90, eg = (i & 1) ? 180 : 90;
+                    quad(t->px[i]  + l0x * (w - 0.5f) * sg, y0 + 0.02f,
+                         t->pz[i]  + l0z * (w - 0.5f) * sg,
+                         t->px[in] + l1x * (w - 0.5f) * sg, y1 + 0.02f,
+                         t->pz[in] + l1z * (w - 0.5f) * sg,
+                         t->px[in] + l1x * w * sg, y1 + 0.02f,
+                         t->pz[in] + l1z * w * sg,
+                         t->px[i]  + l0x * w * sg, y0 + 0.02f,
+                         t->pz[i]  + l0z * w * sg,
+                         er, eg, 70, 255);
+                    quad(t->px[i]  + l0x * w * sg, y0,
+                         t->pz[i]  + l0z * w * sg,
+                         t->px[in] + l1x * w * sg, y1,
+                         t->pz[in] + l1z * w * sg,
+                         t->px[in] + l1x * (w + 1.5f) * sg, y1 - 26.0f,
+                         t->pz[in] + l1z * (w + 1.5f) * sg,
+                         t->px[i]  + l0x * (w + 1.5f) * sg, y0 - 26.0f,
+                         t->pz[i]  + l0z * (w + 1.5f) * sg,
+                         84, 74, 64, 255);
+                }
             }
         }
     }
@@ -1121,10 +1210,11 @@ static void draw_player_hud(int p)
 
     /* lap */
     {
+        int laps = game.track.laps;
         int lap_disp = k->lap + 1;
         if (lap_disp < 1) lap_disp = 1;
-        if (lap_disp > RACE_LAPS) lap_disp = RACE_LAPS;
-        snprintf(buf, sizeof(buf), "L%d/%d", lap_disp, RACE_LAPS);
+        if (lap_disp > laps) lap_disp = laps;
+        snprintf(buf, sizeof(buf), "L%d/%d", lap_disp, laps);
         hud_text(vx + 14.0f, vy + 12.0f, 11.0f, 19.0f, buf,
                  255, 255, 255, 220);
     }
@@ -1152,6 +1242,34 @@ static void draw_player_hud(int p)
                      kart_label(ahead), c[0], c[1], c[2], 235);
         }
     }
+
+    /* gear and revs: the gear number, and a bar for where in the band it
+     * is, so a manual driver can see when to shift */
+    {
+        const KartSpec *sp = &kart_specs[k->spec];
+        float rev = game_clampf(k->rev_frac, 0.0f, 1.0f);
+        u8 rr = 90, rg = 210, rb = 120;
+        if (k->rev_frac > 0.92f) { rr = 255; rg = 90; rb = 70; }
+        else if (k->rev_frac > 0.80f) { rr = 245; rg = 200; rb = 70; }
+
+        snprintf(buf, sizeof(buf), "%d", k->gear + 1);
+        hud_text(vx + 118.0f, vy + vh - 44.0f, 15.0f, 28.0f, buf,
+                 235, 235, 245, 245);
+        hud_rect(vx + 112.0f, vy + vh - 12.0f, 62.0f, 7.0f, 15, 15, 20, 170);
+        hud_rect(vx + 113.0f, vy + vh - 11.0f, 60.0f * rev, 5.0f,
+                 rr, rg, rb, 240);
+        if (k->shift_t > 0.0f)      /* drive is cut during the change */
+            hud_text(vx + 140.0f, vy + vh - 44.0f, 11.0f, 19.0f, "-",
+                     255, 200, 80, 240);
+        if (k->gear + 1 >= sp->n_gears)
+            hud_text(vx + 140.0f, vy + vh - 44.0f, 9.0f, 15.0f, "T",
+                     150, 200, 240, 220);
+    }
+
+    /* just been fished out of the void */
+    if (k->fall_t > 0.0f)
+        hud_text(vx + vw * 0.5f - 60.0f, vy + vh * 0.5f, 14.0f, 24.0f,
+                 "FALLING", 255, 120, 90, 240);
 
     /* power-up in reserve, and the timer while one is deployed */
     if (k->power_held) {
@@ -1319,91 +1437,6 @@ static void draw_garage_scene(int paint_idx)
                    paint_palette[paint_idx % PAINT_COUNT]);
 }
 
-static void draw_stat_bar(float x, float y, float w, float h, float frac,
-                          u8 r, u8 g, u8 b)
-{
-    hud_rect(x, y, w, h, 16, 18, 26, 210);
-    hud_rect(x + 1.0f, y + 1.0f,
-             (w - 2.0f) * game_clampf(frac, 0.02f, 1.0f), h - 2.0f,
-             r, g, b, 240);
-}
-
-static void draw_garage_overlay(int p)
-{
-    const KartSpec *s = &kart_specs[sel_spec[p] % SPEC_COUNT];
-    const u8 *paint = paint_palette[sel_paint[p] % PAINT_COUNT];
-    float W = (float)rmode->fbWidth;
-    float H = (float)rmode->efbHeight;
-    float x = 34.0f, y;
-    char buf[32];
-    int i;
-
-    hud_ortho_fullscreen();
-
-    /* readability panel behind the left-hand column */
-    hud_rect(18.0f, 24.0f, 250.0f, H - 90.0f, 12, 15, 24, 165);
-
-    snprintf(buf, sizeof(buf), "P%d GARAGE", p + 1);
-    hud_text(x, 38.0f, 12.0f, 21.0f, buf, paint[0], paint[1], paint[2], 255);
-
-    snprintf(buf, sizeof(buf), "%s", s->name);
-    hud_text(x, 70.0f, 18.0f, 30.0f, buf, 255, 220, 60, 255);
-
-    /* spec sheet */
-    y = 118.0f;
-    snprintf(buf, sizeof(buf), "HP    %d", (int)s->power_hp);
-    hud_text(x, y, 9.0f, 15.0f, buf, 205, 210, 220, 255); y += 22.0f;
-    snprintf(buf, sizeof(buf), "CURB  %d", (int)s->mass_kg);
-    hud_text(x, y, 9.0f, 15.0f, buf, 205, 210, 220, 255); y += 22.0f;
-    snprintf(buf, sizeof(buf), "0-100 %.1fS", spec_accel_time(s));
-    hud_text(x, y, 9.0f, 15.0f, buf, 205, 210, 220, 255); y += 22.0f;
-    snprintf(buf, sizeof(buf), "TOP   %d", (int)spec_top_speed(s));
-    hud_text(x, y, 9.0f, 15.0f, buf, 205, 210, 220, 255); y += 22.0f;
-    snprintf(buf, sizeof(buf), "100-0 %d", (int)s->brake_dist_100);
-    hud_text(x, y, 9.0f, 15.0f, buf, 205, 210, 220, 255); y += 22.0f;
-    snprintf(buf, sizeof(buf), "GRIP  %.2fG", s->lat_g);
-    hud_text(x, y, 9.0f, 15.0f, buf, 205, 210, 220, 255); y += 30.0f;
-
-    /* at-a-glance bars */
-    hud_text(x, y, 8.0f, 13.0f, "POWER", 150, 158, 175, 255);
-    draw_stat_bar(x + 74.0f, y, 150.0f, 12.0f,
-                  s->power_hp / 320.0f, 235, 120, 60);
-    y += 24.0f;
-    hud_text(x, y, 8.0f, 13.0f, "BRAKE", 150, 158, 175, 255);
-    draw_stat_bar(x + 74.0f, y, 150.0f, 12.0f,
-                  (48.0f - s->brake_dist_100) / 22.0f, 90, 190, 235);
-    y += 24.0f;
-    hud_text(x, y, 8.0f, 13.0f, "GRIP", 150, 158, 175, 255);
-    draw_stat_bar(x + 74.0f, y, 150.0f, 12.0f,
-                  s->lat_g / 1.40f, 235, 200, 70);
-    y += 24.0f;
-    hud_text(x, y, 8.0f, 13.0f, "DIRT", 150, 158, 175, 255);
-    draw_stat_bar(x + 74.0f, y, 150.0f, 12.0f,
-                  s->offroad_grip, 130, 200, 110);
-    y += 34.0f;
-
-    /* paint shop */
-    snprintf(buf, sizeof(buf), "PAINT %s", paint_names[sel_paint[p] %
-                                                       PAINT_COUNT]);
-    hud_text(x, y, 9.0f, 15.0f, buf, 205, 210, 220, 255);
-    y += 24.0f;
-    for (i = 0; i < PAINT_COUNT; i++) {
-        float sx = x + (float)i * 27.0f;
-        const u8 *c = paint_palette[i];
-        if (i == sel_paint[p] % PAINT_COUNT)
-            hud_rect(sx - 3.0f, y - 3.0f, 28.0f, 28.0f, 255, 255, 255, 235);
-        hud_rect(sx, y, 22.0f, 22.0f, c[0], c[1], c[2], 255);
-    }
-
-    /* controls */
-    hud_text(W * 0.5f - 60.0f, H - 52.0f, 9.0f, 15.0f, "A D   CAR",
-             170, 175, 190, 225);
-    hud_text(W * 0.5f - 60.0f, H - 32.0f, 9.0f, 15.0f, "W S   PAINT",
-             170, 175, 190, 225);
-    hud_text(W - 210.0f, H - 42.0f, 9.0f, 15.0f, "ENTER   GO",
-             120, 235, 130, 235);
-}
-
 static void menu_update_track_preview(void)
 {
     if (menu_track_loaded != sel_track) {
@@ -1412,44 +1445,153 @@ static void menu_update_track_preview(void)
     }
 }
 
-static void draw_menu(void)
+/* ------------------------------------------------------------------ */
+/* Menus: a cursor over rows, never "press anything to go forward"      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Every screen is a list of rows with a cursor on one of them. Up/down
+ * moves the cursor, left/right changes the value of the row it is on, and
+ * only the action rows (GO, GARAGE, DONE, EXIT) do anything when
+ * activated. Previously any button press advanced the whole screen, so
+ * pressing A to look at something jumped straight past it.
+ *
+ * Every screen also has a way back: an explicit row, and the B/1/Esc
+ * button. Nothing is a one-way door.
+ */
+enum {
+    RK_PLAYERS = 0, RK_TRACK, RK_GARAGE, RK_START, RK_EXIT,   /* setup   */
+    RK_CAR, RK_PAINT, RK_GEARBOX, RK_TIRES, RK_DONE           /* garage  */
+};
+
+typedef struct {
+    int kind;
+    int player;
+} MenuRow;
+
+static MenuRow menu_rows[6 + MAX_HUMANS];
+static int n_menu_rows;
+static int menu_row;
+static int garage_player;
+static char menu_msg[44];
+static float menu_msg_t;
+
+enum { SCREEN_SETUP = 0, SCREEN_GARAGE = 1 };
+
+static void menu_notice(const char *text)
 {
-    float W = (float)rmode->fbWidth;
-    float H = (float)rmode->efbHeight;
-    char buf[32];
+    snprintf(menu_msg, sizeof(menu_msg), "%s", text);
+    menu_msg_t = 4.0f;
+}
 
-    hud_ortho_fullscreen();
+static void build_rows(void)
+{
+    int p;
 
-    hud_rect(0.0f, 0.0f, W, H, 18, 24, 40, 255);
-    hud_text(W * 0.5f - hud_text_width(30.0f, "WIIKART") * 0.5f, 34.0f,
-             30.0f, 50.0f, "WIIKART", 230, 40, 40, 255);
-
-    if (menu_screen == 0) {
-        hud_text(W * 0.5f - hud_text_width(16.0f, "PLAYERS") * 0.5f,
-                 150.0f, 16.0f, 27.0f, "PLAYERS", 235, 235, 235, 255);
-        snprintf(buf, sizeof(buf), "-  %d  -", sel_players);
-        hud_text(W * 0.5f - hud_text_width(22.0f, buf) * 0.5f, 210.0f,
-                 22.0f, 37.0f, buf, 255, 220, 60, 255);
-    } else if (menu_screen == 1) {
-        menu_update_track_preview();
-        hud_text(60.0f, 140.0f, 13.0f, 22.0f, "TRACK", 235, 235, 235, 255);
-        snprintf(buf, sizeof(buf), "- %s -", track_name(sel_track));
-        hud_text(60.0f, 180.0f, 15.0f, 25.0f, buf, 255, 220, 60, 255);
-        snprintf(buf, sizeof(buf), "LENGTH %d", (int)menu_track.total_len);
-        hud_text(60.0f, 240.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
-        snprintf(buf, sizeof(buf), "RISE   %d",
-                 (int)(menu_track.max_y - menu_track.min_y));
-        hud_text(60.0f, 268.0f, 10.0f, 17.0f, buf, 200, 205, 215, 255);
-        if (sel_track != TRACK_CLASSIC)
-            hud_text(60.0f, 296.0f, 10.0f, 17.0f, "COLORADO PASS",
-                     150, 190, 230, 255);
-        draw_minimap(&menu_track, 0, W - 220.0f, 160.0f, 170.0f);
+    n_menu_rows = 0;
+    if (menu_screen == SCREEN_SETUP) {
+        menu_rows[n_menu_rows].kind = RK_PLAYERS;
+        menu_rows[n_menu_rows++].player = 0;
+        menu_rows[n_menu_rows].kind = RK_TRACK;
+        menu_rows[n_menu_rows++].player = 0;
+        for (p = 0; p < sel_players; p++) {
+            menu_rows[n_menu_rows].kind = RK_GARAGE;
+            menu_rows[n_menu_rows++].player = p;
+        }
+        menu_rows[n_menu_rows].kind = RK_START;
+        menu_rows[n_menu_rows++].player = 0;
+        menu_rows[n_menu_rows].kind = RK_EXIT;
+        menu_rows[n_menu_rows++].player = 0;
+    } else {
+        menu_rows[n_menu_rows].kind = RK_CAR;
+        menu_rows[n_menu_rows++].player = garage_player;
+        menu_rows[n_menu_rows].kind = RK_PAINT;
+        menu_rows[n_menu_rows++].player = garage_player;
+        menu_rows[n_menu_rows].kind = RK_GEARBOX;
+        menu_rows[n_menu_rows++].player = garage_player;
+        menu_rows[n_menu_rows].kind = RK_TIRES;
+        menu_rows[n_menu_rows++].player = garage_player;
+        menu_rows[n_menu_rows].kind = RK_DONE;
+        menu_rows[n_menu_rows++].player = garage_player;
     }
+    if (menu_row >= n_menu_rows)
+        menu_row = n_menu_rows - 1;
+    if (menu_row < 0)
+        menu_row = 0;
+}
 
-    hud_text(W * 0.5f - hud_text_width(9.0f, "A D  CHOOSE") * 0.5f,
-             H - 62.0f, 9.0f, 15.0f, "A D  CHOOSE", 160, 165, 180, 220);
-    hud_text(W * 0.5f - hud_text_width(9.0f, "ENTER  OR  2  GO") * 0.5f,
-             H - 40.0f, 9.0f, 15.0f, "ENTER  OR  2  GO", 160, 165, 180, 220);
+static void row_label(const MenuRow *r, char *out, int cap)
+{
+    switch (r->kind) {
+    case RK_PLAYERS: snprintf(out, cap, "PLAYERS");            break;
+    case RK_TRACK:   snprintf(out, cap, "TRACH");              break;
+    case RK_GARAGE:  snprintf(out, cap, "P%d GARAGE", r->player + 1); break;
+    case RK_START:   snprintf(out, cap, "GO");                 break;
+    case RK_EXIT:    snprintf(out, cap, "EHIT");               break;
+    case RK_CAR:     snprintf(out, cap, "CAR");                break;
+    case RK_PAINT:   snprintf(out, cap, "PAINT");              break;
+    case RK_GEARBOX: snprintf(out, cap, "GEARS");              break;
+    case RK_TIRES:   snprintf(out, cap, "TIRES");              break;
+    default:         snprintf(out, cap, "DONE");               break;
+    }
+}
+
+static void row_value(const MenuRow *r, char *out, int cap)
+{
+    int p = r->player;
+    switch (r->kind) {
+    case RK_PLAYERS: snprintf(out, cap, "%d", sel_players);                 break;
+    case RK_TRACK:   snprintf(out, cap, "%s", track_name(sel_track));       break;
+    case RK_GARAGE:  snprintf(out, cap, "%s",
+                              kart_specs[sel_spec[p] % SPEC_COUNT].name);   break;
+    case RK_CAR:     snprintf(out, cap, "%s",
+                              kart_specs[sel_spec[p] % SPEC_COUNT].name);   break;
+    case RK_PAINT:   snprintf(out, cap, "%s",
+                              paint_names[sel_paint[p] % PAINT_COUNT]);     break;
+    case RK_GEARBOX: snprintf(out, cap, "%s", gearbox_name(sel_gearbox[p])); break;
+    case RK_TIRES:   snprintf(out, cap, "%s", tire_name(sel_tire[p]));      break;
+    default:         out[0] = 0;                                            break;
+    }
+}
+
+static int row_has_value(const MenuRow *r)
+{
+    return (r->kind == RK_PLAYERS || r->kind == RK_TRACK ||
+            r->kind == RK_CAR || r->kind == RK_PAINT ||
+            r->kind == RK_GEARBOX || r->kind == RK_TIRES);
+}
+
+static void row_change(const MenuRow *r, int d)
+{
+    int p = r->player;
+    switch (r->kind) {
+    case RK_PLAYERS:
+        sel_players += d;
+        if (sel_players < 1) sel_players = MAX_HUMANS;
+        if (sel_players > MAX_HUMANS) sel_players = 1;
+        break;
+    case RK_TRACK:
+        sel_track = ((sel_track + d) % TRACK_COUNT + TRACK_COUNT) % TRACK_COUNT;
+        break;
+    case RK_GARAGE:
+    case RK_CAR:
+        sel_spec[p] = ((sel_spec[p] + d) % SPEC_COUNT + SPEC_COUNT) % SPEC_COUNT;
+        break;
+    case RK_PAINT:
+        sel_paint[p] = ((sel_paint[p] + d) % PAINT_COUNT + PAINT_COUNT)
+                       % PAINT_COUNT;
+        break;
+    case RK_GEARBOX:
+        sel_gearbox[p] = ((sel_gearbox[p] + d) % GEARBOX_MODES + GEARBOX_MODES)
+                         % GEARBOX_MODES;
+        break;
+    case RK_TIRES:
+        sel_tire[p] = ((sel_tire[p] + d) % TIRE_COMPOUNDS + TIRE_COMPOUNDS)
+                      % TIRE_COMPOUNDS;
+        break;
+    default:
+        break;
+    }
 }
 
 static void start_race(void)
@@ -1463,6 +1605,8 @@ static void start_race(void)
     for (p = 0; p < MAX_HUMANS; p++) {
         cfg.spec[p] = sel_spec[p] % SPEC_COUNT;
         cfg.paint[p] = sel_paint[p] % PAINT_COUNT;
+        cfg.gearbox[p] = sel_gearbox[p] % GEARBOX_MODES;
+        cfg.tire[p] = sel_tire[p] % TIRE_COMPOUNDS;
     }
 
     game_init(&game, &cfg);
@@ -1479,71 +1623,255 @@ static void start_race(void)
     audio_beep(660.0f, 90, 160);
 }
 
-static void menu_frame(void)
+/*
+ * Starting a race needs a controller per player. If there are not enough,
+ * say so and stay put — the old behaviour would have started a race with
+ * a player who could not steer.
+ */
+static void try_start_race(void)
 {
-    int dx = menu_dx();
-    int dy = menu_dy();
-    int moved = 0;
+    int avail = available_players();
 
-    if (menu_screen == 0) {
-        if (dx || dy) {
-            sel_players += (dx ? dx : dy);
-            if (sel_players < 1) sel_players = MAX_HUMANS;
-            if (sel_players > MAX_HUMANS) sel_players = 1;
-            moved = 1;
-        }
-        if (menu_confirm()) { menu_screen = 1; audio_beep(880.0f, 60, 140); }
-    } else if (menu_screen == 1) {
-        if (dx || dy) {
-            int d = dx ? dx : dy;
-            sel_track = ((sel_track + d) % TRACK_COUNT + TRACK_COUNT)
-                        % TRACK_COUNT;
-            moved = 1;
-        }
-        if (menu_confirm()) { menu_screen = 2; audio_beep(880.0f, 60, 140); }
-        else if (menu_back()) { menu_screen = 0; }
-    } else {
-        /* garage: left/right swaps the car, up/down swaps the paint */
-        int p = menu_screen - 2;
-        if (dx) {
-            sel_spec[p] = ((sel_spec[p] + dx) % SPEC_COUNT + SPEC_COUNT)
-                          % SPEC_COUNT;
-            moved = 1;
-        }
-        if (dy) {
-            sel_paint[p] = ((sel_paint[p] + dy) % PAINT_COUNT + PAINT_COUNT)
-                           % PAINT_COUNT;
-            moved = 1;
-        }
-        if (menu_confirm()) {
-            audio_beep(880.0f, 60, 140);
-            if (p + 1 < sel_players)
-                menu_screen++;
-            else
-                start_race();
-        } else if (menu_back()) {
-            menu_screen--;
-        }
+    if (avail < sel_players) {
+        char buf[44];
+        snprintf(buf, sizeof(buf), "NEED %d PADS  FOUND %d",
+                 sel_players, avail);
+        menu_notice(buf);
+        audio_beep(150.0f, 240, 175);
+        return;
     }
+    start_race();
+}
 
-    if (moved)
-        audio_beep(440.0f, 35, 90);
-
-    if (app_state == APP_RACE)
-        return;                     /* start_race() already switched away */
-
-    if (menu_screen >= 2) {
-        int p = menu_screen - 2;
-        draw_garage_scene(sel_paint[p]);
-        draw_garage_overlay(p);
-    } else {
-        draw_menu();
+static void activate_row(const MenuRow *r)
+{
+    switch (r->kind) {
+    case RK_GARAGE:
+        garage_player = r->player;
+        menu_screen = SCREEN_GARAGE;
+        menu_row = 0;
+        audio_beep(880.0f, 60, 140);
+        break;
+    case RK_START:
+        try_start_race();
+        break;
+    case RK_EXIT:
+        exit(0);
+        break;
+    case RK_DONE:
+        menu_screen = SCREEN_SETUP;
+        menu_row = 0;
+        audio_beep(660.0f, 60, 130);
+        break;
+    default:
+        /* a setting row: left/right changes it, activating does nothing.
+         * This is the whole point — a stray press must not advance. */
+        break;
     }
 }
 
 /* ------------------------------------------------------------------ */
-/* Race frame                                                          */
+/* Menu drawing                                                        */
 /* ------------------------------------------------------------------ */
+
+static void draw_row_list(float x, float y0, float rowh, float value_x)
+{
+    char label[24], value[24];
+    int i;
+
+    for (i = 0; i < n_menu_rows; i++) {
+        float y = y0 + rowh * (float)i;
+        int sel = (i == menu_row);
+        u8 br = sel ? 255 : 210, bg = sel ? 235 : 215, bb = sel ? 245 : 225;
+
+        if (sel)
+            hud_rect(x - 12.0f, y - 4.0f, value_x + 150.0f, rowh - 6.0f,
+                     60, 80, 130, 220);
+        row_label(&menu_rows[i], label, sizeof(label));
+        hud_text(x, y, 11.0f, 19.0f, label, br, bg, bb, 250);
+
+        row_value(&menu_rows[i], value, sizeof(value));
+        if (value[0]) {
+            hud_text(x + value_x, y, 11.0f, 19.0f, value,
+                     255, 220, 60, 250);
+            if (sel) {
+                /* little arrows, so it is obvious this row is adjustable */
+                hud_text(x + value_x - 22.0f, y, 9.0f, 16.0f, "-",
+                         200, 205, 220, 220);
+                hud_text(x + value_x + hud_text_width(11.0f, value) + 10.0f,
+                         y, 9.0f, 16.0f, "-", 200, 205, 220, 220);
+            }
+        }
+    }
+}
+
+static void draw_setup_screen(void)
+{
+    float W = (float)rmode->fbWidth;
+    float H = (float)rmode->efbHeight;
+    char buf[48];
+    int avail;
+
+    menu_update_track_preview();
+    hud_ortho_fullscreen();
+    hud_rect(0.0f, 0.0f, W, H, 18, 24, 40, 255);
+    hud_text(W * 0.5f - hud_text_width(26.0f, "WIIHART") * 0.5f, 22.0f,
+             26.0f, 44.0f, "WIIHART", 230, 40, 40, 255);
+
+    draw_row_list(48.0f, 96.0f, 32.0f, 190.0f);
+
+    /* what hardware we can actually see */
+    avail = available_players();
+    snprintf(buf, sizeof(buf), "PADS FOUND %d", avail);
+    hud_text(48.0f, H - 96.0f, 9.0f, 15.0f, buf,
+             (avail < sel_players) ? 255 : 150,
+             (avail < sel_players) ? 140 : 200,
+             (avail < sel_players) ? 60 : 170, 235);
+
+    /* track card */
+    snprintf(buf, sizeof(buf), "%d LAPS", menu_track.laps);
+    hud_text(W - 236.0f, 100.0f, 10.0f, 17.0f, buf, 210, 215, 225, 240);
+    snprintf(buf, sizeof(buf), "%d N", (int)menu_track.total_len);
+    hud_text(W - 236.0f, 124.0f, 10.0f, 17.0f, buf, 200, 205, 215, 235);
+    snprintf(buf, sizeof(buf), "RISE %d", (int)(menu_track.max_y -
+                                                menu_track.min_y));
+    hud_text(W - 236.0f, 148.0f, 10.0f, 17.0f, buf, 200, 205, 215, 235);
+    hud_text(W - 236.0f, 172.0f, 10.0f, 17.0f,
+             menu_track.has_walls ? "RAILS" : "NO RAILS",
+             menu_track.has_walls ? 150 : 255,
+             menu_track.has_walls ? 200 : 150, 170, 235);
+    draw_minimap(&menu_track, 0, W - 236.0f, 208.0f, 160.0f);
+
+    if (menu_msg_t > 0.0f)
+        hud_text(W * 0.5f - hud_text_width(11.0f, menu_msg) * 0.5f,
+                 H - 66.0f, 11.0f, 19.0f, menu_msg, 255, 120, 90, 250);
+
+    hud_text(W * 0.5f - hud_text_width(9.0f, "S  LINE   A D  CHANGE") * 0.5f,
+             H - 40.0f, 9.0f, 15.0f, "S  LINE   A D  CHANGE",
+             160, 165, 180, 220);
+    hud_text(W * 0.5f - hud_text_width(9.0f, "ENTER  SELECT   ESC  OUT")
+                 * 0.5f,
+             H - 22.0f, 9.0f, 15.0f, "ENTER  SELECT   ESC  OUT",
+             160, 165, 180, 220);
+}
+
+static void draw_garage_overlay(int p)
+{
+    const KartSpec *sp = &kart_specs[sel_spec[p] % SPEC_COUNT];
+    const u8 *paint = paint_palette[sel_paint[p] % PAINT_COUNT];
+    float W = (float)rmode->fbWidth;
+    float H = (float)rmode->efbHeight;
+    char buf[40];
+    float y;
+    int i;
+
+    hud_ortho_fullscreen();
+    hud_rect(14.0f, 18.0f, 268.0f, H - 74.0f, 12, 15, 24, 170);
+
+    snprintf(buf, sizeof(buf), "P%d GARAGE", p + 1);
+    hud_text(30.0f, 28.0f, 12.0f, 21.0f, buf, paint[0], paint[1], paint[2],
+             255);
+
+    draw_row_list(30.0f, 62.0f, 30.0f, 132.0f);
+
+    /* spec sheet for the chosen car, including its gearbox */
+    y = 224.0f;
+    snprintf(buf, sizeof(buf), "HP    %d", (int)sp->power_hp);
+    hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    snprintf(buf, sizeof(buf), "CURB  %d", (int)sp->mass_kg);
+    hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    snprintf(buf, sizeof(buf), "0-100 %.1fS", spec_accel_time(sp));
+    hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    snprintf(buf, sizeof(buf), "TOP   %d", (int)spec_top_speed(sp));
+    hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    snprintf(buf, sizeof(buf), "100-0 %d", (int)sp->brake_dist_100);
+    hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    snprintf(buf, sizeof(buf), "GRIP  %.2fG",
+             sp->lat_g * tire_grip_mult(sel_tire[p]));
+    hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    snprintf(buf, sizeof(buf), "GEARS %d", sp->n_gears);
+    hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    snprintf(buf, sizeof(buf), "DIRT  %d",
+             (int)(sp->offroad_grip * 100.0f));
+    hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250);
+
+    /* the gearing itself, as a row of bars: how tall each gear is */
+    {
+        float bx = W - 250.0f, by = H - 132.0f;
+        float top = sp->gear_top[sp->n_gears - 1];
+        hud_text(bx, by - 22.0f, 9.0f, 15.0f, "GEARING",
+                 150, 158, 175, 235);
+        for (i = 0; i < sp->n_gears; i++) {
+            float wid = 190.0f * (sp->gear_top[i] / top);
+            hud_rect(bx, by + (float)i * 15.0f, wid, 11.0f,
+                     90, 160 + (u8)(i * 12), 235, 235);
+        }
+    }
+
+    /* paint swatches */
+    {
+        float sx = W - 250.0f, sy = H - 190.0f;
+        for (i = 0; i < PAINT_COUNT; i++) {
+            const u8 *c = paint_palette[i];
+            if (i == sel_paint[p] % PAINT_COUNT)
+                hud_rect(sx + (float)i * 24.0f - 3.0f, sy - 3.0f, 26.0f,
+                         26.0f, 255, 255, 255, 235);
+            hud_rect(sx + (float)i * 24.0f, sy, 20.0f, 20.0f,
+                     c[0], c[1], c[2], 255);
+        }
+    }
+
+    if (menu_msg_t > 0.0f)
+        hud_text(W * 0.5f - hud_text_width(11.0f, menu_msg) * 0.5f,
+                 H - 62.0f, 11.0f, 19.0f, menu_msg, 255, 120, 90, 250);
+    hud_text(W * 0.5f - hud_text_width(9.0f, "ESC  OUT") * 0.5f,
+             H - 26.0f, 9.0f, 15.0f, "ESC  OUT", 160, 165, 180, 220);
+}
+
+static void menu_frame(float dt)
+{
+    int dcur, dval;
+
+    if (menu_msg_t > 0.0f)
+        menu_msg_t -= dt;
+
+    build_rows();
+    dcur = menu_dcursor();
+    dval = menu_dvalue();
+
+    if (dcur) {
+        menu_row = (menu_row + dcur + n_menu_rows) % n_menu_rows;
+        audio_beep(420.0f, 30, 80);
+    }
+    if (dval) {
+        row_change(&menu_rows[menu_row], dval);
+        build_rows();      /* PLAYERS changes how many rows there are */
+        audio_beep(500.0f, 30, 90);
+    }
+    if (menu_activate())
+        activate_row(&menu_rows[menu_row]);
+    else if (menu_back()) {
+        if (menu_screen == SCREEN_GARAGE) {
+            menu_screen = SCREEN_SETUP;
+            menu_row = 0;
+            audio_beep(560.0f, 50, 120);
+        } else {
+            /* at the root: put the cursor on GO rather than trapping you */
+            menu_row = n_menu_rows - 2;
+        }
+    }
+
+    if (app_state == APP_RACE)
+        return;                    /* start_race() already switched away */
+
+    build_rows();
+    if (menu_screen == SCREEN_GARAGE) {
+        draw_garage_scene(sel_paint[garage_player]);
+        draw_garage_overlay(garage_player);
+    } else {
+        draw_setup_screen();
+    }
+}
 
 static int prev_countdown_n = -1;
 
@@ -1557,8 +1885,30 @@ static void race_frame(float dt)
 
     if (race_to_menu_pressed()) {
         app_state = APP_MENU;
-        menu_screen = 0;
+        menu_screen = SCREEN_SETUP;
+        menu_row = 0;
         return;
+    }
+
+    /*
+     * A controller going away mid-race must not leave a player as a
+     * statue: after a moment's grace (so a brief radio dropout does not
+     * count) the race is abandoned and we go back to the menu with an
+     * explanation, where you can try again.
+     */
+    if (available_players() < game.cfg.n_humans) {
+        controller_lost_t += dt;
+        if (controller_lost_t > 0.75f) {
+            controller_lost_t = 0.0f;
+            menu_notice("CONTROLLER LOST");
+            audio_beep(140.0f, 300, 180);
+            app_state = APP_MENU;
+            menu_screen = SCREEN_SETUP;
+            menu_row = 0;
+            return;
+        }
+    } else {
+        controller_lost_t = 0.0f;
     }
 
     game_update(&game, in, dt);
@@ -1577,12 +1927,13 @@ static void race_frame(float dt)
     /* per-player rumble + effect sounds (P1 sounds only) */
     for (p = 0; p < game.cfg.n_humans; p++) {
         const Kart *k = &game.karts[p];
-        if (k->power_fired || k->hit_wall || k->got_item)
-            rumble_t[p] = 0.18f;
+        if (k->power_fired || k->hit_wall || k->got_item || k->respawned)
+            rumble_t[p] = k->respawned ? 0.30f : 0.18f;
         if (p == 0) {
             if (k->got_item)     audio_beep(1320.0f, 90, 150);
             if (k->power_fired)  audio_beep(260.0f, 220, 175);
             if (k->hit_wall)     audio_beep(110.0f, 120, 190);
+            if (k->respawned)    audio_beep(520.0f, 260, 170);
         }
         if (rumble_t[p] > 0.0f) {
             rumble_t[p] -= dt;
@@ -1689,7 +2040,7 @@ int main(void)
         poll_all_inputs();
 
         if (app_state == APP_MENU)
-            menu_frame();
+            menu_frame(dt);
         /* not an else: starting a race mid-frame draws its first frame
          * here rather than leaving the screen blank for one flip */
         if (app_state == APP_RACE)

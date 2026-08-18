@@ -2,7 +2,7 @@
 <app version="1">
   <name>WiiKart</name>
   <coder>kaz</coder>
-  <version>1.1.0</version>
+  <version>1.2.0</version>
   <release_date>20260817000000</release_date>
   <short_description>Semi-sim mountain racing</short_description>
   <long_description>Race cars defined by real-world specs (horsepower, stopping distance, lateral grip) over three circuits, including stylized versions of Colorado's Berthoud Pass and Loveland Pass with real grades and gravity. Eleven AI rivals each drive a different strategy, learn from the corners they get wrong, and adapt to how you race them - with no rubber-banding. Power-ups are motorsport ones: push-to-pass and fresh rubber. 3 laps, up to 4-player split screen, garage with paint shop, items, procedural engine audio. Supports Wii Remote (tilt), Nunchuk, Classic Controller, GameCube pads and WASD on a USB keyboard. Runs on the Wii via the Homebrew Channel and in the Dolphin emulator.</long_description>

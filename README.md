@@ -1,4 +1,4 @@
-# WiiKart 1.1.0
+# WiiKart 1.2.0
 
 An original racing game built as **Nintendo Wii homebrew**. It compiles to
 a real Wii executable (`wiikart.dol`) that runs in the
@@ -9,21 +9,31 @@ Wii hardware through the Homebrew Channel.
 [latest release](https://github.com/Nessie404/starwarsgame/releases/latest),
 unzip, and open `wiikart.dol` in Dolphin.
 
-Version 1.1.0 is a semi-sim mountain racer: pick a car in the garage —
-defined by real-world performance numbers — then race 3 laps against a
-**field of eleven AI drivers who each race differently, learn from their
-mistakes, and adapt to you**, over three circuits including two stylized
-Colorado passes with real grades, switchbacks and gravity. Think arcade
+Version 1.2.0 is a semi-sim mountain racer: pick a car in the garage —
+its gearbox, tires and paint, all defined by real-world performance
+numbers — then race a **field of eleven AI drivers who each race
+differently, shift differently, learn from their mistakes, and adapt to
+you**, over five circuits including four stylized Colorado passes with
+real grades, switchbacks, cliffs and gravity. Lap counts are set per
+circuit (2–4 laps) so every race runs about the same length. Think arcade
 fun with a driving model that expects you to brake for the hairpins.
 
-**Version history:** v0.1 was the original arcade kart racer (v0.1.1 adds
-sound, WASD and the steering fix); v1.0 was the driving-model rewrite
-(physics, garage, WASD, Colorado passes) and v1.0.1 fixes its inverted
-steering; v1.1.0 adds
-the twelve-car field with individual strategies, learning and adaptation,
-rebuilds Berthoud as a 19-corner technical circuit, swaps nitro and boost
-pads for motorsport power-ups, removes the remaining arcade cheats, and
-**fixes inverted steering** — left really is left now, on every device.
+**Version history**, oldest first:
+
+- **v0.1** — the original arcade kart racer. **v0.1.1** patches it with
+  sound and moves steering onto WASD, including the steering fix.
+- **v1.0** — the driving-model rewrite: real physics, the garage, WASD,
+  the Colorado passes. **v1.0.1** fixes its inverted steering.
+- **v1.1.0** — the twelve-car field, each AI with its own strategy,
+  learning from its mistakes and adapting to you; Berthoud rebuilt as a
+  19-corner technical circuit; nitro and boost pads replaced with
+  motorsport power-ups; the remaining arcade cheats removed; and
+  **inverted steering fixed** — left really is left now, on every device.
+- **v1.2.0** — gearboxes and per-driver shifting strategies, two more
+  passes (Kenosha and Monarch), guardrails gone from Loveland and
+  Monarch, cliffs with Mario-style checkpoint recovery, per-circuit lap
+  counts, a rebuilt menu you can back out of, a controller-count check,
+  more garage options, and two-player keyboard defaults.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -34,10 +44,13 @@ pads for motorsport power-ups, removes the remaining arcade cheats, and
 - **A grid of twelve, and nobody drives like anyone else.** Eleven AI
   rivals share out seven strategy sheets — BALANCED, LATE (brakes far too
   late), INSIDE (tight and defensive), DEFENDER (covers your favourite
-  passing side), CHARGER (dives for every gap, empties the nitro at
-  once), DRAFTER (sits in your mirrors saving nitro), CRUISER (cautious,
+  passing side), CHARGER (dives for every gap, spends its power-up at
+  once), DRAFTER (sits in your mirrors saving it), CRUISER (cautious,
   wide, smooth). Each sheet sets its racing line, how it brakes, how it
-  overtakes, when it spends nitro, and how it learns.
+  overtakes, when it spends a power-up, **and how it shifts** — where in
+  the rev band it changes up, how early it comes down the box under
+  braking, and how crisply it does it. CRUISER short-shifts and rides the
+  torque; LATE hangs on to the limiter and pays for it in shift time.
 - **They learn from their mistakes.** Every driver keeps its own nerve
   rating for each corner on the track. Run wide, clip a barrier, or spin
   and that corner's rating drops, so it arrives slower next lap; take it
@@ -63,15 +76,36 @@ pads for motorsport power-ups, removes the remaining arcade cheats, and
   lateral g, drag area, wheelbase and dirt grip — the menu shows the
   derived 0-100 time and top speed, and the physics actually uses these
   numbers.
-- **Three tracks.** CLASSIC (a flat, flowing speedway), plus stylized
-  versions of **Berthoud Pass** (US-40) and **Loveland Pass** (US-6) in
-  Colorado: 6-10% grades, guardrails and ~78 m of climb per lap. Berthoud
-  is the technical one — 19 corners including an opening chicane, four
-  switchbacks up the east face, a double-apex sweeper, a fast kink, esses
-  onto the summit and a descent that tightens as it drops.
-- **Garage view.** Pick your car on a lit 3D turntable, with its spec
-  sheet, at-a-glance power/brake/grip/dirt bars, and eight paint colors
-  — each player gets their own garage before the lights go out.
+- **Five circuits**, all measured rather than guessed. Lap counts are set
+  per circuit so every race covers a similar distance:
+
+  | Circuit | Length | Width | Corners | Tightest | Climb | Steepest | Rails | Laps |
+  |---------|--------|-------|---------|----------|-------|----------|-------|------|
+  | CLASSIC | 555 m | 10 m | 10 | 24 m | flat | — | yes | 4 |
+  | BERTHOUD (US-40) | 1421 m | 8.4 m | 19 | 11 m | 48 m | 15% | yes | 2 |
+  | LOVELAND (US-6) | 1699 m | 10.8 m | 11 | 12 m | 61 m | 14% | **no** | 2 |
+  | KENOSHA (US-285) | 2172 m | 12 m | 43 | 15 m | 58 m | 10% | yes | 2 |
+  | MONARCH (US-50) | 1612 m | 7.6 m | 28 | 11 m | 73 m | 17% | **no** | 2 |
+
+  **Kenosha** is the long, wide, flowing one — the biggest lap and the most
+  corners, but the gentlest grades, so it is fast. **Monarch** is the
+  hardest by every measure: narrowest road, tightest corners, steepest
+  grades, biggest climb, and no guardrails anywhere. **Loveland** lost its
+  guardrails too, and got wider and longer.
+- **Gearboxes.** Every car has a real gearbox — 4 to 6 gears, each with a
+  road speed at the limiter. Where you are in the band decides your power:
+  bog it below a third of the band and it pulls badly, sit on the limiter
+  and it stops pulling at all, and a shift cuts drive for a moment, so
+  short-shifting out of a hairpin is a genuine decision. Pick **AUTO** or
+  **SHIFT** (manual) per player in the garage.
+- **Cliffs and checkpoints.** On the unguarded passes the shoulder is the
+  edge: go over it and the car drops away, then gets set back down at the
+  last checkpoint it passed — Mario-style, without handing out any free
+  progress.
+- **Garage.** Each player gets their own: car, one of eight paint colours,
+  **gearbox** (auto or manual) and **tire compound** (soft grips more and
+  drags more, hard is slipperier and faster), all on a lit 3D turntable
+  with the full spec sheet and a bar chart of the car's gearing.
 - **Steering with weight.** Every input runs through a virtual analog
   stick: the wheel winds on over a few tenths of a second, self-centers
   faster than it winds on, calms down as speed rises, and passes through
@@ -123,28 +157,50 @@ Copy the `apps` folder from `wiikart.zip` onto an SD card (so you have
 
 ## Controls
 
-**Keyboard is WASD by default** — A left, D right, W gas, S brake.
+**Two players share one keyboard.** A second physical keyboard cannot be
+told apart — libwiikeyboard merges every attached keyboard into one event
+stream — so players 3 and 4 use pads (an Xbox pad appears as a GameCube
+pad under Dolphin) or Wii Remotes.
 
-| Action      | USB keyboard | GameCube pad (Xbox in Dolphin) | Wii Remote (sideways) | + Nunchuk | Classic |
-|-------------|--------------|--------------------------------|------------------------|-----------|---------|
-| Steer left / right | **A** / **D** (or ← / →) | Main stick | Tilt or D-pad | Stick | Left stick |
-| Accelerate  | **W** (or ↑) | A or X                         | 2 or A                 | A         | a or x  |
-| Brake / reverse | **S** (or ↓) | B                          | 1                      | B         | b or y  |
-| Handbrake   | Space or Shift | L or R trigger               | Hold B                 | C or Z    | L/R/ZL/ZR |
-| Deploy power-up | **E**    | Y                              | −                      | −         | −       |
-| Back to menu | **R**       | Start                          | +                      | +         | +       |
-| Quit        | Esc          | Z + Start                      | HOME                   | HOME      | HOME    |
+| Action | Player 1 keyboard | Player 2 keyboard | Pad (Xbox/GameCube) | Wii Remote (sideways) |
+|--------|-------------------|-------------------|---------------------|------------------------|
+| Steer left / right | **A** / **D** | **J** / **L** | Main stick | Tilt or D-pad |
+| Accelerate | **W** | **I** | A or X | 2 or A |
+| Brake / reverse | **S** | **K** | B | 1 |
+| Up a gear | **E** | **O** | R trigger | Classic ZR |
+| Down a gear | **Q** | **U** | L trigger | Classic ZL |
+| Power-up | **X** | **M** | Y | − / Classic − |
+| Handbrake | Space | **P** | Z + B | Hold B |
+| Back to menu | **R** | **R** | Start | + |
+| Quit | (EXIT row) | — | Z + Start | HOME |
 
-Menus and garage: **A/D** (or ←/→) change the selection, **W/S** (or
-↑/↓) change the paint in the garage, **Enter** or **Space** confirms,
-**Q** goes back. On a pad it's the D-pad plus A/Start, and on a Wii
-Remote the D-pad plus 2.
+Arrow keys mirror player 1's WASD. Most of these are just defaults —
+they're all in one `KeyMap` table at the top of `source/main.c` if you
+want to move them.
+
+**Menus never advance on a stray press.** Every screen is a list of rows
+with a cursor: **W/S** (or ↑/↓, or the D-pad) moves the cursor,
+**A/D** (or ←/→) changes the value of the row you are on, **Enter**
+(or A/2) acts on it, and **Esc** (or B/1) backs out. Only the action rows
+— GO, a player's GARAGE, DONE, EXIT — actually do anything when
+activated, so you can look around without being thrown forward. Esc no
+longer quits the game; EXIT does.
+
+**You cannot start a race without enough controllers.** The setup screen
+shows how many pads it can see, and GO refuses with `NEED n PADS FOUND m`
+rather than starting a race with a player who cannot steer. If a
+controller disappears mid-race, the race is abandoned after a moment's
+grace and you land back in the menu with `CONTROLLER LOST` — no freeze,
+no dead player.
 
 Driving notes: brake before hairpins — the grip circle is real. The
 handbrake rotates the car but costs you speed, so use it to place the car,
-not to go faster. RALLY keeps 72% of its grip on dirt, TOURER only 35%.
+not to go faster. Watch the rev bar next to the gear number: shift at the
+top of the band, and come down a gear before a hairpin so you are not
+bogged on the exit. RALLY keeps 72% of its grip on dirt, TOURER only 35%.
 Save push-to-pass for a straight where you have someone to catch, and
-fresh rubber for the run into a switchback section.
+fresh rubber for the run into a switchback section. On Loveland and
+Monarch there is nothing holding you on the road.
 
 The HUD names the car you are chasing by its strategy, and the finish
 screen prints the full classification, so you can see whether DEFENDER or
@@ -153,12 +209,12 @@ and Loveland in about 59 s, against 27 s round Classic.
 
 ## The cars
 
-| Car    | Power | Curb  | 100-0 | Lateral | Dirt grip |
-|--------|-------|-------|-------|---------|-----------|
-| RACER  | 48 hp | 260 kg | 30 m | 1.30 g  | 30% |
-| SPORT  | 150 hp | 950 kg | 37 m | 0.95 g  | 45% |
-| RALLY  | 220 hp | 1180 kg | 40 m | 0.88 g  | 72% |
-| TOURER | 310 hp | 1350 kg | 34 m | 1.02 g  | 35% |
+| Car    | Power | Curb  | 100-0 | Lateral | Dirt grip | Gears | 1st tops at |
+|--------|-------|-------|-------|---------|-----------|-------|-------------|
+| RACER  | 48 hp | 260 kg | 30 m | 1.30 g  | 30% | 4 | 50 km/h |
+| SPORT  | 150 hp | 950 kg | 37 m | 0.95 g  | 45% | 5 | 47 km/h |
+| RALLY  | 220 hp | 1180 kg | 40 m | 0.88 g  | 72% | 6 | 43 km/h |
+| TOURER | 310 hp | 1350 kg | 34 m | 1.02 g  | 35% | 6 | 54 km/h |
 
 0-100 times and top speeds shown in the menu are derived from these
 numbers by the same equations the physics uses.
@@ -224,6 +280,18 @@ produces the mirror-image line), and that an overtake is logged with the
 side it happened on. Power-ups are checked for being deployed, being
 distinct from one another, and staying within realistic bounds, and a
 dedicated test proves the AI get no rubber-band power boost.
+
+v1.2.0 adds tests for the gear model (the power curve's shape, that a
+held key shifts exactly one gear, that a gear's limiter really caps
+speed, and that neither the automatic box nor any AI strategy *hunts* —
+this caught a real bug where short-shifting drivers changed gear 360
+times in 90 seconds because an upshift landed on their own downshift
+point), for the circuit roster (which tracks are unguarded, that Kenosha
+is the longest/widest/turniest and Monarch the narrowest/tightest/
+steepest), for lap counts scaling with circuit length, and for cliff
+recovery: that a car off an unguarded edge falls, comes back at the last
+checkpoint it passed, keeps its lap, gains no free progress, and is
+drivable afterwards — while a barriered track still holds cars in.
 
 ## Ideas for later
 

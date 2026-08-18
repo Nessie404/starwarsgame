@@ -32,25 +32,91 @@
 /* Power-up strengths live in game.h (PUSH_POWER / TIRE_GRIP). */
 
 const KartSpec kart_specs[SPEC_COUNT] = {
-    /* name      mass    hp   brake  lat_g  CdA   wheelbase offroad */
-    { "RACER",   260.f,  48.f, 30.f, 1.30f, 0.45f, 1.05f,   0.30f },
-    { "SPORT",   950.f, 150.f, 37.f, 0.95f, 0.66f, 2.45f,   0.45f },
-    { "RALLY",  1180.f, 220.f, 40.f, 0.88f, 0.70f, 2.60f,   0.72f },
-    { "TOURER", 1350.f, 310.f, 34.f, 1.02f, 0.60f, 2.70f,   0.35f },
+    /* name      mass    hp   brake  lat_g  CdA   wheelbase offroad
+     *   gears, and the road speed (m/s) at the limiter in each          */
+    { "RACER",   260.f,  48.f, 30.f, 1.30f, 0.45f, 1.05f,   0.30f,
+      4, { 14.f, 24.f, 35.f, 47.f } },
+    { "SPORT",   950.f, 150.f, 37.f, 0.95f, 0.66f, 2.45f,   0.45f,
+      5, { 13.f, 22.f, 33.f, 45.f, 60.f } },
+    { "RALLY",  1180.f, 220.f, 40.f, 0.88f, 0.70f, 2.60f,   0.72f,
+      6, { 12.f, 20.f, 29.f, 40.f, 53.f, 67.f } },
+    { "TOURER", 1350.f, 310.f, 34.f, 1.02f, 0.60f, 2.70f,   0.35f,
+      6, { 15.f, 25.f, 37.f, 50.f, 64.f, 79.f } },
 };
+
+/*
+ * Where you are in a gear matters. Below the torque band the engine bogs,
+ * the middle of the band is where the power is, and past peak revs output
+ * tails off until the limiter cuts it entirely — which is what stops a
+ * gear from pulling past its top speed.
+ */
+float gear_power_scale(float frac)
+{
+    if (frac < 0.0f)
+        frac = 0.0f;
+    if (frac < BOG_FRACTION)
+        return 0.45f + 1.6f * frac;          /* bogging: 0.45 .. 0.99   */
+    if (frac <= 0.92f)
+        return 1.0f;                          /* in the band            */
+    if (frac <= 1.0f)
+        return 1.0f - 2.4f * (frac - 0.92f);  /* past peak revs         */
+    return 0.0f;                              /* on the limiter         */
+}
+
+const char *gearbox_name(int mode)
+{
+    return (mode == GEARBOX_MANUAL) ? "SHIFT" : "AUTO";
+}
+
+const char *tire_name(int compound)
+{
+    switch (compound) {
+    case TIRE_SOFT: return "SOFT";
+    case TIRE_HARD: return "HARD";
+    default:        return "STD";
+    }
+}
+
+/* Softer rubber grips harder and drags a little more; hard rubber gives
+ * some grip back for a slipperier, faster car. */
+float tire_grip_mult(int compound)
+{
+    switch (compound) {
+    case TIRE_SOFT: return 1.08f;
+    case TIRE_HARD: return 0.94f;
+    default:        return 1.00f;
+    }
+}
+
+float tire_drag_mult(int compound)
+{
+    switch (compound) {
+    case TIRE_SOFT: return 1.04f;
+    case TIRE_HARD: return 0.97f;
+    default:        return 1.00f;
+    }
+}
 
 /* Strategy sheets. conf_start over 1.0 means the driver begins the race
  * believing it can beat the grip limit: it will run wide, learn, and
  * settle down. Under 1.0 means it starts cautious and works up. */
 const AIStrategy ai_strategies[AI_STRATEGY_COUNT] = {
-/*   name        conf_start conf_max learn_up learn_down line   defend attack wait  trim */
-  { "BALANCED",   0.97f,   1.05f,   0.014f,  0.10f,   0.00f,  0.35f, 0.40f, 1.0f, 1.000f },
-  { "LATE",       1.12f,   1.14f,   0.010f,  0.17f,  -0.10f,  0.25f, 0.70f, 0.3f, 1.015f },
-  { "INSIDE",     0.99f,   1.06f,   0.013f,  0.11f,  -0.55f,  0.55f, 0.45f, 1.2f, 0.995f },
-  { "DEFENDER",   0.95f,   1.02f,   0.011f,  0.09f,   0.10f,  0.95f, 0.25f, 2.2f, 0.990f },
-  { "CHARGER",    1.06f,   1.11f,   0.012f,  0.14f,  -0.25f,  0.30f, 0.95f, 0.0f, 1.020f },
-  { "DRAFTER",    1.00f,   1.09f,   0.016f,  0.12f,   0.30f,  0.40f, 0.80f, 3.0f, 1.005f },
-  { "CRUISER",    0.88f,   1.03f,   0.018f,  0.07f,   0.45f,  0.20f, 0.30f, 1.6f, 0.985f },
+/*   name        conf_start conf_max learn_up learn_down line   defend attack wait  trim
+ *                                                        up    down  shift delay     */
+  { "BALANCED",   0.97f,   1.05f,   0.014f,  0.10f,   0.00f,  0.35f, 0.40f, 1.0f, 1.000f,
+                                                             0.93f, 0.42f, 0.04f },
+  { "LATE",       1.12f,   1.14f,   0.010f,  0.17f,  -0.10f,  0.25f, 0.70f, 0.3f, 1.015f,
+                                                             0.99f, 0.34f, 0.02f },
+  { "INSIDE",     0.99f,   1.06f,   0.013f,  0.11f,  -0.55f,  0.55f, 0.45f, 1.2f, 0.995f,
+                                                             0.90f, 0.40f, 0.05f },
+  { "DEFENDER",   0.95f,   1.02f,   0.011f,  0.09f,   0.10f,  0.95f, 0.25f, 2.2f, 0.990f,
+                                                             0.87f, 0.38f, 0.09f },
+  { "CHARGER",    1.06f,   1.11f,   0.012f,  0.14f,  -0.25f,  0.30f, 0.95f, 0.0f, 1.020f,
+                                                             0.97f, 0.38f, 0.02f },
+  { "DRAFTER",    1.00f,   1.09f,   0.016f,  0.12f,   0.30f,  0.40f, 0.80f, 3.0f, 1.005f,
+                                                             0.92f, 0.45f, 0.06f },
+  { "CRUISER",    0.88f,   1.03f,   0.018f,  0.07f,   0.45f,  0.20f, 0.30f, 1.6f, 0.985f,
+                                                             0.82f, 0.36f, 0.12f },
 };
 
 const char *power_name(int power)
@@ -142,12 +208,17 @@ float spec_top_speed(const KartSpec *s)
 {
     float P = s->power_hp * HP_TO_W * DRIVE_EFF;
     float v = 40.0f;
+    float geared;
     int i;
     for (i = 0; i < 40; i++) {
         float resist = 0.5f * RHO_AIR * s->cd_a * v * v +
                        CRR * s->mass_kg * GRAVITY;
         v = 0.5f * (v + P / resist);
     }
+    /* whichever runs out first: the air, or top gear */
+    geared = s->gear_top[s->n_gears - 1];
+    if (geared < v)
+        v = geared;
     return v * 3.6f;
 }
 
@@ -236,6 +307,10 @@ void game_init(Game *g, const GameConfig *cfg)
             if (k->spec < 0) k->spec = 0;
             k->paint_idx = ((g->cfg.paint[i] % PAINT_COUNT) + PAINT_COUNT)
                            % PAINT_COUNT;
+            k->gearbox = (g->cfg.gearbox[i] == GEARBOX_MANUAL)
+                             ? GEARBOX_MANUAL : GEARBOX_AUTO;
+            k->tire = ((g->cfg.tire[i] % TIRE_COMPOUNDS) + TIRE_COMPOUNDS)
+                      % TIRE_COMPOUNDS;
         } else {
             int ai_no = i - g->cfg.n_humans;
             const AIStrategy *st;
@@ -254,6 +329,13 @@ void game_init(Game *g, const GameConfig *cfg)
             for (c = 0; c < TRACK_MAX_CORNERS; c++)
                 k->corner_conf[c] = st->conf_start;
             k->cur_corner = -1;
+            /* AI drive their own gearbox by hand, and pick rubber to suit
+             * how they race: the aggressive sheets take softs */
+            k->gearbox = GEARBOX_MANUAL;
+            k->tire = (k->strategy == AI_LATE || k->strategy == AI_CHARGER)
+                          ? TIRE_SOFT
+                          : (k->strategy == AI_CRUISER ? TIRE_HARD
+                                                       : TIRE_MEDIUM);
         }
         /* humans start at the back of the grid */
         kart_place_on_grid(g, k,
@@ -261,6 +343,8 @@ void game_init(Game *g, const GameConfig *cfg)
                                ? NUM_KARTS - g->cfg.n_humans + k->human
                                : i - g->cfg.n_humans);
         k->rank = i + 1;
+        k->gear = 0;
+        k->last_checkpoint = 0;
     }
 
     for (i = 0; i < MAX_HUMANS; i++) {
@@ -330,6 +414,11 @@ static float ai_tactical_line(const Game *g, const Kart *k)
     const AIStrategy *st = &ai_strategies[k->strategy];
     float line = k->ai_line;
     float room = t->road_half * 0.70f;
+
+    /* With nothing but air past the shoulder, everyone drives closer to
+     * the middle: the racing line is not worth a trip down the mountain */
+    if (!t->has_walls)
+        room *= 0.55f;
     float gap;
     int who;
 
@@ -436,6 +525,40 @@ static void ai_control(const Game *g, const Kart *k, Input *in)
         in->brake = 1;
     } else if (v < vmax_allow * 0.97f) {
         in->accel = 1;
+    }
+
+    /*
+     * Gears. Each strategy has its own shifting style: where in the band
+     * it changes up, and how early it grabs a lower gear on the way into
+     * a corner. A short-shifter rides the torque and gets out of hairpins
+     * well; a driver who hangs on to the limiter keeps the top end but
+     * spends more of the lap mid-shift.
+     */
+    if (k->shift_t <= 0.0f) {
+        const KartSpec *sp = &kart_specs[k->spec];
+        float next_frac = (k->gear + 1 < sp->n_gears)
+                              ? v / sp->gear_top[k->gear + 1] : 0.0f;
+        float low_frac = (k->gear > 0)
+                             ? v / sp->gear_top[k->gear - 1] : 9.0f;
+
+        /*
+         * Every shift is judged on where the revs would land afterwards,
+         * against this driver's OWN thresholds. Gear ratios are around
+         * 1.6, so a short-shifter changing up at 0.87 of the band lands
+         * near 0.52 — and if that is below its downshift point it changes
+         * straight back, for ever. Requiring a margin on both sides is
+         * what stops the box oscillating.
+         */
+        if (k->rev_frac > st->shift_up_frac && k->gear < sp->n_gears - 1 &&
+            next_frac > st->shift_down_frac + 0.06f &&
+            next_frac > BOG_FRACTION + 0.04f) {
+            in->gear_up = 1;
+        } else if (k->gear > 0 && low_frac < st->shift_up_frac - 0.06f &&
+                   (k->rev_frac < st->shift_down_frac ||
+                    (in->brake &&
+                     k->rev_frac < st->shift_down_frac + 0.18f))) {
+            in->gear_down = 1;   /* also comes down the box under braking */
+        }
     }
 
     /*
@@ -591,7 +714,8 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     const KartSpec *s = &kart_specs[k->spec];
     int offroad = fabsf(k->lat) > t->road_half + 0.3f;
     float grip = offroad ? s->offroad_grip : 1.0f;
-    float mu_a = s->lat_g * GRAVITY * grip;          /* lateral accel cap */
+    float mu_a = s->lat_g * GRAVITY * grip * tire_grip_mult(k->tire);
+    float cd_a = s->cd_a * tire_drag_mult(k->tire);
     float P = s->power_hp * HP_TO_W * DRIVE_EFF * grip * power_scale;
     float steer = game_clampf(in->steer, -1.0f, 1.0f);
     float v = k->speed;
@@ -601,6 +725,62 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     k->power_fired = 0;
     k->hit_wall = 0;
     k->got_item = 0;
+    k->respawned = 0;
+
+    /* ---- gearbox -------------------------------------------------- */
+    if (k->gear < 0) k->gear = 0;
+    if (k->gear >= s->n_gears) k->gear = s->n_gears - 1;
+    k->rev_frac = fabsf(v) / s->gear_top[k->gear];
+
+    if (k->shift_t > 0.0f) {
+        k->shift_t -= dt;
+    } else {
+        int want_up = 0, want_down = 0;
+
+        if (k->gearbox == GEARBOX_MANUAL) {
+            /* edge-triggered, so holding the key does not run through the
+             * whole gearbox in three frames */
+            want_up   = in->gear_up   && !k->prev_up_btn;
+            want_down = in->gear_down && !k->prev_down_btn;
+        } else {
+            /*
+             * Automatic. Both decisions are checked against where the
+             * revs would land AFTER the shift, otherwise the box hunts:
+             * upshifting at the top of one gear can drop you straight
+             * below the downshift threshold of the next, and back again,
+             * for ever.
+             */
+            float next_frac = (k->gear + 1 < s->n_gears)
+                                  ? fabsf(v) / s->gear_top[k->gear + 1]
+                                  : 0.0f;
+            float low_frac = (k->gear > 0)
+                                 ? fabsf(v) / s->gear_top[k->gear - 1]
+                                 : 9.0f;
+            want_up   = (k->rev_frac > 0.95f &&
+                         next_frac > BOG_FRACTION + 0.08f);
+            want_down = (k->rev_frac < 0.38f && low_frac < 0.92f);
+        }
+
+        if (want_up && k->gear < s->n_gears - 1) {
+            k->gear++;
+            k->shift_t = SHIFT_TIME +
+                         ((k->gearbox == GEARBOX_AUTO) ? 0.06f : 0.0f);
+        } else if (want_down && k->gear > 0) {
+            k->gear--;
+            k->shift_t = SHIFT_TIME +
+                         ((k->gearbox == GEARBOX_AUTO) ? 0.06f : 0.0f);
+        }
+        k->rev_frac = fabsf(v) / s->gear_top[k->gear];
+    }
+    k->prev_up_btn = in->gear_up;
+    k->prev_down_btn = in->gear_down;
+
+    /* drive is cut mid-shift, and where you are in the gear decides how
+     * much of the engine you actually have */
+    if (k->shift_t > 0.0f)
+        P = 0.0f;
+    else
+        P *= gear_power_scale(k->rev_frac);
 
     /* deployed power-ups: a bounded engine boost, and/or fresh rubber */
     if (k->push_t > 0.0f) {
@@ -626,7 +806,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     }
     /* drag + rolling resistance oppose motion */
     if (fabsf(v) > 0.2f) {
-        float a_res = (0.5f * RHO_AIR * s->cd_a * v * v) / s->mass_kg +
+        float a_res = (0.5f * RHO_AIR * cd_a * v * v) / s->mass_kg +
                       CRR * GRAVITY;
         a += (v > 0.0f) ? -a_res : a_res;
     }
@@ -696,16 +876,27 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
 
         track_locate(t, k->x, k->z, k->seg, &seg, &frac, &lat, &y);
 
-        /* guardrail */
-        if (fabsf(lat) > t->wall_half) {
-            float clamped = game_clampf(lat, -t->wall_half, t->wall_half);
-            float excess = lat - clamped;
-            k->x += t->dz[seg] * excess;
-            k->z -= t->dx[seg] * excess;
-            k->speed *= (1.0f - 2.5f * dt);
-            if (was_inside)
-                k->hit_wall = 1;
-            lat = clamped;
+        if (t->has_walls) {
+            /* guardrail: the car is held on the road, and pays in speed */
+            if (fabsf(lat) > t->wall_half) {
+                float clamped = game_clampf(lat, -t->wall_half, t->wall_half);
+                float excess = lat - clamped;
+                k->x += t->dz[seg] * excess;
+                k->z -= t->dx[seg] * excess;
+                k->speed *= (1.0f - 2.5f * dt);
+                if (was_inside)
+                    k->hit_wall = 1;
+                lat = clamped;
+            }
+        } else if (fabsf(lat) > t->wall_half) {
+            /* No barrier here: past the shoulder there is nothing but air.
+             * The car drops for a moment, so you see it go, and is then
+             * set back down at the last checkpoint it passed. */
+            k->fall_t += dt;
+            k->y -= (3.0f + 12.0f * k->fall_t) * dt;
+            k->speed *= (1.0f - 1.2f * dt);
+        } else {
+            k->fall_t = 0.0f;
         }
 
         newp = (float)seg + frac;
@@ -718,6 +909,13 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->lat = lat;
         k->y = y;
         k->lap = (int)floorf(k->total_progress / (float)t->n);
+
+        /* remember the last checkpoint reached while safely on the road */
+        if (k->fall_t <= 0.0f && fabsf(lat) <= t->road_half + 1.0f) {
+            int cp = track_checkpoint_for(t, seg);
+            if (cp >= 0)
+                k->last_checkpoint = cp;
+        }
 
         /* power-up panels: three across the road on marked rows. Which
          * of the two a panel carries is fixed, so a driver can aim for
@@ -739,6 +937,29 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
                 }
             }
         }
+    }
+
+    /* --- fished out of the void, back at the last checkpoint --- */
+    if (k->fall_t > 1.1f) {
+        int cseg = t->checkpoint_seg[k->last_checkpoint %
+                                     (t->n_checkpoints > 0
+                                          ? t->n_checkpoints : 1)];
+        k->x = t->px[cseg];
+        k->z = t->pz[cseg];
+        k->y = t->py[cseg];
+        k->heading = atan2f(t->dz[cseg], t->dx[cseg]);
+        k->speed = 0.0f;
+        k->gear = 0;
+        k->shift_t = 0.0f;
+        k->drifting = 0;
+        k->slip = 0.0f;
+        k->fall_t = 0.0f;
+        k->respawned = 1;
+        k->seg = cseg;
+        k->lat = 0.0f;
+        k->prog_raw = (float)cseg;
+        /* no free progress: keep the lap, take the position */
+        k->total_progress = (float)k->lap * (float)t->n + (float)cseg;
     }
 
     /* --- deploy a held power-up --- */
@@ -873,7 +1094,7 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
         if (k->human < 0)
             ai_learn(g, k);
 
-        if (!k->finished && k->lap >= RACE_LAPS) {
+        if (!k->finished && k->lap >= g->track.laps) {
             k->finished = 1;
             k->finish_time = g->race_t;
             g->finish_count++;

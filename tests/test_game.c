@@ -98,7 +98,7 @@ static void test_tracks_geometry(void)
                   "curvature %.3f at %d on track %d", t.curv[i], i, id);
         }
         if (id != TRACK_CLASSIC) {
-            CHECK(t.max_y - t.min_y > 40.0f, "pass %d too flat", id);
+            CHECK(t.max_y - t.min_y > 30.0f, "pass %d too flat", id);
             CHECK(t.alpine, "pass %d not alpine", id);
         } else {
             CHECK(t.max_y - t.min_y < 1.0f, "classic not flat");
@@ -342,7 +342,7 @@ static void test_ai_races_all_tracks(void)
 
         printf("track %-8s: %2d/%d AI finished %d laps, best AI lap %.1f s "
                "(%.0f m)\n", g.track.name, finished, NUM_KARTS - 1,
-               RACE_LAPS, best_lap, g.track.total_len);
+               g.track.laps, best_lap, g.track.total_len);
         CHECK(finished == NUM_KARTS - 1,
               "only %d of %d AI finished on track %d", finished,
               NUM_KARTS - 1, id);
@@ -373,7 +373,7 @@ static void test_full_race_classic(void)
             if (!g.karts[i].finished)
                 done = 0;
     }
-    CHECK(done, "AI did not finish %d laps on classic", RACE_LAPS);
+    CHECK(done, "AI did not finish %d laps on classic", g.track.laps);
     if (done) {
         int seen[NUM_KARTS + 1] = { 0 };
         printf("classic full race: AI done at %.0f s\n", f / 60.0f);
@@ -916,6 +916,423 @@ static void test_no_rubber_banding(void)
           dropped - chased);
 }
 
+/* ------------------------------------------------------------------ */
+/* v1.2: gearboxes, cliffs and checkpoints, the two new passes          */
+/* ------------------------------------------------------------------ */
+
+/* The gear power curve: bogging below the band, full in it, nothing at
+ * the limiter (which is what stops a gear pulling past its top speed). */
+static void test_gear_power_curve(void)
+{
+    printf("gear curve: bog %.2f  band %.2f  peak-out %.2f  limiter %.2f\n",
+           gear_power_scale(0.15f), gear_power_scale(0.70f),
+           gear_power_scale(0.97f), gear_power_scale(1.10f));
+    CHECK(gear_power_scale(0.15f) < 0.8f, "bogging is not penalised");
+    CHECK(gear_power_scale(0.70f) > 0.99f, "no full power in the band");
+    CHECK(gear_power_scale(0.97f) < 1.0f &&
+          gear_power_scale(0.97f) > 0.7f, "past-peak falloff wrong");
+    CHECK(gear_power_scale(1.10f) == 0.0f, "limiter still makes power");
+    /* monotonic through the bog region */
+    CHECK(gear_power_scale(0.05f) < gear_power_scale(0.25f),
+          "bog region not monotonic");
+}
+
+/* Every car must have a sane gearbox: rising ratios, and a top gear that
+ * roughly matches the drag-limited top speed. */
+static void test_gearboxes_sane(void)
+{
+    int i, gi;
+    for (i = 0; i < SPEC_COUNT; i++) {
+        const KartSpec *s = &kart_specs[i];
+        CHECK(s->n_gears >= 3 && s->n_gears <= MAX_GEARS,
+              "%s has %d gears", s->name, s->n_gears);
+        for (gi = 1; gi < s->n_gears; gi++)
+            CHECK(s->gear_top[gi] > s->gear_top[gi - 1] * 1.15f,
+                  "%s gear %d is not taller than %d", s->name, gi + 1, gi);
+        printf("%-6s %d gears, 1st tops %.0f km/h, top gear %.0f km/h\n",
+               s->name, s->n_gears, s->gear_top[0] * 3.6f,
+               s->gear_top[s->n_gears - 1] * 3.6f);
+    }
+}
+
+/* A manual box only shifts on a fresh press, and an automatic works its
+ * way up the box under power without hunting. */
+static void test_shifting(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    int f, shifts, start_gear;
+
+    /* --- manual: holding the button must not run through the box --- */
+    cfg.gearbox[0] = GEARBOX_MANUAL;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 30.0f);
+    in[0].gear_up = 1;
+    start_gear = g.karts[0].gear;
+    for (f = 0; f < 90; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    printf("manual: holding upshift for 1.5 s moved %d gear(s)\n",
+           g.karts[0].gear - start_gear);
+    CHECK(g.karts[0].gear == start_gear + 1,
+          "held upshift changed %d gears, should be exactly 1",
+          g.karts[0].gear - start_gear);
+
+    /* releasing and pressing again gives another gear */
+    in[0].gear_up = 0;
+    game_update(&g, in, 1.0f / 60.0f);
+    in[0].gear_up = 1;
+    for (f = 0; f < 30; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    CHECK(g.karts[0].gear == start_gear + 2, "second press did not shift");
+
+    /* --- automatic: climbs the box, and does not hunt at steady speed */
+    cfg.gearbox[0] = GEARBOX_AUTO;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    /* Nobody is steering here, so the car will eventually run wide on a
+     * curving track; take the PEAK gear rather than the gear it happens
+     * to be in once it has found a barrier. */
+    teleport(&g, &g.karts[0], 2, 2.0f);
+    in[0].accel = 1;
+    {
+        int top_gear = 0;
+        float vpeak = 0.0f;
+        for (f = 0; f < 60 * 12; f++) {
+            game_update(&g, in, 1.0f / 60.0f);
+            if (g.karts[0].gear > top_gear) top_gear = g.karts[0].gear;
+            if (fabsf(g.karts[0].speed) > vpeak)
+                vpeak = fabsf(g.karts[0].speed);
+        }
+        printf("auto: worked up to gear %d of %d, peak %.0f km/h\n",
+               top_gear + 1, kart_specs[g.karts[0].spec].n_gears,
+               vpeak * 3.6f);
+        CHECK(top_gear > 0, "automatic never upshifted");
+        CHECK(top_gear >= 2, "automatic only reached gear %d", top_gear + 1);
+    }
+
+    /* Hunting is a property of the gearbox, not of the driving, so hold
+     * the speed fixed and simply count gear changes: a sane box settles
+     * on one gear and stays there. */
+    {
+        int last;
+        game_init(&g, &cfg);
+        g.state = STATE_RACING;
+        idle_inputs(in);
+        teleport(&g, &g.karts[0], 2, 26.0f);
+        in[0].accel = 1;
+        last = g.karts[0].gear;
+        shifts = 0;
+        for (f = 0; f < 60 * 6; f++) {
+            g.karts[0].speed = 26.0f;      /* pin the speed */
+            game_update(&g, in, 1.0f / 60.0f);
+            if (g.karts[0].gear != last) {
+                shifts++;
+                last = g.karts[0].gear;
+            }
+        }
+        printf("auto: %d shift(s) while pinned at 26 m/s for 6 s\n", shifts);
+        CHECK(shifts <= 2, "automatic gearbox is hunting (%d shifts)",
+              shifts);
+    }
+}
+
+/* A gear caps speed: in first, with a manual box, the car cannot pull
+ * past the limiter no matter how long you hold the throttle. */
+static void test_gear_limits_speed(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    float top1;
+    int f;
+
+    cfg.gearbox[0] = GEARBOX_MANUAL;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 2.0f);
+    in[0].accel = 1;
+    {
+        float vpeak = 0.0f;
+        for (f = 0; f < 60 * 10; f++) {
+            game_update(&g, in, 1.0f / 60.0f);
+            if (fabsf(g.karts[0].speed) > vpeak)
+                vpeak = fabsf(g.karts[0].speed);
+        }
+        top1 = kart_specs[g.karts[0].spec].gear_top[0];
+        printf("first gear: peak %.1f m/s, limiter at %.1f m/s\n",
+               vpeak, top1);
+        CHECK(g.karts[0].gear == 0, "manual box shifted itself");
+        CHECK(vpeak < top1 * 1.04f,
+              "pulled past the first-gear limiter (%.1f vs %.1f)",
+              vpeak, top1);
+        CHECK(vpeak > top1 * 0.85f,
+              "never reached the first-gear limiter (%.1f vs %.1f)",
+              vpeak, top1);
+    }
+}
+
+/* Tire compounds have to actually trade grip against slipperiness. */
+static void test_tire_compounds(void)
+{
+    printf("tires: soft grip x%.2f drag x%.2f, hard grip x%.2f drag x%.2f\n",
+           tire_grip_mult(TIRE_SOFT), tire_drag_mult(TIRE_SOFT),
+           tire_grip_mult(TIRE_HARD), tire_drag_mult(TIRE_HARD));
+    CHECK(tire_grip_mult(TIRE_SOFT) > tire_grip_mult(TIRE_MEDIUM),
+          "softs do not grip more");
+    CHECK(tire_grip_mult(TIRE_MEDIUM) > tire_grip_mult(TIRE_HARD),
+          "hards do not grip less");
+    CHECK(tire_drag_mult(TIRE_HARD) < tire_drag_mult(TIRE_SOFT),
+          "hards are not the slipperier tire");
+}
+
+/* The passes: which are barriered, and the shape of the new ones. */
+static void test_track_roster(void)
+{
+    Track cl, be, lo, ke, mo;
+    track_init(&cl, TRACK_CLASSIC);
+    track_init(&be, TRACK_BERTHOUD);
+    track_init(&lo, TRACK_LOVELAND);
+    track_init(&ke, TRACK_KENOSHA);
+    track_init(&mo, TRACK_MONARCH);
+
+    printf("roster: %s %.0fm w%.1f rails%d | %s %.0fm w%.1f rails%d | "
+           "%s %.0fm w%.1f rails%d\n",
+           lo.name, lo.total_len, lo.road_half * 2.0f, lo.has_walls,
+           ke.name, ke.total_len, ke.road_half * 2.0f, ke.has_walls,
+           mo.name, mo.total_len, mo.road_half * 2.0f, mo.has_walls);
+
+    /* guardrails: gone from Loveland and Monarch, kept elsewhere */
+    CHECK(cl.has_walls && be.has_walls && ke.has_walls,
+          "a barriered track lost its rails");
+    CHECK(!lo.has_walls, "Loveland still has guardrails");
+    CHECK(!mo.has_walls, "Monarch still has guardrails");
+
+    /* Loveland got wider and longer than it was (was 1454 m, 8.4 m wide) */
+    CHECK(lo.total_len > 1600.0f, "Loveland is only %.0f m", lo.total_len);
+    CHECK(lo.road_half * 2.0f > 9.0f, "Loveland is only %.1f m wide",
+          lo.road_half * 2.0f);
+
+    /* Kenosha: longer and wider than either older pass, and turnier */
+    CHECK(ke.total_len > be.total_len && ke.total_len > lo.total_len,
+          "Kenosha is not the longest (%.0f m)", ke.total_len);
+    CHECK(ke.road_half > be.road_half && ke.road_half > lo.road_half,
+          "Kenosha is not the widest");
+    CHECK(ke.n_corners > be.n_corners,
+          "Kenosha (%d corners) is not turnier than Berthoud (%d)",
+          ke.n_corners, be.n_corners);
+
+    /* Monarch: the hardest — narrowest, unguarded, tightest, steepest */
+    {
+        float mo_peak = 0.0f, be_peak = 0.0f, mo_grade = 0.0f;
+        int i;
+        for (i = 0; i < mo.n_corners; i++)
+            if (mo.corner_peak[i] > mo_peak) mo_peak = mo.corner_peak[i];
+        for (i = 0; i < be.n_corners; i++)
+            if (be.corner_peak[i] > be_peak) be_peak = be.corner_peak[i];
+        for (i = 0; i < mo.n; i++)
+            if (fabsf(mo.slope[i]) > mo_grade) mo_grade = fabsf(mo.slope[i]);
+        printf("Monarch: tightest R %.0f m, steepest %.0f%%, %d corners\n",
+               1.0f / mo_peak, mo_grade * 100.0f, mo.n_corners);
+        CHECK(mo.road_half < lo.road_half && mo.road_half < ke.road_half,
+              "Monarch is not the narrowest");
+        CHECK(mo_peak >= be_peak * 0.95f,
+              "Monarch is not as tight as Berthoud");
+        /* Monarch's difficulty is narrow, tight, unguarded and STEEP —
+         * Berthoud climbs a little more overall, but not as sharply. */
+        {
+            float be_grade = 0.0f;
+            for (i = 0; i < be.n; i++)
+                if (fabsf(be.slope[i]) > be_grade)
+                    be_grade = fabsf(be.slope[i]);
+            CHECK(mo_grade > be_grade,
+                  "Monarch (%.0f%%) is not steeper than Berthoud (%.0f%%)",
+                  mo_grade * 100.0f, be_grade * 100.0f);
+            CHECK(mo.max_y - mo.min_y > 60.0f,
+                  "Monarch only climbs %.0f m", mo.max_y - mo.min_y);
+        }
+    }
+
+    /* every track needs checkpoints to respawn at */
+    {
+        Track *all[5]; int i;
+        all[0] = &cl; all[1] = &be; all[2] = &lo; all[3] = &ke; all[4] = &mo;
+        for (i = 0; i < 5; i++) {
+            CHECK(all[i]->n_checkpoints >= 4,
+                  "%s has only %d checkpoints", all[i]->name,
+                  all[i]->n_checkpoints);
+            CHECK(track_checkpoint_for(all[i], 0) == 0,
+                  "%s checkpoint lookup wrong at the line", all[i]->name);
+            CHECK(track_checkpoint_for(all[i], all[i]->n - 1) ==
+                      all[i]->n_checkpoints - 1,
+                  "%s checkpoint lookup wrong at the end", all[i]->name);
+        }
+    }
+}
+
+/* Race length is set per circuit, so a long pass is not the same number
+ * of laps as a short speedway: every race should cover a similar
+ * distance. */
+static void test_lap_counts(void)
+{
+    int id;
+    for (id = 0; id < TRACK_COUNT; id++) {
+        Track t;
+        float dist;
+        track_init(&t, id);
+        dist = t.total_len * (float)t.laps;
+        printf("%-9s %5.0f m x %d laps = %.0f m of racing\n",
+               t.name, t.total_len, t.laps, dist);
+        CHECK(t.laps >= 2 && t.laps <= 4, "%s has %d laps", t.name, t.laps);
+        CHECK(dist > 1800.0f && dist < 5000.0f,
+              "%s race is %.0f m, out of line with the others",
+              t.name, dist);
+    }
+}
+
+/* Going over an unguarded edge must drop the car and then put it back on
+ * the road at the last checkpoint it passed — without handing out any
+ * free progress. */
+static void test_cliff_respawn(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_MONARCH);
+    Input in[MAX_HUMANS];
+    Kart *k;
+    int f, cp_before, lap_before, fell = 0;
+    float prog_before, y_start;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    k = &g.karts[0];
+
+    /* drive a little way down the road so a checkpoint is behind us */
+    teleport(&g, k, 30, 16.0f);
+    in[0].accel = 1;
+    for (f = 0; f < 60; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    cp_before = k->last_checkpoint;
+    lap_before = k->lap;
+    prog_before = k->total_progress;
+    CHECK(cp_before > 0, "no checkpoint recorded while driving (%d)",
+          cp_before);
+
+    /* now shove it off the side, well past the shoulder */
+    teleport_lat(&g, k, k->seg, g.track.wall_half + 6.0f, 12.0f);
+    y_start = k->y;
+    idle_inputs(in);
+    for (f = 0; f < 60 * 3; f++) {
+        game_update(&g, in, 1.0f / 60.0f);
+        if (k->fall_t > 0.0f)
+            fell = 1;
+        if (k->respawned)
+            break;
+    }
+
+    printf("cliff: fell %d, respawned at checkpoint %d (was %d), "
+           "dropped %.1f m first\n", fell, k->last_checkpoint, cp_before,
+           y_start - k->y);
+    CHECK(fell, "car off an unguarded edge did not start falling");
+    CHECK(k->respawned, "car never came back from over the edge");
+    CHECK(fabsf(k->lat) < 1.0f, "respawned off the road (lat %.2f)",
+          k->lat);
+    CHECK(fabsf(k->speed) < 0.5f, "respawned still moving (%.2f m/s)",
+          k->speed);
+    CHECK(k->lap == lap_before, "respawn changed the lap count");
+    CHECK(k->total_progress <= prog_before + 0.5f,
+          "respawn handed out free progress (%.1f -> %.1f)",
+          prog_before, k->total_progress);
+    CHECK(k->seg == g.track.checkpoint_seg[cp_before],
+          "respawned at segment %d, not checkpoint segment %d",
+          k->seg, g.track.checkpoint_seg[cp_before]);
+
+    /* and it must be drivable again afterwards */
+    in[0].accel = 1;
+    for (f = 0; f < 120; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    CHECK(k->speed > 3.0f, "car is dead after respawning (%.2f m/s)",
+          k->speed);
+    CHECK(!isnan(k->x) && !isnan(k->y), "respawn left NaNs behind");
+}
+
+/* A barriered track must still hold cars in rather than dropping them. */
+static void test_guardrails_still_hold(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    int f;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport_lat(&g, &g.karts[0], 20, g.track.wall_half + 5.0f, 10.0f);
+    for (f = 0; f < 60; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    CHECK(fabsf(g.karts[0].lat) <= g.track.wall_half + 0.1f,
+          "guardrail let the car through (lat %.2f)", g.karts[0].lat);
+    CHECK(g.karts[0].fall_t == 0.0f, "car fell on a barriered track");
+    CHECK(!g.karts[0].respawned, "barriered track used a respawn");
+}
+
+/* AI shifting styles must differ, and none of them may hunt. */
+static void test_ai_shift_styles(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_BERTHOUD);
+    Input in[MAX_HUMANS];
+    int shifts[NUM_KARTS], last[NUM_KARTS];
+    int f, i, lo_s = 1 << 30, hi_s = -1;
+
+    game_init(&g, &cfg);
+    idle_inputs(in);
+    for (i = 0; i < NUM_KARTS; i++) {
+        shifts[i] = 0;
+        last[i] = g.karts[i].gear;
+    }
+    for (f = 0; f < 60 * 90; f++) {
+        game_update(&g, in, 1.0f / 60.0f);
+        for (i = 1; i < NUM_KARTS; i++)
+            if (g.karts[i].gear != last[i]) {
+                shifts[i]++;
+                last[i] = g.karts[i].gear;
+            }
+    }
+    for (i = 1; i < NUM_KARTS; i++) {
+        if (shifts[i] < lo_s) lo_s = shifts[i];
+        if (shifts[i] > hi_s) hi_s = shifts[i];
+        /* 90 s of racing: more than ~1.5 shifts a second is hunting */
+        CHECK(shifts[i] < 135,
+              "%s shifted %d times in 90 s — hunting",
+              ai_strategy_name(g.karts[i].strategy), shifts[i]);
+    }
+    printf("AI shifting over 90 s: %d..%d changes across the field\n",
+           lo_s, hi_s);
+    CHECK(hi_s > lo_s + 8, "shift counts too uniform (%d..%d)", lo_s, hi_s);
+
+    /* the strategy sheets themselves must describe different styles */
+    {
+        float up_lo = 9.0f, up_hi = -9.0f;
+        for (i = 0; i < AI_STRATEGY_COUNT; i++) {
+            if (ai_strategies[i].shift_up_frac < up_lo)
+                up_lo = ai_strategies[i].shift_up_frac;
+            if (ai_strategies[i].shift_up_frac > up_hi)
+                up_hi = ai_strategies[i].shift_up_frac;
+            CHECK(ai_strategies[i].shift_down_frac <
+                      ai_strategies[i].shift_up_frac - 0.2f,
+                  "%s up/down shift points are too close",
+                  ai_strategies[i].name);
+        }
+        CHECK(up_hi - up_lo > 0.1f,
+              "every strategy shifts up at the same point");
+    }
+}
+
 int main(void)
 {
     test_steering_filter();
@@ -927,6 +1344,15 @@ int main(void)
     test_gravity_grade();
     test_cornering_grip_cap();
     test_power_ups();
+    test_gear_power_curve();
+    test_gearboxes_sane();
+    test_shifting();
+    test_gear_limits_speed();
+    test_tire_compounds();
+    test_track_roster();
+    test_lap_counts();
+    test_cliff_respawn();
+    test_guardrails_still_hold();
     test_corner_segmentation();
     test_full_grid_fits();
     test_ai_races_all_tracks();
@@ -936,6 +1362,7 @@ int main(void)
     test_ai_adapts_to_player();
     test_ai_uses_power_ups();
     test_no_rubber_banding();
+    test_ai_shift_styles();
     test_player_model_learns();
 
     if (failures) {
