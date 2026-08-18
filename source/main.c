@@ -19,8 +19,10 @@
 #include <wiiuse/wpad.h>
 #include <wiikeyboard/keyboard.h>   /* pulls in wsksymdef.h keysyms */
 #include <asndlib.h>
+#include <fat.h>
 
 #include "game.h"
+#include "config.h"
 
 #define DEFAULT_FIFO_SIZE (256 * 1024)
 
@@ -34,10 +36,15 @@ static u32 fb = 0;
 
 static Game game;
 static u32 frame_no = 0;
+static GameSettings app_settings;
+static ControlConfig control_config;
+static char config_banner[48];
+static char config_detail[48];
 
 /* app flow */
 enum { APP_MENU = 0, APP_RACE = 1 };
 static int app_state = APP_MENU;
+static int race_exit_confirm;       /* leave-race guard; pauses simulation */
 static int menu_screen;              /* SCREEN_SETUP / SCREEN_GARAGE     */
 static int sel_players = 1;
 static int sel_track = 0;
@@ -79,6 +86,103 @@ static const u8 *kart_color(const Kart *k)
 static const float LX = 0.45f, LY = 0.85f, LZ = 0.28f;
 
 /* ------------------------------------------------------------------ */
+/* Editable configuration                                             */
+/* ------------------------------------------------------------------ */
+
+static int readable_file(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    fclose(f);
+    return 1;
+}
+
+static int make_config_path(char *out, int cap, const char *root,
+                            const char *name)
+{
+    int n = snprintf(out, (size_t)cap, "%s/config/%s", root, name);
+    return n > 0 && n < cap;
+}
+
+static void load_editable_config(int argc, char **argv)
+{
+    char roots[4][256];
+    char path[320];
+    char error[48];
+    const char *root = NULL;
+    int n_roots = 0, i, loaded = 0, failed = 0;
+
+    game_settings_defaults(&app_settings);
+    control_config_defaults(&control_config);
+    kart_specs_reset_defaults();
+    config_banner[0] = config_detail[0] = '\0';
+
+    /* libfat is optional at runtime. Directly opening the DOL in Dolphin
+     * still works with compiled defaults; a virtual SD card or real Wii
+     * makes the adjacent JSON files editable without rebuilding. */
+    (void)fatInitDefault();
+
+    if (argc > 0 && argv && argv[0] && strchr(argv[0], '/')) {
+        char *slash;
+        snprintf(roots[n_roots], sizeof(roots[n_roots]), "%s", argv[0]);
+        slash = strrchr(roots[n_roots], '/');
+        if (slash) {
+            *slash = '\0';
+            n_roots++;
+        }
+    }
+    snprintf(roots[n_roots++], sizeof(roots[0]), "sd:/apps/wiikart");
+    snprintf(roots[n_roots++], sizeof(roots[0]), "usb:/apps/wiikart");
+    snprintf(roots[n_roots++], sizeof(roots[0]), ".");
+
+    for (i = 0; i < n_roots; i++) {
+        if ((make_config_path(path, (int)sizeof(path), roots[i],
+                              "settings.json") && readable_file(path)) ||
+            (make_config_path(path, (int)sizeof(path), roots[i],
+                              "cars.json") && readable_file(path)) ||
+            (make_config_path(path, (int)sizeof(path), roots[i],
+                              "controls.json") && readable_file(path))) {
+            root = roots[i];
+            break;
+        }
+    }
+
+    if (!root) {
+        snprintf(config_banner, sizeof(config_banner), "BUILT IN CONFIG");
+        return;
+    }
+
+#define LOAD_ONE(filename, call)                                           \
+    do {                                                                   \
+        if (make_config_path(path, (int)sizeof(path), root, filename) &&   \
+            readable_file(path)) {                                         \
+            if (call) loaded++;                                            \
+            else {                                                         \
+                failed++;                                                  \
+                if (!config_detail[0])                                     \
+                    snprintf(config_detail, sizeof(config_detail), "%s", \
+                             error);                                       \
+            }                                                              \
+        }                                                                  \
+    } while (0)
+
+    LOAD_ONE("settings.json",
+             config_load_settings_file(&app_settings, path, error,
+                                       (int)sizeof(error)));
+    LOAD_ONE("cars.json",
+             config_load_cars_file(path, error, (int)sizeof(error)));
+    LOAD_ONE("controls.json",
+             config_load_controls_file(&control_config, path, error,
+                                       (int)sizeof(error)));
+#undef LOAD_ONE
+
+    if (failed)
+        snprintf(config_banner, sizeof(config_banner), "CONFIG ERROR");
+    else
+        snprintf(config_banner, sizeof(config_banner), "CONFIG %d/3", loaded);
+}
+
+/* ------------------------------------------------------------------ */
 /* Input state (polled once per frame, consumed per player)            */
 /* ------------------------------------------------------------------ */
 
@@ -102,18 +206,66 @@ static u32 gc_mask;      /* connected GameCube pads, from PAD_ScanPads  */
  * row and Esc to back out. Steering signs always come from STEER_LEFT /
  * STEER_RIGHT (see game.h) rather than being written by hand here.
  */
-typedef struct {
-    u8 left, right, accel, brake, drift, item, gear_up, gear_down;
-} KeyMap;
-
-static KeyMap keys[2];
+static u8 key_actions[CONTROL_KEYBOARD_PLAYERS][CONTROL_ACTION_COUNT];
+static u8 key_held[GAME_KEY_DOWN + 1];
 static int keyboard_ok = 0;       /* the driver started */
 static int keyboard_here = 0;     /* ...and a keyboard is actually plugged in */
 static u8 key_confirm_edge, key_back_edge, key_menu_edge;
-/* Menu keys are edges, not held state: sampling `keys[]` every tenth
+/* Menu keys are edges, not held state: sampling held actions every tenth
  * frame dropped most taps outright and made the menus feel broken. */
 static u8 key_up_edge, key_down_edge, key_left_edge, key_right_edge;
 static float key_repeat_t;        /* held-key auto-repeat timer */
+static Input shown_input[MAX_HUMANS];
+static unsigned int shown_gc[MAX_HUMANS];
+
+static int normalized_key(u32 symbol)
+{
+    if (symbol >= KS_a && symbol <= KS_z)
+        return 'A' + (int)(symbol - KS_a);
+    if (symbol >= KS_A && symbol <= KS_Z)
+        return 'A' + (int)(symbol - KS_A);
+    switch (symbol) {
+    case KS_space:  return GAME_KEY_SPACE;
+    case KS_Return: return GAME_KEY_ENTER;
+    case KS_Escape: return GAME_KEY_ESCAPE;
+    case KS_Left:   return GAME_KEY_LEFT;
+    case KS_Right:  return GAME_KEY_RIGHT;
+    case KS_Up:     return GAME_KEY_UP;
+    case KS_Down:   return GAME_KEY_DOWN;
+    default:        return GAME_KEY_NONE;
+    }
+}
+
+static void remember_key_edge(int player, int action, int held)
+{
+    if (!held || player != 0)
+        return;
+    if (action == CONTROL_STEER_LEFT)       key_left_edge = 1;
+    else if (action == CONTROL_STEER_RIGHT) key_right_edge = 1;
+    else if (action == CONTROL_ACCEL)       key_up_edge = 1;
+    else if (action == CONTROL_BRAKE)       key_down_edge = 1;
+    else if (action == CONTROL_MENU_CONFIRM) key_confirm_edge = 1;
+    else if (action == CONTROL_MENU_BACK)    key_back_edge = 1;
+    else if (action == CONTROL_RACE_MENU)    key_menu_edge = 1;
+}
+
+static void rebuild_key_actions(void)
+{
+    int p, action, slot;
+    memset(key_actions, 0, sizeof(key_actions));
+    for (p = 0; p < CONTROL_KEYBOARD_PLAYERS; p++) {
+        for (action = 0; action < CONTROL_ACTION_COUNT; action++) {
+            for (slot = 0; slot < CONTROL_MAX_BINDS; slot++) {
+                int code = control_config.keyboard[p][action][slot];
+                if (code > GAME_KEY_NONE && code <= GAME_KEY_DOWN &&
+                    key_held[code]) {
+                    key_actions[p][action] = 1;
+                    break;
+                }
+            }
+        }
+    }
+}
 
 static void poll_keyboard(void)
 {
@@ -125,11 +277,14 @@ static void poll_keyboard(void)
         u8 held;
         if (ev.type == KEYBOARD_CONNECTED) {
             keyboard_here = 1;
+            memset(key_held, 0, sizeof(key_held));
+            rebuild_key_actions();
             continue;
         }
         if (ev.type == KEYBOARD_DISCONNECTED) {
             keyboard_here = 0;
-            memset(keys, 0, sizeof(keys));
+            memset(key_held, 0, sizeof(key_held));
+            rebuild_key_actions();
             continue;
         }
         /* a key event can only come from a keyboard that is present */
@@ -137,43 +292,29 @@ static void poll_keyboard(void)
         if (ev.type != KEYBOARD_PRESSED && ev.type != KEYBOARD_RELEASED)
             continue;
         held = (ev.type == KEYBOARD_PRESSED);
-        switch (ev.symbol) {
-        /* ---- player one ---- */
-        case KS_a: case KS_A: case KS_Left:
-            keys[0].left = held;  if (held) key_left_edge = 1;  break;
-        case KS_d: case KS_D: case KS_Right:
-            keys[0].right = held; if (held) key_right_edge = 1; break;
-        case KS_w: case KS_W: case KS_Up:
-            keys[0].accel = held; if (held) key_up_edge = 1;    break;
-        case KS_s: case KS_S: case KS_Down:
-            keys[0].brake = held; if (held) key_down_edge = 1;  break;
-        case KS_e: case KS_E:                keys[0].gear_up = held;   break;
-        case KS_q: case KS_Q:                keys[0].gear_down = held; break;
-        case KS_x: case KS_X:                keys[0].item = held;      break;
-        case KS_space:                       keys[0].drift = held;     break;
-        /* ---- player two ---- */
-        case KS_j: case KS_J:                keys[1].left = held;      break;
-        case KS_l: case KS_L:                keys[1].right = held;     break;
-        case KS_i: case KS_I:                keys[1].accel = held;     break;
-        case KS_k: case KS_K:                keys[1].brake = held;     break;
-        case KS_o: case KS_O:                keys[1].gear_up = held;   break;
-        case KS_u: case KS_U:                keys[1].gear_down = held; break;
-        case KS_m: case KS_M:                keys[1].item = held;      break;
-        case KS_p: case KS_P:                keys[1].drift = held;     break;
-        /* ---- menus and flow ---- */
-        case KS_Return:
-            if (held) key_confirm_edge = 1;
-            break;
-        case KS_Escape:
-            /* backs out one step; it does not quit, which was an easy way
-             * to lose a race by accident */
-            if (held) key_back_edge = 1;
-            break;
-        case KS_r: case KS_R:
-            if (held) key_menu_edge = 1;
-            break;
-        default:
-            break;
+        {
+            int code = normalized_key(ev.symbol);
+            int p, action, slot;
+            int was_held;
+            if (!code)
+                continue;
+            was_held = key_held[code];
+            key_held[code] = (u8)held;
+            for (p = 0; p < CONTROL_KEYBOARD_PLAYERS; p++) {
+                for (action = 0; action < CONTROL_ACTION_COUNT; action++) {
+                    for (slot = 0; slot < CONTROL_MAX_BINDS; slot++) {
+                        if (control_config.keyboard[p][action][slot] == code) {
+                            remember_key_edge(p, action,
+                                              held && !was_held);
+                            break;
+                        }
+                    }
+                }
+            }
+            /* Derive actions from every held physical key. If W and the
+             * up arrow are both bound to gas, releasing one must not
+             * cancel the other. */
+            rebuild_key_actions();
         }
     }
 }
@@ -210,6 +351,38 @@ static float stick_x(const joystick_t *js)
            sinf(js->ang * ((float)M_PI / 180.0f));
 }
 
+static unsigned int gamecube_button_state(u32 held)
+{
+    unsigned int state = 0;
+    if (held & PAD_BUTTON_A) state |= GC_INPUT_A;
+    if (held & PAD_BUTTON_B) state |= GC_INPUT_B;
+    if (held & PAD_BUTTON_X) state |= GC_INPUT_X;
+    if (held & PAD_BUTTON_Y) state |= GC_INPUT_Y;
+    if (held & PAD_TRIGGER_Z) state |= GC_INPUT_Z;
+    if (held & PAD_TRIGGER_L) state |= GC_INPUT_L;
+    if (held & PAD_TRIGGER_R) state |= GC_INPUT_R;
+    if (held & PAD_BUTTON_START) state |= GC_INPUT_START;
+    if (held & PAD_BUTTON_LEFT) state |= GC_INPUT_DPAD_LEFT;
+    if (held & PAD_BUTTON_RIGHT) state |= GC_INPUT_DPAD_RIGHT;
+    if (held & PAD_BUTTON_UP) state |= GC_INPUT_DPAD_UP;
+    if (held & PAD_BUTTON_DOWN) state |= GC_INPUT_DPAD_DOWN;
+    return state;
+}
+
+static unsigned int gamecube_state(int p)
+{
+    unsigned int state = gamecube_button_state(gheld[p]);
+    s8 sx = PAD_StickX(p);
+    if (sx < -18) state |= GC_INPUT_STICK_LEFT;
+    if (sx > 18) state |= GC_INPUT_STICK_RIGHT;
+    return state;
+}
+
+static unsigned int gamecube_down_state(int p)
+{
+    return gamecube_button_state(gdown[p]);
+}
+
 static SteerAxis steer_axis[MAX_HUMANS];
 
 static void read_player_input(int p, Input *in, float dt)
@@ -217,6 +390,7 @@ static void read_player_input(int p, Input *in, float dt)
     const WPADData *wd;
     float steer = 0.0f;
     int tilt_ok = 1;
+    int wiimote_manual = game.karts[p].gearbox == GEARBOX_MANUAL;
 
     memset(in, 0, sizeof(*in));
 
@@ -226,10 +400,21 @@ static void read_player_input(int p, Input *in, float dt)
     in->hop   = (wheld[p] & WPAD_BUTTON_B) != 0;
     in->item  = (wheld[p] & (WPAD_BUTTON_MINUS |
                              WPAD_CLASSIC_BUTTON_MINUS)) != 0;
-    if (wheld[p] & (WPAD_BUTTON_UP | WPAD_BUTTON_LEFT))
-        steer += STEER_LEFT;
-    if (wheld[p] & (WPAD_BUTTON_DOWN | WPAD_BUTTON_RIGHT))
-        steer += STEER_RIGHT;
+    if (wiimote_manual) {
+        /* Mario Kart Wii has no transmission shift buttons, so WiiKart's
+         * optional manual gearbox uses the otherwise-free D-pad vertical
+         * pair. Tilt remains the primary steering input; left/right still
+         * provide digital steering. */
+        if (wheld[p] & WPAD_BUTTON_LEFT)  steer += STEER_LEFT;
+        if (wheld[p] & WPAD_BUTTON_RIGHT) steer += STEER_RIGHT;
+        in->gear_up |= (wheld[p] & WPAD_BUTTON_UP) != 0;
+        in->gear_down |= (wheld[p] & WPAD_BUTTON_DOWN) != 0;
+    } else {
+        if (wheld[p] & (WPAD_BUTTON_UP | WPAD_BUTTON_LEFT))
+            steer += STEER_LEFT;
+        if (wheld[p] & (WPAD_BUTTON_DOWN | WPAD_BUTTON_RIGHT))
+            steer += STEER_RIGHT;
+    }
 
     /* Wiimote expansions */
     wd = WPAD_Data(p);
@@ -261,43 +446,60 @@ static void read_player_input(int p, Input *in, float dt)
         }
     }
 
-    /* GameCube controller (= Xbox pads in Dolphin) */
+    /* GameCube controller (= Xbox pads in Dolphin). controls.json maps
+     * these emulated inputs to game actions and records the recommended
+     * physical Xbox control beside each one. */
     {
+        unsigned int gc = gamecube_state(p);
         s8 sx = PAD_StickX(p);
-        if (sx > 18 || sx < -18)
+        shown_gc[p] = gc;
+        if (sx < -18 &&
+            (gc & control_config.gamecube[CONTROL_STEER_LEFT] &
+             GC_INPUT_STICK_LEFT))
             steer += game_clampf((float)sx / 90.0f, -1.0f, 1.0f) *
                      STEER_RIGHT;
-        in->accel |= (gheld[p] & (PAD_BUTTON_A | PAD_BUTTON_X)) != 0;
-        in->brake |= (gheld[p] & PAD_BUTTON_B) != 0;
-        in->hop   |= (gheld[p] & PAD_BUTTON_B) != 0 &&
-                     (gheld[p] & PAD_TRIGGER_Z) != 0;   /* Z+B handbrake */
-        in->item  |= (gheld[p] & PAD_BUTTON_Y) != 0;
+        else if (sx > 18 &&
+                 (gc & control_config.gamecube[CONTROL_STEER_RIGHT] &
+                  GC_INPUT_STICK_RIGHT))
+            steer += game_clampf((float)sx / 90.0f, -1.0f, 1.0f) *
+                     STEER_RIGHT;
+        if (gc & control_config.gamecube[CONTROL_STEER_LEFT] &
+                 ~GC_INPUT_STICK_LEFT)
+            steer += STEER_LEFT;
+        if (gc & control_config.gamecube[CONTROL_STEER_RIGHT] &
+                 ~GC_INPUT_STICK_RIGHT)
+            steer += STEER_RIGHT;
+        in->accel |= (gc & control_config.gamecube[CONTROL_ACCEL]) != 0;
+        in->brake |= (gc & control_config.gamecube[CONTROL_BRAKE]) != 0;
+        in->hop   |= (gc & control_config.gamecube[CONTROL_HANDBRAKE]) != 0;
+        in->item  |= (gc & control_config.gamecube[CONTROL_ITEM]) != 0;
+        in->gear_up |= (gc & control_config.gamecube[CONTROL_GEAR_UP]) != 0;
+        in->gear_down |=
+            (gc & control_config.gamecube[CONTROL_GEAR_DOWN]) != 0;
     }
 
-    /* USB keyboard: player 1 on WASD, player 2 on IJKL */
-    if (p < 2) {
-        const KeyMap *km = &keys[p];
-        if (km->left)  steer += STEER_LEFT;
-        if (km->right) steer += STEER_RIGHT;
-        in->accel     |= km->accel;
-        in->brake     |= km->brake;
-        in->hop       |= km->drift;
-        in->item      |= km->item;
-        in->gear_up   |= km->gear_up;
-        in->gear_down |= km->gear_down;
+    /* USB keyboard bindings come from the same file. */
+    if (p < CONTROL_KEYBOARD_PLAYERS) {
+        if (key_actions[p][CONTROL_STEER_LEFT])  steer += STEER_LEFT;
+        if (key_actions[p][CONTROL_STEER_RIGHT]) steer += STEER_RIGHT;
+        in->accel |= key_actions[p][CONTROL_ACCEL];
+        in->brake |= key_actions[p][CONTROL_BRAKE];
+        in->hop |= key_actions[p][CONTROL_HANDBRAKE];
+        in->item |= key_actions[p][CONTROL_ITEM];
+        in->gear_up |= key_actions[p][CONTROL_GEAR_UP];
+        in->gear_down |= key_actions[p][CONTROL_GEAR_DOWN];
     }
 
-    /* pad shoulder buttons shift too, for players on a controller */
-    in->gear_up   |= (gheld[p] & PAD_TRIGGER_R) ? 1 : 0;
-    in->gear_down |= (gheld[p] & PAD_TRIGGER_L) ? 1 : 0;
+    /* Classic Controller keeps the familiar shoulder-button shifts. */
     in->gear_up   |= (wheld[p] & WPAD_CLASSIC_BUTTON_ZR) ? 1 : 0;
     in->gear_down |= (wheld[p] & WPAD_CLASSIC_BUTTON_ZL) ? 1 : 0;
 
     /* every device goes through the virtual stick, so a tapped key and
      * a flicked thumbstick both move the wheel at a believable rate */
-    in->steer = steer_axis_update(&steer_axis[p],
-                                  game_clampf(steer, -1.0f, 1.0f),
-                                  game.karts[p].speed, dt);
+    in->steer = steer_axis_update_with_settings(
+        &steer_axis[p], game_clampf(steer, -1.0f, 1.0f),
+        game.karts[p].speed, dt, &app_settings);
+    shown_input[p] = *in;
 }
 
 /* ------------------------------------------------------------------ */
@@ -351,7 +553,8 @@ static int menu_activate(void)
 {
     return (wdown[0] & (WPAD_BUTTON_2 | WPAD_BUTTON_A |
                         WPAD_CLASSIC_BUTTON_A)) ||
-           (gdown[0] & PAD_BUTTON_A) ||
+           (gamecube_down_state(0) &
+            control_config.gamecube[CONTROL_MENU_CONFIRM]) ||
            key_confirm_edge;
 }
 
@@ -359,7 +562,8 @@ static int menu_back(void)
 {
     return (wdown[0] & (WPAD_BUTTON_1 | WPAD_BUTTON_B |
                         WPAD_CLASSIC_BUTTON_B)) ||
-           (gdown[0] & PAD_BUTTON_B) ||
+           (gamecube_down_state(0) &
+            control_config.gamecube[CONTROL_MENU_BACK]) ||
            key_back_edge;
 }
 
@@ -383,8 +587,10 @@ static int menu_dvalue(void)
     if (wdown[0] & (WPAD_BUTTON_RIGHT | WPAD_CLASSIC_BUTTON_RIGHT)) d += 1;
     if (gdown[0] & PAD_BUTTON_LEFT)  d -= 1;
     if (gdown[0] & PAD_BUTTON_RIGHT) d += 1;
-    if (key_left_edge  || (keys[0].left  && key_repeating())) d -= 1;
-    if (key_right_edge || (keys[0].right && key_repeating())) d += 1;
+    if (key_left_edge ||
+        (key_actions[0][CONTROL_STEER_LEFT] && key_repeating())) d -= 1;
+    if (key_right_edge ||
+        (key_actions[0][CONTROL_STEER_RIGHT] && key_repeating())) d += 1;
     return d;
 }
 
@@ -396,21 +602,59 @@ static int menu_dcursor(void)
     if (wdown[0] & (WPAD_BUTTON_DOWN | WPAD_CLASSIC_BUTTON_DOWN)) d += 1;
     if (gdown[0] & PAD_BUTTON_UP)   d -= 1;
     if (gdown[0] & PAD_BUTTON_DOWN) d += 1;
-    if (key_up_edge   || (keys[0].accel && key_repeating())) d -= 1;
-    if (key_down_edge || (keys[0].brake && key_repeating())) d += 1;
+    if (key_up_edge ||
+        (key_actions[0][CONTROL_ACCEL] && key_repeating())) d -= 1;
+    if (key_down_edge ||
+        (key_actions[0][CONTROL_BRAKE] && key_repeating())) d += 1;
     return d;
 }
 
 static int race_to_menu_pressed(void)
 {
     int p;
-    for (p = 0; p < MAX_HUMANS; p++) {
+    for (p = 0; p < game.cfg.n_humans; p++) {
         if (wdown[p] & (WPAD_BUTTON_PLUS | WPAD_CLASSIC_BUTTON_PLUS))
             return 1;
-        if (!(gheld[p] & PAD_TRIGGER_Z) && (gdown[p] & PAD_BUTTON_START))
+        if (gamecube_down_state(p) &
+            control_config.gamecube[CONTROL_RACE_MENU])
             return 1;
     }
     return key_menu_edge;
+}
+
+/* The setup menus belong to player one, but an in-race question belongs
+ * to whoever opened it.  Let any active racer answer with the same
+ * configurable confirm/back actions shown by the input translator. */
+static int race_confirm_pressed(void)
+{
+    int p;
+    if (key_confirm_edge)
+        return 1;
+    for (p = 0; p < game.cfg.n_humans; p++) {
+        if (wdown[p] & (WPAD_BUTTON_2 | WPAD_BUTTON_A |
+                        WPAD_CLASSIC_BUTTON_A))
+            return 1;
+        if (gamecube_down_state(p) &
+            control_config.gamecube[CONTROL_MENU_CONFIRM])
+            return 1;
+    }
+    return 0;
+}
+
+static int race_cancel_pressed(void)
+{
+    int p;
+    if (key_back_edge)
+        return 1;
+    for (p = 0; p < game.cfg.n_humans; p++) {
+        if (wdown[p] & (WPAD_BUTTON_1 | WPAD_BUTTON_B |
+                        WPAD_CLASSIC_BUTTON_B))
+            return 1;
+        if (gamecube_down_state(p) &
+            control_config.gamecube[CONTROL_MENU_BACK])
+            return 1;
+    }
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -487,7 +731,7 @@ static void audio_update(void)
 
     if (!audio_ok) return;
 
-    if (app_state != APP_RACE) {
+    if (app_state != APP_RACE || race_exit_confirm) {
         ASND_ChangeVolumeVoice(0, 0, 0);
         ASND_ChangeVolumeVoice(1, 0, 0);
         return;
@@ -949,6 +1193,13 @@ static void draw_kart(const Track *t, const Kart *k)
     float by = k->y;
     int w;
 
+    if (k->invincible_t > 0.0f) {
+        int flash_phase = (int)(game.race_t *
+                                game.settings.invincible_flash_hz * 2.0f);
+        if ((flash_phase & 1) != 0)
+            return;
+    }
+
     /* shadow */
     quad(k->x + fx * 1.3f + lx * 0.85f, by + 0.10f,
          k->z + fz * 1.3f + lz * 0.85f,
@@ -1085,9 +1336,11 @@ static int glyph_mask(char c)
     case 'A': return 119;  case 'B': return 124;  case 'C': return 57;
     case 'D': return 94;   case 'E': return 121;  case 'F': return 113;
     case 'G': return 61;   case 'H': return 118;  case 'I': return 48;
+    case 'J': return 30;
     case 'L': return 56;   case 'N': return 84;   case 'O': return 63;
     case 'P': return 115;  case 'R': return 80;   case 'S': return 109;
     case 'T': return 120;  case 'U': return 62;   case 'Y': return 110;
+    case 'Z': return 91;
     case '-': return 64;
     default:  return 0;
     }
@@ -1104,6 +1357,23 @@ static void hud_rect(float x, float y, float w, float h,
     GX_End();
 }
 
+static void hud_diag(float x0, float y0, float x1, float y1, float thick,
+                     u8 r, u8 g, u8 b, u8 a)
+{
+    float dx = x1 - x0, dy = y1 - y0;
+    float len = sqrtf(dx * dx + dy * dy);
+    float px, py;
+    if (len < 0.001f) return;
+    px = -dy * thick / (2.0f * len);
+    py =  dx * thick / (2.0f * len);
+    GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
+    GX_Position3f32(x0 + px, y0 + py, -5.0f); GX_Color4u8(r, g, b, a);
+    GX_Position3f32(x1 + px, y1 + py, -5.0f); GX_Color4u8(r, g, b, a);
+    GX_Position3f32(x1 - px, y1 - py, -5.0f); GX_Color4u8(r, g, b, a);
+    GX_Position3f32(x0 - px, y0 - py, -5.0f); GX_Color4u8(r, g, b, a);
+    GX_End();
+}
+
 static void hud_glyph(float x, float y, float w, float h, char c,
                       u8 r, u8 g, u8 b, u8 a)
 {
@@ -1114,6 +1384,11 @@ static void hud_glyph(float x, float y, float w, float h, char c,
         hud_rect(x, y + h - t, t, t, r, g, b, a);
         return;
     }
+    if (c == ':') {
+        hud_rect(x, y + h * 0.30f, t, t, r, g, b, a);
+        hud_rect(x, y + h * 0.70f, t, t, r, g, b, a);
+        return;
+    }
     if (c == '/') {
         GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
         GX_Position3f32(x + w - t, y,     -5.0f); GX_Color4u8(r, g, b, a);
@@ -1121,6 +1396,77 @@ static void hud_glyph(float x, float y, float w, float h, char c,
         GX_Position3f32(x + t,     y + h, -5.0f); GX_Color4u8(r, g, b, a);
         GX_Position3f32(x,         y + h, -5.0f); GX_Color4u8(r, g, b, a);
         GX_End();
+        return;
+    }
+    if (c == 'X') {
+        hud_diag(x + t * 0.5f, y + t * 0.4f,
+                 x + w - t * 0.5f, y + h - t * 0.4f,
+                 t, r, g, b, a);
+        hud_diag(x + w - t * 0.5f, y + t * 0.4f,
+                 x + t * 0.5f, y + h - t * 0.4f,
+                 t, r, g, b, a);
+        return;
+    }
+    if (c == 'K') {
+        hud_rect(x, y, t, h, r, g, b, a);
+        hud_diag(x + t * 0.5f, y + h * 0.52f,
+                 x + w - t * 0.3f, y + t * 0.4f,
+                 t, r, g, b, a);
+        hud_diag(x + t * 0.5f, y + h * 0.48f,
+                 x + w - t * 0.3f, y + h - t * 0.4f,
+                 t, r, g, b, a);
+        return;
+    }
+    if (c == 'M') {
+        hud_rect(x, y, t, h, r, g, b, a);
+        hud_rect(x + w - t, y, t, h, r, g, b, a);
+        hud_diag(x + t * 0.5f, y + t * 0.4f,
+                 x + w * 0.5f, y + h * 0.50f,
+                 t, r, g, b, a);
+        hud_diag(x + w - t * 0.5f, y + t * 0.4f,
+                 x + w * 0.5f, y + h * 0.50f,
+                 t, r, g, b, a);
+        return;
+    }
+    if (c == 'Q') {
+        m = glyph_mask('O');
+        if (m & 1)  hud_rect(x + t, y, w - 2.0f * t, t, r, g, b, a);
+        if (m & 2)  hud_rect(x + w - t, y + t * 0.5f, t,
+                             h * 0.5f - t, r, g, b, a);
+        if (m & 4)  hud_rect(x + w - t, y + h * 0.5f + t * 0.5f, t,
+                             h * 0.5f - t, r, g, b, a);
+        if (m & 8)  hud_rect(x + t, y + h - t, w - 2.0f * t, t,
+                             r, g, b, a);
+        if (m & 16) hud_rect(x, y + h * 0.5f + t * 0.5f, t,
+                             h * 0.5f - t, r, g, b, a);
+        if (m & 32) hud_rect(x, y + t * 0.5f, t, h * 0.5f - t,
+                             r, g, b, a);
+        hud_diag(x + w * 0.55f, y + h * 0.62f,
+                 x + w, y + h, t, r, g, b, a);
+        return;
+    }
+    if (c == 'V') {
+        hud_diag(x + t * 0.4f, y + t * 0.3f,
+                 x + w * 0.5f, y + h - t * 0.3f,
+                 t, r, g, b, a);
+        hud_diag(x + w - t * 0.4f, y + t * 0.3f,
+                 x + w * 0.5f, y + h - t * 0.3f,
+                 t, r, g, b, a);
+        return;
+    }
+    if (c == 'W') {
+        hud_diag(x + t * 0.3f, y + t * 0.3f,
+                 x + w * 0.28f, y + h - t * 0.3f,
+                 t, r, g, b, a);
+        hud_diag(x + w * 0.28f, y + h - t * 0.3f,
+                 x + w * 0.50f, y + h * 0.58f,
+                 t, r, g, b, a);
+        hud_diag(x + w * 0.50f, y + h * 0.58f,
+                 x + w * 0.72f, y + h - t * 0.3f,
+                 t, r, g, b, a);
+        hud_diag(x + w * 0.72f, y + h - t * 0.3f,
+                 x + w - t * 0.3f, y + t * 0.3f,
+                 t, r, g, b, a);
         return;
     }
 
@@ -1312,8 +1658,9 @@ static void draw_player_hud(int p)
                      110, 225, 140, 235);
     }
     if (k->push_t > 0.0f || k->grip_t > 0.0f) {
-        float frac = (k->push_t > 0.0f) ? k->push_t / PUSH_SECONDS
-                                       : k->grip_t / TIRE_SECONDS;
+        float frac = (k->push_t > 0.0f)
+                         ? k->push_t / game.settings.push_seconds
+                         : k->grip_t / game.settings.fresh_tire_seconds;
         u8 cr = (k->push_t > 0.0f) ? 240 : 110;
         u8 cg = (k->push_t > 0.0f) ? 175 : 225;
         u8 cb = (k->push_t > 0.0f) ?  55 : 140;
@@ -1321,6 +1668,129 @@ static void draw_player_hud(int p)
         hud_rect(vx + 15.0f, vy + vh - 11.0f,
                  88.0f * game_clampf(frac, 0.0f, 1.0f), 4.0f, cr, cg, cb, 230);
     }
+}
+
+static int displayed_action_on(int p, int action)
+{
+    const Input *in = &shown_input[p];
+    switch (action) {
+    case CONTROL_ACCEL:     return in->accel;
+    case CONTROL_BRAKE:     return in->brake;
+    case CONTROL_HANDBRAKE: return in->hop;
+    case CONTROL_ITEM:      return in->item;
+    case CONTROL_GEAR_UP:   return in->gear_up;
+    case CONTROL_GEAR_DOWN: return in->gear_down;
+    case CONTROL_RACE_MENU:
+        return (shown_gc[p] &
+                control_config.gamecube[CONTROL_RACE_MENU]) != 0 ||
+               (p < CONTROL_KEYBOARD_PLAYERS &&
+                key_actions[p][CONTROL_RACE_MENU]) ||
+               (wheld[p] & (WPAD_BUTTON_PLUS |
+                            WPAD_CLASSIC_BUTTON_PLUS)) != 0;
+    default:                return 0;
+    }
+}
+
+static int displayed_key_action_on(int p, int action)
+{
+    return p < CONTROL_KEYBOARD_PLAYERS && key_actions[p][action];
+}
+
+static int displayed_gamecube_action_on(int p, int action)
+{
+    return (shown_gc[p] & control_config.gamecube[action]) != 0;
+}
+
+static void draw_binding_line(int p, float x, float y, const char *label,
+                              int action)
+{
+    char key[16], buf[80];
+    int key_on = displayed_key_action_on(p, action);
+    int gc_on = displayed_gamecube_action_on(p, action);
+    int game_on = displayed_action_on(p, action);
+    int code = p < CONTROL_KEYBOARD_PLAYERS
+                   ? control_config.keyboard[p][action][0] : GAME_KEY_NONE;
+    snprintf(key, sizeof(key), "%s", control_key_name(code));
+    snprintf(buf, sizeof(buf), "%-6.6s %-5.5s:%-2s %-9.9s %-12.12s:%-2s %s",
+             label, key, key_on ? "ON" : "-",
+             control_config.xbox_label[action],
+             control_gamecube_name(control_config.gamecube[action]),
+             gc_on ? "ON" : "-", game_on ? "ON" : "-");
+    hud_text(x, y, 5.2f, 9.0f, buf,
+             game_on ? 255 : 188,
+             game_on ? 225 : 194,
+             game_on ? 90 : 208, 235);
+}
+
+static void draw_input_translator(int p)
+{
+    char left[12], right[12], buf[80];
+    float x = 14.0f, y = 48.0f;
+    u32 wtype;
+    int has_wii = WPAD_Probe((s32)p, &wtype) == WPAD_ERR_NONE;
+    int has_key = p < CONTROL_KEYBOARD_PLAYERS && keyboard_here;
+    int has_gc = (gc_mask & (1u << p)) != 0;
+    int steer_pct = (int)(shown_input[p].steer * 100.0f);
+
+    if (!control_config.show_input_overlay || game.cfg.n_humans != 1)
+        return;
+
+    hud_rect(x - 6.0f, y - 8.0f, 414.0f, 142.0f,
+             8, 12, 22, 185);
+    hud_text(x, y, 5.2f, 9.0f, "ACTION KEY:RAW XBOX DOLPHIN:RAW GAME",
+             130, 205, 255, 245);
+    y += 14.0f;
+
+    snprintf(left, sizeof(left), "%s",
+             control_key_name(control_config.keyboard[0]
+                                                    [CONTROL_STEER_LEFT][0]));
+    snprintf(right, sizeof(right), "%s",
+             control_key_name(control_config.keyboard[0]
+                                                     [CONTROL_STEER_RIGHT][0]));
+    snprintf(buf, sizeof(buf), "STEER %s/%s:%s %.7s/%.7s %-9.9s:%s %d",
+             left, right,
+             (displayed_key_action_on(p, CONTROL_STEER_LEFT) ||
+              displayed_key_action_on(p, CONTROL_STEER_RIGHT)) ? "ON" : "-",
+             control_config.xbox_label[CONTROL_STEER_LEFT],
+             control_config.xbox_label[CONTROL_STEER_RIGHT],
+             control_gamecube_name(
+                 control_config.gamecube[CONTROL_STEER_LEFT] |
+                 control_config.gamecube[CONTROL_STEER_RIGHT]),
+             (displayed_gamecube_action_on(p, CONTROL_STEER_LEFT) ||
+              displayed_gamecube_action_on(p, CONTROL_STEER_RIGHT))
+                 ? "ON" : "-",
+             steer_pct);
+    hud_text(x, y, 5.2f, 9.0f, buf, 205, 210, 225, 238);
+    y += 14.0f;
+
+    draw_binding_line(p, x, y, "GAS", CONTROL_ACCEL); y += 14.0f;
+    draw_binding_line(p, x, y, "BRAKE", CONTROL_BRAKE); y += 14.0f;
+    draw_binding_line(p, x, y, "HAND", CONTROL_HANDBRAKE); y += 14.0f;
+    draw_binding_line(p, x, y, "ITEM", CONTROL_ITEM); y += 14.0f;
+    draw_binding_line(p, x, y, "UP", CONTROL_GEAR_UP); y += 14.0f;
+    draw_binding_line(p, x, y, "DOWN", CONTROL_GEAR_DOWN); y += 14.0f;
+    draw_binding_line(p, x, y, "MENU", CONTROL_RACE_MENU); y += 14.0f;
+
+    snprintf(buf, sizeof(buf), "SEEN KEY %s  GC %s  WII %s",
+             has_key ? "YES" : "NO", has_gc ? "YES" : "NO",
+             has_wii ? "YES" : "NO");
+    hud_text(x, y, 5.2f, 9.0f, buf, 140, 175, 200, 225);
+}
+
+static void draw_respawn_blackout(int p)
+{
+    const Kart *k = &game.karts[p];
+    float vx, vy, vw, vh, alpha;
+    if (k->respawn_t <= 0.0f)
+        return;
+    viewport_rect(p, game.cfg.n_humans, &vx, &vy, &vw, &vh);
+    if (k->respawn_t > game.settings.respawn_fade_seconds)
+        alpha = 255.0f;
+    else
+        alpha = 255.0f *
+                (k->respawn_t / game.settings.respawn_fade_seconds);
+    hud_rect(vx, vy, vw, vh, 0, 0, 0,
+             (u8)game_clampf(alpha, 0.0f, 255.0f));
 }
 
 static void draw_race_hud(void)
@@ -1334,6 +1804,7 @@ static void draw_race_hud(void)
 
     for (p = 0; p < game.cfg.n_humans; p++)
         draw_player_hud(p);
+    draw_input_translator(0);
 
     /* minimap: corner in 1P, spare quadrant in 3P */
     if (game.cfg.n_humans == 1)
@@ -1395,6 +1866,58 @@ static void draw_race_hud(void)
         hud_rect(W * 0.5f + 57.0f, H - 32.0f, 4.0f, 14.0f,
                  200, 200, 210, 200);
     }
+
+    /* Last overlay drawn: the blackout covers both the world and HUD,
+     * then recedes during the configured fade-in. */
+    for (p = 0; p < game.cfg.n_humans; p++)
+        draw_respawn_blackout(p);
+}
+
+static void draw_race_exit_confirmation(void)
+{
+    float W = (float)rmode->fbWidth;
+    float H = (float)rmode->efbHeight;
+    float pw = W - 72.0f;
+    float ph = 218.0f;
+    float px, py;
+    char yes[80], no[80];
+
+    if (pw > 530.0f)
+        pw = 530.0f;
+    px = (W - pw) * 0.5f;
+    py = (H - ph) * 0.5f;
+
+    snprintf(yes, sizeof(yes), "YES  %s / %s / WII A OR 2",
+             control_key_name(control_config.keyboard[0]
+                                                     [CONTROL_MENU_CONFIRM][0]),
+             control_config.xbox_label[CONTROL_MENU_CONFIRM]);
+    snprintf(no, sizeof(no), "NO   %s / %s / WII B OR 1",
+             control_key_name(control_config.keyboard[0]
+                                                        [CONTROL_MENU_BACK][0]),
+             control_config.xbox_label[CONTROL_MENU_BACK]);
+
+    hud_ortho_fullscreen();
+    hud_rect(0.0f, 0.0f, W, H, 0, 0, 8, 170);
+    hud_rect(px - 4.0f, py - 4.0f, pw + 8.0f, ph + 8.0f,
+             205, 72, 52, 245);
+    hud_rect(px, py, pw, ph, 10, 17, 31, 250);
+
+    hud_text(W * 0.5f - hud_text_width(24.0f, "LEAVE RACE") * 0.5f,
+             py + 24.0f, 24.0f, 40.0f, "LEAVE RACE",
+             255, 225, 100, 250);
+    hud_text(W * 0.5f - hud_text_width(13.0f, "ARE YOU SURE") * 0.5f,
+             py + 76.0f, 13.0f, 22.0f, "ARE YOU SURE",
+             235, 238, 245, 240);
+    hud_text(W * 0.5f - hud_text_width(7.5f, yes) * 0.5f,
+             py + 117.0f, 7.5f, 13.0f, yes,
+             255, 150, 120, 245);
+    hud_text(W * 0.5f - hud_text_width(7.5f, no) * 0.5f,
+             py + 145.0f, 7.5f, 13.0f, no,
+             135, 245, 165, 245);
+    hud_text(W * 0.5f -
+                 hud_text_width(7.5f, "MENU AGAIN ALSO SAYS NO") * 0.5f,
+             py + 178.0f, 7.5f, 13.0f, "MENU AGAIN ALSO SAYS NO",
+             175, 190, 215, 225);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1470,7 +1993,7 @@ static void draw_garage_scene(int paint_idx)
 static void menu_update_track_preview(void)
 {
     if (menu_track_loaded != sel_track) {
-        track_init(&menu_track, sel_track);
+        track_init_with_settings(&menu_track, sel_track, &app_settings);
         menu_track_loaded = sel_track;
     }
 }
@@ -1557,7 +2080,7 @@ static void row_label(const MenuRow *r, char *out, int cap)
     case RK_TRACK:   snprintf(out, cap, "TRACH");              break;
     case RK_GARAGE:  snprintf(out, cap, "P%d GARAGE", r->player + 1); break;
     case RK_START:   snprintf(out, cap, "GO");                 break;
-    case RK_EXIT:    snprintf(out, cap, "EHIT");               break;
+    case RK_EXIT:    snprintf(out, cap, "EXIT");               break;
     case RK_CAR:     snprintf(out, cap, "CAR");                break;
     case RK_PAINT:   snprintf(out, cap, "PAINT");              break;
     case RK_GEARBOX: snprintf(out, cap, "GEARS");              break;
@@ -1573,9 +2096,9 @@ static void row_value(const MenuRow *r, char *out, int cap)
     case RK_PLAYERS: snprintf(out, cap, "%d", sel_players);                 break;
     case RK_TRACK:   snprintf(out, cap, "%s", track_name(sel_track));       break;
     case RK_GARAGE:  snprintf(out, cap, "%s",
-                              kart_specs[sel_spec[p] % SPEC_COUNT].name);   break;
+                              kart_specs[sel_spec[p] % kart_spec_count].name); break;
     case RK_CAR:     snprintf(out, cap, "%s",
-                              kart_specs[sel_spec[p] % SPEC_COUNT].name);   break;
+                              kart_specs[sel_spec[p] % kart_spec_count].name); break;
     case RK_PAINT:   snprintf(out, cap, "%s",
                               paint_names[sel_paint[p] % PAINT_COUNT]);     break;
     case RK_GEARBOX: snprintf(out, cap, "%s", gearbox_name(sel_gearbox[p])); break;
@@ -1605,7 +2128,8 @@ static void row_change(const MenuRow *r, int d)
         break;
     case RK_GARAGE:
     case RK_CAR:
-        sel_spec[p] = ((sel_spec[p] + d) % SPEC_COUNT + SPEC_COUNT) % SPEC_COUNT;
+        sel_spec[p] = ((sel_spec[p] + d) % kart_spec_count +
+                       kart_spec_count) % kart_spec_count;
         break;
     case RK_PAINT:
         sel_paint[p] = ((sel_paint[p] + d) % PAINT_COUNT + PAINT_COUNT)
@@ -1641,6 +2165,15 @@ static void stop_all_rumble(void)
     }
 }
 
+static void leave_race_for_menu(void)
+{
+    stop_all_rumble();
+    race_exit_confirm = 0;
+    app_state = APP_MENU;
+    menu_screen = SCREEN_SETUP;
+    menu_row = 0;
+}
+
 static void start_race(void)
 {
     GameConfig cfg;
@@ -1649,8 +2182,9 @@ static void start_race(void)
     memset(&cfg, 0, sizeof(cfg));
     cfg.track_id = sel_track;
     cfg.n_humans = sel_players;
+    cfg.settings = &app_settings;
     for (p = 0; p < MAX_HUMANS; p++) {
-        cfg.spec[p] = sel_spec[p] % SPEC_COUNT;
+        cfg.spec[p] = sel_spec[p] % kart_spec_count;
         cfg.paint[p] = sel_paint[p] % PAINT_COUNT;
         cfg.gearbox[p] = sel_gearbox[p] % GEARBOX_MODES;
         cfg.tire[p] = sel_tire[p] % TIRE_COMPOUNDS;
@@ -1659,6 +2193,7 @@ static void start_race(void)
     game_init(&game, &cfg);
     place_scenery(&game.track);
     stop_all_rumble();
+    race_exit_confirm = 0;
     controller_lost_t = 0.0f;    /* a dropout banked in a previous race
                                   * must not shorten this one's grace */
     prev_countdown_n = -1;
@@ -1760,14 +2295,15 @@ static void draw_setup_screen(void)
 {
     float W = (float)rmode->fbWidth;
     float H = (float)rmode->efbHeight;
-    char buf[48];
+    char buf[48], nav[64], action[64];
+    char up[12], down[12], left[12], right[12], confirm[12], back[12];
     int avail;
 
     menu_update_track_preview();
     hud_ortho_fullscreen();
     hud_rect(0.0f, 0.0f, W, H, 18, 24, 40, 255);
-    hud_text(W * 0.5f - hud_text_width(26.0f, "WIIHART") * 0.5f, 22.0f,
-             26.0f, 44.0f, "WIIHART", 230, 40, 40, 255);
+    hud_text(W * 0.5f - hud_text_width(26.0f, "WIIKART") * 0.5f, 22.0f,
+             26.0f, 44.0f, "WIIKART", 230, 40, 40, 255);
 
     draw_row_list(48.0f, 96.0f, 32.0f, 190.0f);
 
@@ -1778,6 +2314,15 @@ static void draw_setup_screen(void)
              (avail < sel_players) ? 255 : 150,
              (avail < sel_players) ? 140 : 200,
              (avail < sel_players) ? 60 : 170, 235);
+
+    if (config_banner[0])
+        hud_text(48.0f, H - 122.0f, 7.5f, 13.0f, config_banner,
+                 config_detail[0] ? 255 : 135,
+                 config_detail[0] ? 135 : 190,
+                 config_detail[0] ? 80 : 165, 225);
+    if (config_detail[0])
+        hud_text(48.0f, H - 106.0f, 6.5f, 11.0f, config_detail,
+                 245, 160, 105, 220);
 
     /* track card */
     snprintf(buf, sizeof(buf), "%d LAPS", menu_track.laps);
@@ -1797,18 +2342,32 @@ static void draw_setup_screen(void)
         hud_text(W * 0.5f - hud_text_width(11.0f, menu_msg) * 0.5f,
                  H - 66.0f, 11.0f, 19.0f, menu_msg, 255, 120, 90, 250);
 
-    hud_text(W * 0.5f - hud_text_width(9.0f, "S  LINE   A D  CHANGE") * 0.5f,
-             H - 40.0f, 9.0f, 15.0f, "S  LINE   A D  CHANGE",
+    snprintf(up, sizeof(up), "%s",
+             control_key_name(control_config.keyboard[0][CONTROL_ACCEL][0]));
+    snprintf(down, sizeof(down), "%s",
+             control_key_name(control_config.keyboard[0][CONTROL_BRAKE][0]));
+    snprintf(left, sizeof(left), "%s",
+             control_key_name(control_config.keyboard[0][CONTROL_STEER_LEFT][0]));
+    snprintf(right, sizeof(right), "%s",
+             control_key_name(control_config.keyboard[0][CONTROL_STEER_RIGHT][0]));
+    snprintf(confirm, sizeof(confirm), "%s",
+             control_key_name(control_config.keyboard[0][CONTROL_MENU_CONFIRM][0]));
+    snprintf(back, sizeof(back), "%s",
+             control_key_name(control_config.keyboard[0][CONTROL_MENU_BACK][0]));
+    snprintf(nav, sizeof(nav), "%s %s LINE   %s %s CHANGE",
+             up, down, left, right);
+    snprintf(action, sizeof(action), "%s SELECT   %s OUT", confirm, back);
+    hud_text(W * 0.5f - hud_text_width(9.0f, nav) * 0.5f,
+             H - 40.0f, 9.0f, 15.0f, nav,
              160, 165, 180, 220);
-    hud_text(W * 0.5f - hud_text_width(9.0f, "ENTER  SELECT   ESC  OUT")
-                 * 0.5f,
-             H - 22.0f, 9.0f, 15.0f, "ENTER  SELECT   ESC  OUT",
+    hud_text(W * 0.5f - hud_text_width(9.0f, action) * 0.5f,
+             H - 22.0f, 9.0f, 15.0f, action,
              160, 165, 180, 220);
 }
 
 static void draw_garage_overlay(int p)
 {
-    const KartSpec *sp = &kart_specs[sel_spec[p] % SPEC_COUNT];
+    const KartSpec *sp = &kart_specs[sel_spec[p] % kart_spec_count];
     const u8 *paint = paint_palette[sel_paint[p] % PAINT_COUNT];
     float W = (float)rmode->fbWidth;
     float H = (float)rmode->efbHeight;
@@ -1831,14 +2390,17 @@ static void draw_garage_overlay(int p)
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
     snprintf(buf, sizeof(buf), "CURB  %d", (int)sp->mass_kg);
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
-    snprintf(buf, sizeof(buf), "0-100 %.1fS", spec_accel_time(sp));
+    snprintf(buf, sizeof(buf), "0-100 %.1fS",
+             spec_accel_time_with_settings(sp, &app_settings));
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
-    snprintf(buf, sizeof(buf), "TOP   %d", (int)spec_top_speed(sp));
+    snprintf(buf, sizeof(buf), "TOP   %d",
+             (int)spec_top_speed_with_settings(sp, &app_settings));
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
     snprintf(buf, sizeof(buf), "100-0 %d", (int)sp->brake_dist_100);
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
     snprintf(buf, sizeof(buf), "GRIP  %.2fG",
-             sp->lat_g * tire_grip_mult(sel_tire[p]));
+             sp->lat_g *
+                 tire_grip_mult_with_settings(&app_settings, sel_tire[p]));
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
     snprintf(buf, sizeof(buf), "GEARS %d", sp->n_gears);
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
@@ -1887,7 +2449,9 @@ static void menu_frame(float dt)
         menu_msg_t -= dt;
 
     /* how long a menu key has been held, for the auto-repeat */
-    if (keys[0].left || keys[0].right || keys[0].accel || keys[0].brake)
+    if (key_actions[0][CONTROL_STEER_LEFT] ||
+        key_actions[0][CONTROL_STEER_RIGHT] ||
+        key_actions[0][CONTROL_ACCEL] || key_actions[0][CONTROL_BRAKE])
         key_repeat_t += dt;
     else
         key_repeat_t = 0.0f;
@@ -1930,21 +2494,51 @@ static void menu_frame(float dt)
     }
 }
 
+static void draw_race_views(void)
+{
+    int p;
+    for (p = 0; p < game.cfg.n_humans; p++)
+        draw_scene_for_player(p);
+    draw_race_hud();
+}
+
 static void race_frame(float dt)
 {
     Input in[MAX_HUMANS];
     int p;
 
-    for (p = 0; p < MAX_HUMANS; p++)
-        read_player_input(p, &in[p], dt);
+    /* Opening and answering live in separate frames.  Besides feeling
+     * deliberate, this prevents a custom mapping that puts MENU and YES
+     * on the same physical button from confirming its own question. The
+     * driving-input filter stays frozen along with the simulation. */
+    if (race_exit_confirm) {
+        if (race_confirm_pressed()) {
+            audio_beep(180.0f, 90, 140);
+            leave_race_for_menu();
+            return;
+        }
+        if (race_cancel_pressed() || race_to_menu_pressed()) {
+            race_exit_confirm = 0;
+            audio_beep(720.0f, 70, 135);
+        }
 
-    if (race_to_menu_pressed()) {
-        stop_all_rumble();
-        app_state = APP_MENU;
-        menu_screen = SCREEN_SETUP;
-        menu_row = 0;
+        draw_race_views();
+        if (race_exit_confirm)
+            draw_race_exit_confirmation();
         return;
     }
+
+    if (race_to_menu_pressed()) {
+        race_exit_confirm = 1;
+        stop_all_rumble();
+        audio_beep(260.0f, 90, 140);
+        draw_race_views();
+        draw_race_exit_confirmation();
+        return;
+    }
+
+    for (p = 0; p < MAX_HUMANS; p++)
+        read_player_input(p, &in[p], dt);
 
     /*
      * A controller going away mid-race must not leave a player as a
@@ -1956,12 +2550,9 @@ static void race_frame(float dt)
         controller_lost_t += dt;
         if (controller_lost_t > 0.75f) {
             controller_lost_t = 0.0f;
-            stop_all_rumble();
             menu_notice("CONTROLLER LOST");
             audio_beep(140.0f, 300, 180);
-            app_state = APP_MENU;
-            menu_screen = SCREEN_SETUP;
-            menu_row = 0;
+            leave_race_for_menu();
             return;
         }
     } else {
@@ -2002,18 +2593,15 @@ static void race_frame(float dt)
         }
     }
 
-    for (p = 0; p < game.cfg.n_humans; p++)
-        draw_scene_for_player(p);
-
     /* blank the unused quadrant in 3P before HUD overlays it */
-    draw_race_hud();
+    draw_race_views();
 }
 
 /* ------------------------------------------------------------------ */
 /* Setup and main loop                                                 */
 /* ------------------------------------------------------------------ */
 
-int main(void)
+int main(int argc, char **argv)
 {
     void *gp_fifo;
     GXColor sky = { 120, 175, 235, 255 };
@@ -2030,6 +2618,7 @@ int main(void)
     PAD_Init();
     if (KEYBOARD_Init(NULL) >= 0)
         keyboard_ok = 1;
+    load_editable_config(argc, argv);
 
     rmode = VIDEO_GetPreferredMode(NULL);
     frameBuffer[0] = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));

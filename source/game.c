@@ -15,23 +15,24 @@
  *  - gravity acting along the road grade, so climbs cost speed and
  *    descents give it back
  *
- * A light handbrake-drift with a small mini-turbo is kept as the one
- * arcade nod.
+ * The handbrake can rotate the car, but costs speed; there is deliberately
+ * no hidden slide boost or rubber-banding.
  */
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 #include "game.h"
 
 #define PI_F 3.14159265358979f
 
-#define RHO_AIR    1.225f
-#define CRR        0.015f      /* rolling resistance coefficient       */
-#define DRIVE_EFF  0.85f       /* drivetrain efficiency                */
+#define RHO_AIR       1.225f
+#define DEFAULT_CRR   0.015f   /* rolling resistance coefficient       */
+#define DEFAULT_DRIVE 0.85f    /* drivetrain efficiency                */
 #define HP_TO_W    745.7f
 #define V100       27.78f      /* 100 km/h in m/s                      */
 /* Power-up strengths live in game.h (PUSH_POWER / TIRE_GRIP). */
 
-const KartSpec kart_specs[SPEC_COUNT] = {
+static const KartSpec default_kart_specs[DEFAULT_SPEC_COUNT] = {
     /* name      mass    hp   brake  lat_g  CdA   wheelbase offroad
      *   gears, and the road speed (m/s) at the limiter in each          */
     { "RACER",   260.f,  48.f, 30.f, 1.30f, 0.45f, 1.05f,   0.30f,
@@ -43,6 +44,144 @@ const KartSpec kart_specs[SPEC_COUNT] = {
     { "TOURER", 1350.f, 310.f, 34.f, 1.02f, 0.60f, 2.70f,   0.35f,
       6, { 15.f, 25.f, 37.f, 50.f, 64.f, 79.f } },
 };
+
+KartSpec kart_specs[MAX_KART_SPECS] = {
+    { "RACER",   260.f,  48.f, 30.f, 1.30f, 0.45f, 1.05f, 0.30f,
+      4, { 14.f, 24.f, 35.f, 47.f } },
+    { "SPORT",   950.f, 150.f, 37.f, 0.95f, 0.66f, 2.45f, 0.45f,
+      5, { 13.f, 22.f, 33.f, 45.f, 60.f } },
+    { "RALLY",  1180.f, 220.f, 40.f, 0.88f, 0.70f, 2.60f, 0.72f,
+      6, { 12.f, 20.f, 29.f, 40.f, 53.f, 67.f } },
+    { "TOURER", 1350.f, 310.f, 34.f, 1.02f, 0.60f, 2.70f, 0.35f,
+      6, { 15.f, 25.f, 37.f, 50.f, 64.f, 79.f } },
+};
+
+int kart_spec_count = DEFAULT_SPEC_COUNT;
+
+void kart_specs_reset_defaults(void)
+{
+    memset(kart_specs, 0, sizeof(kart_specs));
+    memcpy(kart_specs, default_kart_specs, sizeof(default_kart_specs));
+    kart_spec_count = DEFAULT_SPEC_COUNT;
+}
+
+void game_settings_defaults(GameSettings *s)
+{
+    int i;
+    memset(s, 0, sizeof(*s));
+    s->countdown_seconds = 3.2f;
+    s->target_race_distance_m = 3200.0f;
+    s->min_laps = 2;
+    s->max_laps = 4;
+    for (i = 0; i < TRACK_COUNT; i++) {
+        s->track_width_mult[i] = 1.0f;
+        s->track_scale_mult[i] = 1.0f;
+        s->track_elevation_mult[i] = 1.0f;
+        s->track_laps[i] = 0;
+    }
+    s->rolling_resistance = DEFAULT_CRR;
+    s->drivetrain_efficiency = DEFAULT_DRIVE;
+    s->shift_seconds = SHIFT_TIME;
+    s->bog_fraction = BOG_FRACTION;
+    s->steer_rate_on = 2.6f;
+    s->steer_rate_center = 6.0f;
+    s->steer_speed_fade = 0.035f;
+    s->steer_curve = 1.55f;
+    s->tire_grip_mult[TIRE_MEDIUM] = 1.00f;
+    s->tire_grip_mult[TIRE_SOFT] = 1.08f;
+    s->tire_grip_mult[TIRE_HARD] = 0.94f;
+    s->tire_drag_mult[TIRE_MEDIUM] = 1.00f;
+    s->tire_drag_mult[TIRE_SOFT] = 1.04f;
+    s->tire_drag_mult[TIRE_HARD] = 0.97f;
+    s->push_power_mult = PUSH_POWER;
+    s->push_seconds = PUSH_SECONDS;
+    s->fresh_tire_grip_mult = TIRE_GRIP;
+    s->fresh_tire_seconds = TIRE_SECONDS;
+    s->ai_skill_mult = 0.97f;
+    s->ai_brake_mult = 0.72f;
+    s->ai_unguarded_line_room = 0.72f;
+    s->ai_overcommit_chance = 0.055f;
+    s->ai_overcommit_min_curvature = 0.028f;
+    s->ai_overcommit_seconds = 1.15f;
+    s->ai_overcommit_overshoot_m = 1.10f;
+    s->fall_seconds = 1.10f;
+    s->respawn_black_seconds = 1.0f;
+    s->respawn_fade_seconds = 0.8f;
+    s->invincible_seconds = 5.0f;
+    s->invincible_flash_hz = 5.0f;
+}
+
+static int settings_error(char *error, int cap, const char *message)
+{
+    if (error && cap > 0) {
+        snprintf(error, (size_t)cap, "%s", message);
+        error[cap - 1] = '\0';
+    }
+    return 0;
+}
+
+int game_settings_validate(GameSettings *s, char *error, int error_cap)
+{
+    int i;
+#define FINITE_RANGE(v, lo, hi, msg) \
+    do { if (!isfinite(v) || (v) < (lo) || (v) > (hi)) \
+        return settings_error(error, error_cap, msg); } while (0)
+
+    if (!s)
+        return settings_error(error, error_cap, "NO SETTINGS");
+    FINITE_RANGE(s->countdown_seconds, 0.0f, 10.0f, "BAD COUNTDOWN");
+    FINITE_RANGE(s->target_race_distance_m, 500.0f, 20000.0f,
+                 "BAD RACE DISTANCE");
+    if (s->min_laps < 1 || s->min_laps > 20 ||
+        s->max_laps < s->min_laps || s->max_laps > 20)
+        return settings_error(error, error_cap, "BAD LAP LIMITS");
+    for (i = 0; i < TRACK_COUNT; i++) {
+        FINITE_RANGE(s->track_width_mult[i], 0.60f, 2.50f,
+                     "BAD TRACK WIDTH");
+        FINITE_RANGE(s->track_scale_mult[i], 0.60f, 2.50f,
+                     "BAD TRACK SCALE");
+        FINITE_RANGE(s->track_elevation_mult[i], 0.20f, 2.50f,
+                     "BAD TRACK HEIGHT");
+        if (s->track_laps[i] < 0 || s->track_laps[i] > 20)
+            return settings_error(error, error_cap, "BAD TRACK LAPS");
+    }
+    FINITE_RANGE(s->rolling_resistance, 0.0f, 0.10f, "BAD ROLLING DRAG");
+    FINITE_RANGE(s->drivetrain_efficiency, 0.20f, 1.0f, "BAD DRIVE EFF");
+    FINITE_RANGE(s->shift_seconds, 0.02f, 2.0f, "BAD SHIFT TIME");
+    FINITE_RANGE(s->bog_fraction, 0.05f, 0.75f, "BAD BOG POINT");
+    FINITE_RANGE(s->steer_rate_on, 0.2f, 20.0f, "BAD STEER RATE");
+    FINITE_RANGE(s->steer_rate_center, 0.2f, 30.0f, "BAD CENTER RATE");
+    FINITE_RANGE(s->steer_speed_fade, 0.0f, 0.5f, "BAD SPEED FADE");
+    FINITE_RANGE(s->steer_curve, 0.2f, 4.0f, "BAD STEER CURVE");
+    for (i = 0; i < TIRE_COMPOUNDS; i++) {
+        FINITE_RANGE(s->tire_grip_mult[i], 0.30f, 2.0f, "BAD TIRE GRIP");
+        FINITE_RANGE(s->tire_drag_mult[i], 0.50f, 2.0f, "BAD TIRE DRAG");
+    }
+    FINITE_RANGE(s->push_power_mult, 1.0f, 2.0f, "BAD PUSH POWER");
+    FINITE_RANGE(s->push_seconds, 0.1f, 60.0f, "BAD PUSH TIME");
+    FINITE_RANGE(s->fresh_tire_grip_mult, 1.0f, 2.0f, "BAD FRESH GRIP");
+    FINITE_RANGE(s->fresh_tire_seconds, 0.1f, 60.0f, "BAD FRESH TIME");
+    FINITE_RANGE(s->ai_skill_mult, 0.50f, 1.30f, "BAD AI SKILL");
+    FINITE_RANGE(s->ai_brake_mult, 0.30f, 1.50f, "BAD AI BRAKES");
+    FINITE_RANGE(s->ai_unguarded_line_room, 0.20f, 1.40f,
+                 "BAD AI ROAD ROOM");
+    FINITE_RANGE(s->ai_overcommit_chance, 0.0f, 1.0f,
+                 "BAD AI RISK CHANCE");
+    FINITE_RANGE(s->ai_overcommit_min_curvature, 0.001f, 0.30f,
+                 "BAD AI RISK CURVE");
+    FINITE_RANGE(s->ai_overcommit_seconds, 0.1f, 8.0f,
+                 "BAD AI RISK TIME");
+    FINITE_RANGE(s->ai_overcommit_overshoot_m, 0.0f, 8.0f,
+                 "BAD AI OVERSHOOT");
+    FINITE_RANGE(s->fall_seconds, 0.2f, 8.0f, "BAD FALL TIME");
+    FINITE_RANGE(s->respawn_black_seconds, 0.0f, 8.0f, "BAD BLACK TIME");
+    FINITE_RANGE(s->respawn_fade_seconds, 0.05f, 8.0f, "BAD FADE TIME");
+    FINITE_RANGE(s->invincible_seconds, 0.0f, 30.0f, "BAD INVINCIBLE TIME");
+    FINITE_RANGE(s->invincible_flash_hz, 0.5f, 30.0f, "BAD FLASH RATE");
+#undef FINITE_RANGE
+    if (error && error_cap > 0) error[0] = '\0';
+    return 1;
+}
 
 /*
  * Where you are in a gear matters. Below the torque band the engine bogs,
@@ -61,6 +200,21 @@ float gear_power_scale(float frac)
     if (frac <= 1.0f)
         return 1.0f - 2.4f * (frac - 0.92f);  /* past peak revs         */
     return 0.0f;                              /* on the limiter         */
+}
+
+static float gear_power_scale_with_settings(float frac,
+                                            const GameSettings *settings)
+{
+    float bog = settings->bog_fraction;
+    if (frac < 0.0f)
+        frac = 0.0f;
+    if (frac < bog)
+        return 0.45f + 0.54f * (frac / bog);
+    if (frac <= 0.92f)
+        return 1.0f;
+    if (frac <= 1.0f)
+        return 1.0f - 2.4f * (frac - 0.92f);
+    return 0.0f;
 }
 
 const char *gearbox_name(int mode)
@@ -88,6 +242,16 @@ float tire_grip_mult(int compound)
     }
 }
 
+float tire_grip_mult_with_settings(const GameSettings *settings,
+                                   int compound)
+{
+    if (!settings)
+        return tire_grip_mult(compound);
+    if (compound < 0 || compound >= TIRE_COMPOUNDS)
+        compound = TIRE_MEDIUM;
+    return settings->tire_grip_mult[compound];
+}
+
 float tire_drag_mult(int compound)
 {
     switch (compound) {
@@ -95,6 +259,16 @@ float tire_drag_mult(int compound)
     case TIRE_HARD: return 0.97f;
     default:        return 1.00f;
     }
+}
+
+float tire_drag_mult_with_settings(const GameSettings *settings,
+                                   int compound)
+{
+    if (!settings)
+        return tire_drag_mult(compound);
+    if (compound < 0 || compound >= TIRE_COMPOUNDS)
+        compound = TIRE_MEDIUM;
+    return settings->tire_drag_mult[compound];
 }
 
 /* Strategy sheets. conf_start over 1.0 means the driver begins the race
@@ -175,19 +349,22 @@ float game_angle_wrap(float a)
 /* Steering feel: the virtual analog stick (see game.h)                */
 /* ------------------------------------------------------------------ */
 
-#define STEER_RATE_ON      2.6f   /* wind-on rate at a standstill, 1/s */
-#define STEER_RATE_CENTER  6.0f   /* self-centering rate, 1/s          */
-#define STEER_SPEED_FADE   0.035f /* how fast the wheel slows with v   */
-#define STEER_CURVE        1.55f  /* >1 = gentle near center           */
-
 void steer_axis_reset(SteerAxis *a)
 {
     a->value = 0.0f;
 }
 
-float steer_axis_update(SteerAxis *a, float target, float speed, float dt)
+float steer_axis_update_with_settings(SteerAxis *a, float target,
+                                      float speed, float dt,
+                                      const GameSettings *settings)
 {
+    GameSettings defaults;
     float rate, diff, mag;
+
+    if (!settings) {
+        game_settings_defaults(&defaults);
+        settings = &defaults;
+    }
 
     target = game_clampf(target, -1.0f, 1.0f);
 
@@ -195,10 +372,11 @@ float steer_axis_update(SteerAxis *a, float target, float speed, float dt)
      * real wheel spin back; winding on is slower, and slower still the
      * faster the car is going */
     if (fabsf(target) < fabsf(a->value) || target * a->value < 0.0f) {
-        rate = STEER_RATE_CENTER;
+        rate = settings->steer_rate_center;
     } else {
-        rate = STEER_RATE_ON *
-               (0.30f + 0.70f / (1.0f + fabsf(speed) * STEER_SPEED_FADE));
+        rate = settings->steer_rate_on *
+               (0.30f + 0.70f /
+                    (1.0f + fabsf(speed) * settings->steer_speed_fade));
     }
 
     diff = target - a->value;
@@ -206,23 +384,36 @@ float steer_axis_update(SteerAxis *a, float target, float speed, float dt)
     if (diff < -rate * dt) diff = -rate * dt;
     a->value = game_clampf(a->value + diff, -1.0f, 1.0f);
 
-    mag = powf(fabsf(a->value), STEER_CURVE);
+    mag = powf(fabsf(a->value), settings->steer_curve);
     return (a->value < 0.0f) ? -mag : mag;
+}
+
+float steer_axis_update(SteerAxis *a, float target, float speed, float dt)
+{
+    return steer_axis_update_with_settings(a, target, speed, dt, NULL);
 }
 
 /* ------------------------------------------------------------------ */
 /* Spec-derived display stats                                          */
 /* ------------------------------------------------------------------ */
 
-float spec_top_speed(const KartSpec *s)
+float spec_top_speed_with_settings(const KartSpec *s,
+                                   const GameSettings *settings)
 {
-    float P = s->power_hp * HP_TO_W * DRIVE_EFF;
+    GameSettings defaults;
+    float P;
     float v = 40.0f;
     float geared;
     int i;
+
+    if (!settings) {
+        game_settings_defaults(&defaults);
+        settings = &defaults;
+    }
+    P = s->power_hp * HP_TO_W * settings->drivetrain_efficiency;
     for (i = 0; i < 40; i++) {
         float resist = 0.5f * RHO_AIR * s->cd_a * v * v +
-                       CRR * s->mass_kg * GRAVITY;
+                       settings->rolling_resistance * s->mass_kg * GRAVITY;
         v = 0.5f * (v + P / resist);
     }
     /* whichever runs out first: the air, or top gear */
@@ -232,19 +423,38 @@ float spec_top_speed(const KartSpec *s)
     return v * 3.6f;
 }
 
-float spec_accel_time(const KartSpec *s)
+float spec_top_speed(const KartSpec *s)
 {
-    float P = s->power_hp * HP_TO_W * DRIVE_EFF;
+    return spec_top_speed_with_settings(s, NULL);
+}
+
+float spec_accel_time_with_settings(const KartSpec *s,
+                                    const GameSettings *settings)
+{
+    GameSettings defaults;
+    float P;
     float v = 0.5f, t = 0.0f;
+
+    if (!settings) {
+        game_settings_defaults(&defaults);
+        settings = &defaults;
+    }
+    P = s->power_hp * HP_TO_W * settings->drivetrain_efficiency;
     while (v < V100 && t < 30.0f) {
         float a = P / (s->mass_kg * (v > 3.0f ? v : 3.0f));
         float cap = s->lat_g * GRAVITY;      /* traction limit */
         if (a > cap) a = cap;
-        a -= (0.5f * RHO_AIR * s->cd_a * v * v) / s->mass_kg + CRR * GRAVITY;
+        a -= (0.5f * RHO_AIR * s->cd_a * v * v) / s->mass_kg +
+             settings->rolling_resistance * GRAVITY;
         v += a * 0.01f;
         t += 0.01f;
     }
     return t;
+}
+
+float spec_accel_time(const KartSpec *s)
+{
+    return spec_accel_time_with_settings(s, NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -301,19 +511,31 @@ static void kart_place_on_grid(Game *g, Kart *k, int grid_slot)
 void game_init(Game *g, const GameConfig *cfg)
 {
     int i, r;
+    char settings_error_text[32];
 
     memset(g, 0, sizeof(*g));
     g->cfg = *cfg;
+    game_settings_defaults(&g->settings);
+    if (cfg->settings) {
+        GameSettings candidate = *cfg->settings;
+        if (game_settings_validate(&candidate, settings_error_text,
+                                   (int)sizeof(settings_error_text)))
+            g->settings = candidate;
+    }
+    g->cfg.settings = NULL;       /* the race owns the snapshot above */
     if (g->cfg.n_humans < 1) g->cfg.n_humans = 1;
     if (g->cfg.n_humans > MAX_HUMANS) g->cfg.n_humans = MAX_HUMANS;
 
-    track_init(&g->track, cfg->track_id);
+    if (kart_spec_count < 1 || kart_spec_count > MAX_KART_SPECS)
+        kart_specs_reset_defaults();
+
+    track_init_with_settings(&g->track, cfg->track_id, &g->settings);
 
     for (i = 0; i < NUM_KARTS; i++) {
         Kart *k = &g->karts[i];
         if (i < g->cfg.n_humans) {
             k->human = i;
-            k->spec = g->cfg.spec[i] % SPEC_COUNT;
+            k->spec = g->cfg.spec[i] % kart_spec_count;
             if (k->spec < 0) k->spec = 0;
             k->paint_idx = ((g->cfg.paint[i] % PAINT_COUNT) + PAINT_COUNT)
                            % PAINT_COUNT;
@@ -334,7 +556,7 @@ void game_init(Game *g, const GameConfig *cfg)
             int c;
 
             k->human = -1;
-            k->spec = ai_no % SPEC_COUNT;
+            k->spec = ai_no % kart_spec_count;
             k->paint_idx = (i * 3 + 2) % PAINT_COUNT;
             k->strategy = ai_no % AI_STRATEGY_COUNT;
             st = &ai_strategies[k->strategy];
@@ -342,7 +564,8 @@ void game_init(Game *g, const GameConfig *cfg)
             k->line_target = k->ai_line;
             /* a little spread inside each strategy so two drivers on the
              * same sheet are still individuals */
-            k->ai_skill = 0.95f + 0.02f * (float)((ai_no * 5) % 4);
+            k->ai_skill = (0.95f + 0.02f * (float)((ai_no * 5) % 4)) *
+                          g->settings.ai_skill_mult;
             for (c = 0; c < TRACK_MAX_CORNERS; c++)
                 k->corner_conf[c] = st->conf_start;
             k->cur_corner = -1;
@@ -362,6 +585,9 @@ void game_init(Game *g, const GameConfig *cfg)
         k->rank = i + 1;
         k->gear = 0;
         k->last_checkpoint = 0;
+        k->risk_corner = -1;
+        k->rng_state = 0x9e3779b9u ^ (unsigned int)(i + 1) * 0x85ebca6bu ^
+                       (unsigned int)(g->track.id + 11) * 0xc2b2ae35u;
     }
 
     for (i = 0; i < MAX_HUMANS; i++) {
@@ -374,7 +600,7 @@ void game_init(Game *g, const GameConfig *cfg)
             g->item_respawn[r][i] = 0.0f;
 
     g->state = STATE_COUNTDOWN;
-    g->countdown = 3.2f;
+    g->countdown = g->settings.countdown_seconds;
 }
 
 /* ------------------------------------------------------------------ */
@@ -433,9 +659,11 @@ static float ai_tactical_line(const Game *g, const Kart *k)
     float room = t->road_half * 0.70f;
 
     /* With nothing but air past the shoulder, everyone drives closer to
-     * the middle: the racing line is not worth a trip down the mountain */
+     * the middle, though the amount is configurable. The separate
+     * overcommit path below is what lets an aggressive driver knowingly
+     * use more road and occasionally get that calculation wrong. */
     if (!t->has_walls)
-        room *= 0.55f;
+        room *= g->settings.ai_unguarded_line_room;
     float gap;
     int who;
 
@@ -462,18 +690,67 @@ static float ai_tactical_line(const Game *g, const Kart *k)
     return game_clampf(line, -room, room);
 }
 
-static void ai_control(const Game *g, const Kart *k, Input *in)
+static float ai_random01(Kart *k)
+{
+    unsigned int x = k->rng_state;
+    if (!x) x = 0x6d2b79f5u;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    k->rng_state = x;
+    return (float)(x & 0x00ffffffu) / 16777216.0f;
+}
+
+static void ai_control(const Game *g, Kart *k, Input *in, float dt)
 {
     const Track *t = &g->track;
     const KartSpec *s = &kart_specs[k->spec];
     const AIStrategy *st = &ai_strategies[k->strategy];
     float v = fabsf(k->speed);
     float mu = s->lat_g * k->ai_skill;
-    float a_brk = 0.75f * (V100 * V100) / (2.0f * s->brake_dist_100);
+    float a_brk = g->settings.ai_brake_mult *
+                  (V100 * V100) / (2.0f * s->brake_dist_100);
     float look, d, vmax_allow;
     int j, seg;
 
     memset(in, 0, sizeof(*in));
+
+    /* Test the risk once per tight, unguarded corner. The result comes
+     * from a per-driver PRNG, so a replay is repeatable and the host test
+     * is not a slot machine. Attack-minded strategies are the ones likely
+     * to keep a doomed outside move alive. */
+    {
+        int corner = t->corner_id[k->seg];
+        if (corner < 0) {
+            k->risk_corner = -1;
+        } else if (!t->has_walls && k->fall_t <= 0.0f &&
+                   k->respawn_t <= 0.0f && corner != k->risk_corner &&
+                   t->corner_peak[corner] >=
+                       g->settings.ai_overcommit_min_curvature) {
+            float attack_weight = game_clampf((st->attack - 0.25f) / 0.70f,
+                                               0.0f, 1.0f);
+            float chance = g->settings.ai_overcommit_chance * attack_weight;
+            float roll;
+            k->risk_corner = corner;
+            roll = ai_random01(k);
+            if (roll < chance) {
+                int ahead = (k->seg + 6) % t->n;
+                float h0 = atan2f(t->dz[k->seg], t->dx[k->seg]);
+                float h1 = atan2f(t->dz[ahead], t->dx[ahead]);
+                float turn = game_angle_wrap(h1 - h0);
+                float outside = (turn >= 0.0f) ? -1.0f : 1.0f;
+                k->overcommit_t = g->settings.ai_overcommit_seconds *
+                                  (0.85f + 0.30f * ai_random01(k));
+                k->overcommit_line = outside *
+                    (t->wall_half + g->settings.ai_overcommit_overshoot_m *
+                                      (0.55f + 0.45f * st->attack));
+            }
+        }
+        if (k->overcommit_t > 0.0f) {
+            k->overcommit_t -= dt;
+            if (k->overcommit_t < 0.0f) k->overcommit_t = 0.0f;
+        }
+    }
 
     /* steering: pure pursuit toward a speed-scaled lookahead point,
      * pulled in tight when curvature anywhere just ahead is high
@@ -499,8 +776,10 @@ static void ai_control(const Game *g, const Kart *k, Input *in)
         seg = (seg + 1) % t->n;
     }
     {
-        float txp = t->px[seg] - t->dz[seg] * k->line_target;
-        float tzp = t->pz[seg] + t->dx[seg] * k->line_target;
+        float wanted_line = (k->overcommit_t > 0.0f)
+                                ? k->overcommit_line : k->line_target;
+        float txp = t->px[seg] - t->dz[seg] * wanted_line;
+        float tzp = t->pz[seg] + t->dx[seg] * wanted_line;
         float desired = atan2f(tzp - k->z, txp - k->x);
         float diff = game_angle_wrap(desired - k->heading);
         int pinned = fabsf(k->lat) > t->wall_half - 0.6f;
@@ -538,6 +817,9 @@ static void ai_control(const Game *g, const Kart *k, Input *in)
         seg = (seg + 1) % t->n;
     }
 
+    if (k->overcommit_t > 0.0f)
+        vmax_allow *= 1.18f + 0.18f * st->attack;
+
     if (v > vmax_allow) {
         in->brake = 1;
     } else if (v < vmax_allow * 0.97f) {
@@ -568,7 +850,7 @@ static void ai_control(const Game *g, const Kart *k, Input *in)
          */
         if (k->rev_frac > st->shift_up_frac && k->gear < sp->n_gears - 1 &&
             next_frac > st->shift_down_frac + 0.06f &&
-            next_frac > BOG_FRACTION + 0.04f) {
+            next_frac > g->settings.bog_fraction + 0.04f) {
             in->gear_up = 1;
         } else if (k->gear > 0 && low_frac < st->shift_up_frac - 0.06f &&
                    (k->rev_frac < st->shift_down_frac ||
@@ -731,9 +1013,12 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     const KartSpec *s = &kart_specs[k->spec];
     int offroad = fabsf(k->lat) > t->road_half + 0.3f;
     float grip = offroad ? s->offroad_grip : 1.0f;
-    float mu_a = s->lat_g * GRAVITY * grip * tire_grip_mult(k->tire);
-    float cd_a = s->cd_a * tire_drag_mult(k->tire);
-    float P = s->power_hp * HP_TO_W * DRIVE_EFF * grip * power_scale;
+    float mu_a = s->lat_g * GRAVITY * grip *
+                 tire_grip_mult_with_settings(&g->settings, k->tire);
+    float cd_a = s->cd_a *
+                 tire_drag_mult_with_settings(&g->settings, k->tire);
+    float P = s->power_hp * HP_TO_W * g->settings.drivetrain_efficiency *
+              grip * power_scale;
     float steer = game_clampf(in->steer, -1.0f, 1.0f);
     float v = k->speed;
     float a = 0.0f;
@@ -743,6 +1028,24 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     k->hit_wall = 0;
     k->got_item = 0;
     k->respawned = 0;
+
+    if (k->invincible_t > 0.0f) {
+        k->invincible_t -= dt;
+        if (k->invincible_t < 0.0f) k->invincible_t = 0.0f;
+    }
+
+    /* Hold the recovered car still while its viewport is black/fading.
+     * Remember held buttons so a key pressed during the blackout does not
+     * turn into an accidental edge-triggered shift or item on return. */
+    if (k->respawn_t > 0.0f) {
+        k->respawn_t -= dt;
+        if (k->respawn_t < 0.0f) k->respawn_t = 0.0f;
+        k->speed = 0.0f;
+        k->prev_up_btn = in->gear_up;
+        k->prev_down_btn = in->gear_down;
+        k->prev_item_btn = in->item;
+        return;
+    }
 
     /* ---- gearbox -------------------------------------------------- */
     if (k->gear < 0) k->gear = 0;
@@ -774,17 +1077,17 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
                                  ? fabsf(v) / s->gear_top[k->gear - 1]
                                  : 9.0f;
             want_up   = (k->rev_frac > 0.95f &&
-                         next_frac > BOG_FRACTION + 0.08f);
+                         next_frac > g->settings.bog_fraction + 0.08f);
             want_down = (k->rev_frac < 0.38f && low_frac < 0.92f);
         }
 
         if (want_up && k->gear < s->n_gears - 1) {
             k->gear++;
-            k->shift_t = SHIFT_TIME +
+            k->shift_t = g->settings.shift_seconds +
                          ((k->gearbox == GEARBOX_AUTO) ? 0.06f : 0.0f);
         } else if (want_down && k->gear > 0) {
             k->gear--;
-            k->shift_t = SHIFT_TIME +
+            k->shift_t = g->settings.shift_seconds +
                          ((k->gearbox == GEARBOX_AUTO) ? 0.06f : 0.0f);
         }
         k->rev_frac = fabsf(v) / s->gear_top[k->gear];
@@ -797,15 +1100,15 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     if (k->shift_t > 0.0f)
         P = 0.0f;
     else
-        P *= gear_power_scale(k->rev_frac);
+        P *= gear_power_scale_with_settings(k->rev_frac, &g->settings);
 
     /* deployed power-ups: a bounded engine boost, and/or fresh rubber */
     if (k->push_t > 0.0f) {
-        P *= PUSH_POWER;
+        P *= g->settings.push_power_mult;
         k->push_t -= dt;
     }
     if (k->grip_t > 0.0f) {
-        mu_a *= TIRE_GRIP;
+        mu_a *= g->settings.fresh_tire_grip_mult;
         k->grip_t -= dt;
     }
 
@@ -824,7 +1127,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     /* drag + rolling resistance oppose motion */
     if (fabsf(v) > 0.2f) {
         float a_res = (0.5f * RHO_AIR * cd_a * v * v) / s->mass_kg +
-                      CRR * GRAVITY;
+                      g->settings.rolling_resistance * GRAVITY;
         a += (v > 0.0f) ? -a_res : a_res;
     }
     if (in->brake) {
@@ -959,7 +1262,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     }
 
     /* --- fished out of the void, back at the last checkpoint --- */
-    if (k->fall_t > 1.1f) {
+    if (k->fall_t > g->settings.fall_seconds) {
         int cp = k->last_checkpoint;
         int cseg;
         float back;
@@ -985,6 +1288,11 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->slip = 0.0f;
         k->fall_t = 0.0f;
         k->respawned = 1;
+        k->falls++;
+        k->respawn_t = g->settings.respawn_black_seconds +
+                       g->settings.respawn_fade_seconds;
+        k->invincible_t = k->respawn_t + g->settings.invincible_seconds;
+        k->overcommit_t = 0.0f;
         k->seg = cseg;
         k->lat = 0.0f;
 
@@ -1009,9 +1317,10 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     /* --- deploy a held power-up --- */
     if (in->item && !k->prev_item_btn && k->power_held) {
         if (k->power_held == POWER_PUSH)
-            k->push_t = fmaxf(k->push_t, PUSH_SECONDS);
+            k->push_t = fmaxf(k->push_t, g->settings.push_seconds);
         else
-            k->grip_t = fmaxf(k->grip_t, TIRE_SECONDS);
+            k->grip_t = fmaxf(k->grip_t,
+                              g->settings.fresh_tire_seconds);
         k->power_held = POWER_NONE;
         k->power_fired = 1;
     }
@@ -1028,6 +1337,10 @@ static void resolve_kart_collisions(Game *g)
             float ddz = b->z - a->z;
             float d2 = ddx * ddx + ddz * ddz;
             const float min_d = 1.9f;
+            if (a->fall_t > 0.0f || b->fall_t > 0.0f ||
+                a->respawn_t > 0.0f || b->respawn_t > 0.0f ||
+                a->invincible_t > 0.0f || b->invincible_t > 0.0f)
+                continue;
             if (d2 < min_d * min_d && d2 > 1e-6f) {
                 float d = sqrtf(d2);
                 float push = 0.5f * (min_d - d);
@@ -1139,7 +1452,7 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
             }
             k->line_target += (want - k->line_target) *
                               game_clampf(dt * 1.8f, 0.0f, 1.0f);
-            ai_control(g, k, &in);
+            ai_control(g, k, &in, dt);
             scale = ai_power_scale(g, k);
             k->power_timer = k->power_held ? k->power_timer + dt : 0.0f;
         }

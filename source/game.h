@@ -21,6 +21,8 @@ extern "C" {
 
 #define GRAVITY 9.81f
 
+typedef struct GameSettings GameSettings;
+
 /* ------------------------------------------------------------------ */
 /* Tracks                                                             */
 /* ------------------------------------------------------------------ */
@@ -78,6 +80,8 @@ typedef struct {
 } Track;
 
 void track_init(Track *t, int track_id);
+void track_init_with_settings(Track *t, int track_id,
+                              const GameSettings *settings);
 const char *track_name(int track_id);
 
 /* Locate (x,z) relative to the track. hint = last known segment
@@ -93,8 +97,13 @@ int track_item_row(const Track *t, int seg);   /* -1 or item row index */
 /* Vehicle specs (real-world performance parameters)                  */
 /* ------------------------------------------------------------------ */
 
-#define SPEC_COUNT 4
-#define MAX_GEARS  6
+#define DEFAULT_SPEC_COUNT 4
+/* Kept as the built-in roster size for old tests and source users. Runtime
+ * code must use kart_spec_count: cars.json can grow the garage. */
+#define SPEC_COUNT DEFAULT_SPEC_COUNT
+#define MAX_KART_SPECS 16
+#define KART_NAME_LEN   16
+#define MAX_GEARS       6
 
 /*
  * Gearing. Each car has a gearbox whose ratios are expressed as the road
@@ -105,7 +114,7 @@ int track_item_row(const Track *t, int seg);   /* -1 or item row index */
  * drive is cut, so short-shifting a hairpin exit is a real decision.
  */
 typedef struct {
-    const char *name;        /* 7-segment-safe                          */
+    char  name[KART_NAME_LEN]; /* short uppercase garage label          */
     float mass_kg;           /* curb mass incl. driver                  */
     float power_hp;          /* engine power                            */
     float brake_dist_100;    /* stopping distance 100-0 km/h, meters    */
@@ -133,7 +142,9 @@ const char *tire_name(int compound);
 float tire_grip_mult(int compound);
 float tire_drag_mult(int compound);
 
-extern const KartSpec kart_specs[SPEC_COUNT];
+extern KartSpec kart_specs[MAX_KART_SPECS];
+extern int kart_spec_count;
+void kart_specs_reset_defaults(void);
 
 /* ------------------------------------------------------------------ */
 /* Race                                                               */
@@ -187,12 +198,74 @@ enum {
     POWER_TYPES = 2
 };
 
-#define PUSH_POWER    1.13f   /* ~+11%, in the region of IndyCar P2P    */
+#define PUSH_POWER    1.13f   /* +13%, in the region of IndyCar P2P     */
 #define PUSH_SECONDS  4.0f
 #define TIRE_GRIP     1.10f
 #define TIRE_SECONDS  8.0f
 
 const char *power_name(int power);
+
+/* ------------------------------------------------------------------ */
+/* User-tunable simulation settings                                   */
+/* ------------------------------------------------------------------ */
+
+/* Defaults match the values shipped in config/settings.json. A GameConfig
+ * may point at an edited copy; game_init() snapshots it so a running race
+ * cannot change underneath itself. */
+struct GameSettings {
+    /* race and circuit construction */
+    float countdown_seconds;
+    float target_race_distance_m;
+    int   min_laps;
+    int   max_laps;
+    float track_width_mult[TRACK_COUNT];
+    float track_scale_mult[TRACK_COUNT];
+    float track_elevation_mult[TRACK_COUNT];
+    int   track_laps[TRACK_COUNT];       /* 0 = choose from distance */
+
+    /* vehicle model and steering */
+    float rolling_resistance;
+    float drivetrain_efficiency;
+    float shift_seconds;
+    float bog_fraction;
+    float steer_rate_on;
+    float steer_rate_center;
+    float steer_speed_fade;
+    float steer_curve;
+    float tire_grip_mult[TIRE_COMPOUNDS];
+    float tire_drag_mult[TIRE_COMPOUNDS];
+
+    /* power-ups */
+    float push_power_mult;
+    float push_seconds;
+    float fresh_tire_grip_mult;
+    float fresh_tire_seconds;
+
+    /* AI. overcommit_chance is checked once on each sufficiently tight,
+     * unguarded corner and is scaled by the strategy's attack rating. */
+    float ai_skill_mult;
+    float ai_brake_mult;
+    float ai_unguarded_line_room;
+    float ai_overcommit_chance;
+    float ai_overcommit_min_curvature;
+    float ai_overcommit_seconds;
+    float ai_overcommit_overshoot_m;
+
+    /* cliff recovery */
+    float fall_seconds;
+    float respawn_black_seconds;
+    float respawn_fade_seconds;
+    float invincible_seconds;
+    float invincible_flash_hz;
+};
+
+void game_settings_defaults(GameSettings *s);
+int  game_settings_validate(GameSettings *s, char *error, int error_cap);
+
+float tire_grip_mult_with_settings(const GameSettings *settings,
+                                   int compound);
+float tire_drag_mult_with_settings(const GameSettings *settings,
+                                   int compound);
 
 typedef struct {
     float steer;     /* -1..1; negative = left, positive = right        */
@@ -227,6 +300,9 @@ typedef struct {
 
 void  steer_axis_reset(SteerAxis *a);
 float steer_axis_update(SteerAxis *a, float target, float speed, float dt);
+float steer_axis_update_with_settings(SteerAxis *a, float target,
+                                      float speed, float dt,
+                                      const GameSettings *settings);
 
 /* ------------------------------------------------------------------ */
 /* AI drivers                                                         */
@@ -250,8 +326,8 @@ enum {
     AI_LATE     = 1,   /* brakes far too late, then learns better       */
     AI_INSIDE   = 2,   /* hugs the inside, tight and defensive          */
     AI_DEFENDER = 3,   /* covers the line you like to pass on           */
-    AI_CHARGER  = 4,   /* dives for overtakes, spends nitro at once     */
-    AI_DRAFTER  = 5,   /* sits in your mirrors, saves nitro to pounce   */
+    AI_CHARGER  = 4,   /* dives for overtakes, spends its item at once  */
+    AI_DRAFTER  = 5,   /* sits in your mirrors, saves its item to pounce */
     AI_CRUISER  = 6,   /* cautious, smooth, wide lines                  */
     AI_STRATEGY_COUNT  = 7
 };
@@ -318,7 +394,10 @@ typedef struct {
     /* going over the edge, and getting put back on the road           */
     int   last_checkpoint;
     float fall_t;         /* >0 while falling off an unguarded edge     */
+    float respawn_t;      /* black hold + fade; car is frozen           */
+    float invincible_t;   /* contact immunity after the recovery        */
     int   respawned;      /* one-frame flag for the platform layer      */
+    int   falls;          /* completed cliff falls (AI telemetry/tests) */
     int   drifting;       /* handbrake locked in, +1/-1 = direction     */
     float push_t;         /* push-to-pass seconds remaining             */
     float grip_t;         /* fresh-rubber seconds remaining             */
@@ -341,6 +420,10 @@ typedef struct {
     int   mistakes;                          /* corners actually botched */
     float line_target;                       /* smoothed tactical line   */
     float power_timer;                       /* how long it has held one */
+    float overcommit_t;                      /* deliberate AI overreach  */
+    float overcommit_line;                   /* risky outside line, m    */
+    int   risk_corner;                       /* last corner risk-tested  */
+    unsigned int rng_state;                  /* deterministic local PRNG */
 
     /* results */
     int   rank;
@@ -369,11 +452,13 @@ typedef struct {
     int paint[MAX_HUMANS];        /* chosen paint index per human      */
     int gearbox[MAX_HUMANS];      /* GEARBOX_AUTO / GEARBOX_MANUAL     */
     int tire[MAX_HUMANS];         /* TIRE_* compound                    */
+    const GameSettings *settings; /* NULL = compiled defaults           */
 } GameConfig;
 
 typedef struct {
     Track track;
     GameConfig cfg;
+    GameSettings settings;
     Kart  karts[NUM_KARTS];       /* karts[0..n_humans-1] are human    */
     float item_respawn[TRACK_MAX_ITEMS][3];  /* per row, 3 boxes across */
     PlayerModel pmodel[MAX_HUMANS];
@@ -401,6 +486,10 @@ float       ai_corner_conf(const Kart *k, const Track *t, int seg);
 /* derived stats for menus: 0-100 km/h time (s) and top speed (km/h) */
 float spec_accel_time(const KartSpec *s);
 float spec_top_speed(const KartSpec *s);
+float spec_accel_time_with_settings(const KartSpec *s,
+                                    const GameSettings *settings);
+float spec_top_speed_with_settings(const KartSpec *s,
+                                   const GameSettings *settings);
 
 #ifdef __cplusplus
 }

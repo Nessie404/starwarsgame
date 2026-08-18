@@ -14,7 +14,8 @@ jobs:
       - name: Build and run tests
         run: |
           gcc -std=c99 -O2 -Wall -Werror -Isource \
-              tests/test_game.c source/game.c source/track.c -lm -o wiikart-test
+              tests/test_game.c source/game.c source/track.c source/config.c \
+              -lm -o wiikart-test
           ./wiikart-test
 
   build:
@@ -53,6 +54,8 @@ jobs:
           mkdir pkg
           cp wiikart.dol pkg/
           cp -r dist/apps pkg/apps
+          cp -r config pkg/config
+          cp CHANGELOG.md TODO.md pkg/
           cat > pkg/README.txt <<'EOF'
           WiiKart — original kart racer for the Nintendo Wii (homebrew)
 
@@ -64,17 +67,27 @@ jobs:
             Homebrew Channel.
 
           Controls
-            Wii Remote (sideways): tilt or D-pad = steer, 2 = gas,
-              1 = brake, B = power-up, A = confirm, - = back,
-              + = restart, HOME = quit.
-            GameCube / Xbox-style pad: stick = steer, A = gas, B = brake,
-              X = power-up, triggers = shift, START = restart.
+            Wii Remote (sideways): tilt = steer, 2 = gas, 1 = brake,
+              B = handbrake, - = item, + = menu, HOME = quit. In manual
+              gearbox mode, D-pad up/down = shift and left/right = steer.
+            GameCube input: stick = steer, A or X = gas, B = brake,
+              Z = handbrake, Y = item, R/L = shift, START = menu.
+            Recommended Xbox-to-GameCube map in Dolphin: left stick =
+              stick, RT = A, LT = B, A = Z, X = Y, RB = R, LB = L,
+              START = START. The live input panel shows this translation.
             Keyboard player 1: WASD = drive, E = shift up, Q = shift down,
               X = power-up, Space = handbrake.
             Keyboard player 2: IJKL = drive, O = shift up, U = shift down,
               M = power-up, P = handbrake.
-            Menus: up/down picks a row, left/right changes its value,
-              Enter/A confirms, Esc/- backs out.
+            Menus: up/down picks a row, left/right changes its value.
+              Keyboard Enter confirms and Esc backs out. With the map
+              above, Xbox A or RT confirms and LT backs out.
+            In a race, menu pauses at a leave-race confirmation. Confirm
+              leaves; Back or Menu again resumes the race.
+
+          Tuning
+            Editable JSON files are in apps/wiikart/config (and mirrored
+            in config for reference). See config/README.md.
           EOF
           (cd pkg && zip -r ../wiikart.zip .)
       - name: Create release

@@ -1,0 +1,59 @@
+{
+  "_comment": "Values outside safe ranges are rejected and the built-in defaults remain active.",
+  "race": {
+    "_comment": "Target distance and min/max are used only when a track's laps value is 0.",
+    "countdown_seconds": 3.2,
+    "target_distance_m": 3200,
+    "minimum_laps": 2,
+    "maximum_laps": 4
+  },
+  "physics": {
+    "rolling_resistance": 0.015,
+    "drivetrain_efficiency": 0.85,
+    "shift_seconds": 0.18,
+    "bog_fraction": 0.34
+  },
+  "steering": {
+    "wind_on_rate": 2.6,
+    "self_center_rate": 6.0,
+    "speed_fade": 0.035,
+    "response_curve": 1.55
+  },
+  "tires": {
+    "medium": { "grip_multiplier": 1.00, "drag_multiplier": 1.00 },
+    "soft":   { "grip_multiplier": 1.08, "drag_multiplier": 1.04 },
+    "hard":   { "grip_multiplier": 0.94, "drag_multiplier": 0.97 }
+  },
+  "powerups": {
+    "push_power_multiplier": 1.13,
+    "push_seconds": 4.0,
+    "fresh_tire_grip_multiplier": 1.10,
+    "fresh_tire_seconds": 8.0
+  },
+  "ai": {
+    "_comment": "Lower skill slows the field. Overcommit chance is tested once per sufficiently tight unguarded corner and scaled by driver aggression.",
+    "skill_multiplier": 0.97,
+    "braking_multiplier": 0.72,
+    "unguarded_line_room": 0.72,
+    "overcommit_chance_per_corner": 0.055,
+    "overcommit_min_curvature": 0.028,
+    "overcommit_seconds": 1.15,
+    "overcommit_overshoot_m": 1.10
+  },
+  "respawn": {
+    "_comment": "Invincibility is visible driving time after the black hold and fade have completed.",
+    "visible_fall_seconds": 1.10,
+    "black_hold_seconds": 1.0,
+    "fade_in_seconds": 0.8,
+    "invincible_seconds": 5.0,
+    "flash_hz": 5.0
+  },
+  "tracks": {
+    "_comment": "laps 0 means automatic. Width, scale, and elevation values multiply the built-in track.",
+    "classic":  { "width_multiplier": 1.0, "scale_multiplier": 1.0, "elevation_multiplier": 1.0, "laps": 0 },
+    "berthoud": { "width_multiplier": 1.0, "scale_multiplier": 1.0, "elevation_multiplier": 1.0, "laps": 0 },
+    "loveland": { "width_multiplier": 1.0, "scale_multiplier": 1.0, "elevation_multiplier": 1.0, "laps": 0 },
+    "kenosha":  { "width_multiplier": 1.0, "scale_multiplier": 1.0, "elevation_multiplier": 1.0, "laps": 0 },
+    "monarch":  { "width_multiplier": 1.0, "scale_multiplier": 1.0, "elevation_multiplier": 1.0, "laps": 0 }
+  }
+}

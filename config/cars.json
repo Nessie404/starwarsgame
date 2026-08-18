@@ -1,0 +1,49 @@
+{
+  "_comment": "All units are shown in field names. Add a new object to this array to add a garage car. Maximum: 16 cars, 6 gears each.",
+  "cars": [
+    {
+      "name": "RACER",
+      "mass_kg": 260,
+      "power_hp": 48,
+      "brake_distance_100_kph_m": 30,
+      "lateral_grip_g": 1.30,
+      "drag_area_m2": 0.45,
+      "wheelbase_m": 1.05,
+      "offroad_grip": 0.30,
+      "gear_top_speeds_kph": [50.4, 86.4, 126.0, 169.2]
+    },
+    {
+      "name": "SPORT",
+      "mass_kg": 950,
+      "power_hp": 150,
+      "brake_distance_100_kph_m": 37,
+      "lateral_grip_g": 0.95,
+      "drag_area_m2": 0.66,
+      "wheelbase_m": 2.45,
+      "offroad_grip": 0.45,
+      "gear_top_speeds_kph": [46.8, 79.2, 118.8, 162.0, 216.0]
+    },
+    {
+      "name": "RALLY",
+      "mass_kg": 1180,
+      "power_hp": 220,
+      "brake_distance_100_kph_m": 40,
+      "lateral_grip_g": 0.88,
+      "drag_area_m2": 0.70,
+      "wheelbase_m": 2.60,
+      "offroad_grip": 0.72,
+      "gear_top_speeds_kph": [43.2, 72.0, 104.4, 144.0, 190.8, 241.2]
+    },
+    {
+      "name": "TOURER",
+      "mass_kg": 1350,
+      "power_hp": 310,
+      "brake_distance_100_kph_m": 34,
+      "lateral_grip_g": 1.02,
+      "drag_area_m2": 0.60,
+      "wheelbase_m": 2.70,
+      "offroad_grip": 0.35,
+      "gear_top_speeds_kph": [54.0, 90.0, 133.2, 180.0, 230.4, 284.4]
+    }
+  ]
+}

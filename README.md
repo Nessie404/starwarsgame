@@ -1,4 +1,4 @@
-# WiiKart 1.2.1
+# WiiKart 1.3.0
 
 An original racing game built as **Nintendo Wii homebrew**. It compiles to
 a real Wii executable (`wiikart.dol`) that runs in the
@@ -8,6 +8,7 @@ Wii hardware through the Homebrew Channel.
 **Download:** grab `wiikart.zip` from the
 [latest release](https://github.com/Nessie404/starwarsgame/releases/latest),
 unzip, and open `wiikart.dol` in Dolphin. Older lines are published too:
+[v1.2.1](https://github.com/Nessie404/starwarsgame/releases/tag/v1.2.1),
 [v1.1.0](https://github.com/Nessie404/starwarsgame/releases/tag/v1.1.0),
 [v1.0.1](https://github.com/Nessie404/starwarsgame/releases/tag/v1.0.1) and
 the original arcade racer as
@@ -15,14 +16,19 @@ the original arcade racer as
 on the [v0.1 release](https://github.com/Nessie404/starwarsgame/releases/tag/v0.1)
 (see `patches/README.md` for why 0.1.1 has no tag of its own).
 
-Version 1.2.1 is a semi-sim mountain racer: pick a car in the garage —
+See [CHANGELOG.md](CHANGELOG.md) for the release-by-release inventory and
+[TODO.md](TODO.md) for proposed future work that is explicitly not part of
+v1.3.0.
+
+Version 1.3.0 is a semi-sim mountain racer: pick a car in the garage —
 its gearbox, tires and paint, all defined by real-world performance
 numbers — then race a **field of eleven AI drivers who each race
 differently, shift differently, learn from their mistakes, and adapt to
 you**, over five circuits including four stylized Colorado passes with
 real grades, switchbacks, cliffs and gravity. Lap counts are set per
-circuit (2–4 laps) so every race runs about the same length. Think arcade
-fun with a driving model that expects you to brake for the hairpins.
+circuit (2–4 laps by default) so short circuits remain multi-lap. Think
+arcade fun with a driving model that expects you to brake for the
+hairpins.
 
 **Version history**, oldest first:
 
@@ -35,17 +41,21 @@ fun with a driving model that expects you to brake for the hairpins.
   19-corner technical circuit; nitro and boost pads replaced with
   motorsport power-ups; the remaining arcade cheats removed; and
   **inverted steering fixed** — left really is left now, on every device.
+- **v1.2.0** — gearboxes and per-driver shifting strategies, two more
+  passes (Kenosha and Monarch), guardrails gone from Loveland and
+  Monarch, cliffs with checkpoint recovery, per-circuit lap counts, a
+  rebuilt menu you can back out of, a controller-count check, more garage
+  options, and two-player keyboard defaults.
 - **v1.2.1** — the stability pass: falling off the edge just before the
   line no longer hands out most of a free lap, a finished car coasts
   instead of standing on the brakes and reversing back through the field,
   keyboard menu keys register every tap, the controller check notices
   whether a keyboard is actually plugged in, and the drop off a cliff is
-  visible again. Details below.
-- **v1.2.0** — gearboxes and per-driver shifting strategies, two more
-  passes (Kenosha and Monarch), guardrails gone from Loveland and
-  Monarch, cliffs with Mario-style checkpoint recovery, per-circuit lap
-  counts, a rebuilt menu you can back out of, a controller-count check,
-  more garage options, and two-player keyboard defaults.
+  visible again.
+- **v1.3.0** — editable JSON car/settings/control files, a live
+  keyboard/Xbox/Dolphin input translator, wider roads, intentionally
+  fallible aggressive AI, a longer and harder Monarch, and a staged
+  blackout/fade/invincibility recovery after a cliff fall.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -63,12 +73,16 @@ fun with a driving model that expects you to brake for the hairpins.
   the rev band it changes up, how early it comes down the box under
   braking, and how crisply it does it. CRUISER short-shifts and rides the
   torque; LATE hangs on to the limiter and pays for it in shift time.
+  On unguarded corners the attack-minded sheets also have a small,
+  deterministic chance to overcommit to the outside line. Sometimes they
+  save it. Sometimes gravity files the protest.
 - **They learn from their mistakes.** Every driver keeps its own nerve
   rating for each corner on the track. Run wide, clip a barrier, or spin
   and that corner's rating drops, so it arrives slower next lap; take it
   cleanly and the rating creeps back up. Over a race the field visibly
-  tidies up — in the test suite, mistakes across the grid fall from 78 in
-  the first third of a race to 13 in the last. The late-brakers start
+  tidies up — in the current deterministic test run, mistakes across the
+  grid fall from 71 in the first third of a race to 9 in the last. The
+  late-brakers start
   over the limit and talk themselves down; the cruiser starts timid and
   finds pace.
 - **They adapt to you.** The game keeps a model of each human: which
@@ -83,27 +97,28 @@ fun with a driving model that expects you to brake for the hairpins.
   cornering is limited by lateral grip (v²/r ≤ μg) — push past it and the
   car understeers wide, scrubbing speed. Gravity acts along the road
   grade: climbs cost speed, descents give it back.
-- **Car selection with real spec sheets.** Four cars (RACER, SPORT,
-  RALLY, TOURER) defined by horsepower, curb weight, stopping distance,
-  lateral g, drag area, wheelbase and dirt grip — the menu shows the
-  derived 0-100 time and top speed, and the physics actually uses these
-  numbers.
+- **Car selection with real spec sheets.** The included RACER, SPORT,
+  RALLY and TOURER are defined by horsepower, curb weight, stopping
+  distance, lateral g, drag area, wheelbase, dirt grip and per-gear
+  limiter speeds. The menu derives 0-100 time and top speed from the same
+  equations the physics uses. The roster now comes from `cars.json`, so a
+  fifth car is an added JSON object, not a C surgery.
 - **Five circuits**, all measured rather than guessed. Lap counts are set
   per circuit so every race covers a similar distance:
 
   | Circuit | Length | Width | Corners | Tightest | Climb | Steepest | Rails | Laps |
   |---------|--------|-------|---------|----------|-------|----------|-------|------|
-  | CLASSIC | 555 m | 10 m | 10 | 24 m | flat | — | yes | 4 |
-  | BERTHOUD (US-40) | 1421 m | 8.4 m | 19 | 11 m | 48 m | 15% | yes | 2 |
-  | LOVELAND (US-6) | 1699 m | 10.8 m | 11 | 12 m | 61 m | 14% | **no** | 2 |
-  | KENOSHA (US-285) | 2172 m | 12 m | 43 | 15 m | 58 m | 10% | yes | 2 |
-  | MONARCH (US-50) | 1612 m | 7.6 m | 28 | 11 m | 73 m | 17% | **no** | 2 |
+  | CLASSIC | 555 m | 11.2 m | 10 | 24 m | flat | — | yes | 4 |
+  | BERTHOUD (US-40) | 1421 m | 9.6 m | 19 | 11 m | 48 m | 15% | yes | 2 |
+  | LOVELAND (US-6) | 1699 m | 12.0 m | 11 | 12 m | 61 m | 14% | **no** | 2 |
+  | KENOSHA (US-285) | 2172 m | 13.2 m | 43 | 15 m | 58 m | 10% | yes | 2 |
+  | MONARCH (US-50) | 2167 m | 8.6 m | 33 | 9 m | 118 m | 19% | **no** | 2 |
 
-  **Kenosha** is the long, wide, flowing one — the biggest lap and the most
-  corners, but the gentlest grades, so it is fast. **Monarch** is the
-  hardest by every measure: narrowest road, tightest corners, steepest
-  grades, biggest climb, and no guardrails anywhere. **Loveland** lost its
-  guardrails too, and got wider and longer.
+  **Kenosha** remains the widest, flowing one and narrowly the longest.
+  **Monarch** now runs nearly as long, adds an extended summit/descent,
+  climbs 118 m, tightens to roughly a 9 m radius, and still has no rails.
+  Every road gained about 10–15% pavement width, but Monarch gained more
+  ways to spend it badly.
 - **Gearboxes.** Every car has a real gearbox — 4 to 6 gears, each with a
   road speed at the limiter. Where you are in the band decides your power:
   bog it below a third of the band and it pulls badly, sit on the limiter
@@ -112,8 +127,9 @@ fun with a driving model that expects you to brake for the hairpins.
   **SHIFT** (manual) per player in the garage.
 - **Cliffs and checkpoints.** On the unguarded passes the shoulder is the
   edge: go over it and the car drops away, then gets set back down at the
-  last checkpoint it passed — Mario-style, without handing out any free
-  progress.
+  last checkpoint it passed without handing out any free progress. A
+  recovery now holds that player's view on black for one second, fades the
+  road back in, and flashes the car with five seconds of contact immunity.
 - **Garage.** Each player gets their own: car, one of eight paint colours,
   **gearbox** (auto or manual) and **tire compound** (soft grips more and
   drags more, hard is slipperier and faster), all on a lit 3D turntable
@@ -122,6 +138,13 @@ fun with a driving model that expects you to brake for the hairpins.
   stick: the wheel winds on over a few tenths of a second, self-centers
   faster than it winds on, calms down as speed rises, and passes through
   a progressive curve. Keyboards feel like a stick, not a switch.
+- **Inputs without divination.** An optional live panel shows the keyboard
+  key, recommended physical Xbox control, logical GameCube input Dolphin
+  reports, and final game action on one line. It can be disabled in
+  `controls.json` once the mapping behaves.
+- **Editable tuning.** `settings.json`, `cars.json`, and `controls.json`
+  are loaded independently from the app's `config` directory and safely
+  fall back to compiled defaults if a file is missing or invalid.
 - **Split-screen multiplayer** for up to 4 players (horizontal split for
   2, quadrants for 3-4), with view culling so a full field still runs at
   frame rate in four-way split.
@@ -129,11 +152,11 @@ fun with a driving model that expects you to brake for the hairpins.
   one of two things, and each panel always holds the same one so you can
   aim for what you want: **push-to-pass** (+13% engine for 4 s, in the
   region of IndyCar's real overtake boost) or **fresh rubber** (+10%
-  lateral grip for 8 s). Deploy with E / Y / −. The AI spend theirs the
+  lateral grip for 8 s). Deploy with X / Y / −. The AI spend theirs the
   way an engineer would — push-to-pass on open road with someone to
   catch, fresh rubber just before a twisty stretch.
 - **No arcade cheats.** There is no rubber-banding (a test proves an AI
-  left behind gets exactly the same power: 18.34 m/s either way), no
+  left behind gets exactly the same power: 17.05 m/s either way), no
   floor boost pads, and no mini-turbo reward for sliding — the handbrake
   rotates the car and scrubs speed, because that is what a handbrake
   does.
@@ -155,7 +178,9 @@ fun with a driving model that expects you to brake for the hairpins.
 
 - **Xbox / any gamepad:** Dolphin → **Controllers → GameCube Controller
   Port 1 → Standard Controller → Configure**, select your pad (XInput
-  for Xbox) and map the stick, A/B/X/Y, R/L triggers and Start.
+  for Xbox), then use the recommended map below. The in-race translator
+  shows the physical Xbox label beside the GameCube input Dolphin is
+  presenting to WiiKart, so a crossed wire is visible immediately.
 - **Keyboard (WASD):** Dolphin → **Config → Wii → Connect USB Keyboard**,
   and that's it — no key mapping needed. **A** steers left, **D** right,
   **W** is the throttle, **S** the brake (arrow keys mirror all four).
@@ -167,33 +192,49 @@ fun with a driving model that expects you to brake for the hairpins.
 Copy the `apps` folder from `wiikart.zip` onto an SD card (so you have
 `SD:/apps/wiikart/boot.dol`) and launch WiiKart from the Homebrew Channel.
 
-## Controls
+## Controls and Dolphin translation
 
 **Two players share one keyboard.** A second physical keyboard cannot be
 told apart — libwiikeyboard merges every attached keyboard into one event
 stream — so players 3 and 4 use pads (an Xbox pad appears as a GameCube
 pad under Dolphin) or Wii Remotes.
 
-| Action | Player 1 keyboard | Player 2 keyboard | Pad (Xbox/GameCube) | Wii Remote (sideways) |
-|--------|-------------------|-------------------|---------------------|------------------------|
-| Steer left / right | **A** / **D** | **J** / **L** | Main stick | Tilt or D-pad |
-| Accelerate | **W** | **I** | A or X | 2 or A |
-| Brake / reverse | **S** | **K** | B | 1 |
-| Up a gear | **E** | **O** | R trigger | Classic ZR |
-| Down a gear | **Q** | **U** | L trigger | Classic ZL |
-| Power-up | **X** | **M** | Y | − / Classic − |
-| Handbrake | Space | **P** | Z + B | Hold B |
-| Back to menu | **R** | **R** | Start | + |
-| Quit | (EXIT row) | — | Z + Start | HOME |
+| Action | Player 1 keyboard | Player 2 keyboard | Dolphin presents | Recommended Xbox control | Wii Remote (sideways) |
+|--------|-------------------|-------------------|------------------|--------------------------|------------------------|
+| Steer left / right | **A** / **D** | **J** / **L** | GC stick or D-pad | Left stick | Tilt or D-pad |
+| Accelerate | **W** | **I** | GC A or X | Right trigger | 2 or A |
+| Brake / reverse | **S** | **K** | GC B | Left trigger | 1 |
+| Up a gear | **E** | **O** | GC R | Right bumper | D-pad ↑ / Classic ZR |
+| Down a gear | **Q** | **U** | GC L | Left bumper | D-pad ↓ / Classic ZL |
+| Power-up | **X** | **M** | GC Y | X | − / Classic − |
+| Handbrake | Space | **P** | GC Z | A | Hold B |
+| Back to menu | **R** | **R** | GC Start | Start | + |
+| Quit | (EXIT row) | — | GC Z + Start | A + Start | HOME |
+
+Back to menu now pauses the race and opens a **LEAVE RACE / ARE YOU
+SURE** guard. Use the mapped menu-confirm action to leave, or press Back
+or the race-menu button again to keep racing. Any active racer can answer
+the prompt; the HOME/emergency full-app quit remains immediate.
 
 Arrow keys mirror player 1's WASD. Most of these are just defaults —
-they're all in one `KeyMap` table at the top of `source/main.c` if you
-want to move them.
+edit `config/controls.json` to move them. The Xbox column is a recommended
+host-side Dolphin map, not something Wii code can detect directly: WiiKart
+receives the logical GameCube column. Keep the `xbox_recommended` labels
+in the JSON aligned with your Dolphin profile and the live panel becomes
+an exact translation chart.
+
+Mario Kart Wii itself has no manual transmission: its karts shift
+automatically. WiiKart therefore defaults each garage gearbox to AUTO. If
+you select SHIFT with a plain Wii Remote, tilt steers, D-pad Up/Down shifts,
+and D-pad Left/Right remains available for digital steering. A Classic
+Controller uses ZR/ZL instead.
 
 **Menus never advance on a stray press.** Every screen is a list of rows
 with a cursor: **W/S** (or ↑/↓, or the D-pad) moves the cursor,
 **A/D** (or ←/→) changes the value of the row you are on, **Enter**
-(or A/2) acts on it, and **Esc** (or B/1) backs out. Only the action rows
+(or GC A/Z, or Wii A/2) acts on it, and **Esc** (or GC B, or Wii B/1)
+backs out. With the recommended Xbox map, A or RT confirms and LT backs
+out. Only the action rows
 — GO, a player's GARAGE, DONE, EXIT — actually do anything when
 activated, so you can look around without being thrown forward. Esc no
 longer quits the game; EXIT does.
@@ -217,7 +258,25 @@ Monarch there is nothing holding you on the road.
 The HUD names the car you are chasing by its strategy, and the finish
 screen prints the full classification, so you can see whether DEFENDER or
 CHARGER actually got the job done. A quick AI laps Berthoud in about 62 s
-and Loveland in about 59 s, against 27 s round Classic.
+and Loveland in about 68 s, against 26 s round Classic. The extended
+Monarch takes roughly 105 s in the deterministic host simulation.
+
+## Editable configuration
+
+The three files in [`config/`](config/) are the supported tuning surface:
+
+- `cars.json` contains the complete garage roster in real-world units;
+  duplicate an object to add a car (up to 16 cars and 6 gears each).
+- `settings.json` covers race length, driving physics, steering, tires,
+  power-ups, AI risk, recovery timing, and per-track scale, elevation,
+  width, and lap count.
+- `controls.json` covers keyboard bindings, logical GameCube bindings,
+  recommended Xbox labels, and the live translator toggle.
+
+Each file is validated and loaded independently. A missing or invalid file
+falls back to its compiled defaults instead of partially applying. See
+[`config/README.md`](config/README.md) for accepted names, ranges, and the
+Dolphin virtual-SD layout.
 
 ## The cars
 
@@ -253,7 +312,9 @@ Every push builds on GitHub Actions and publishes a release with
 source/game.h     shared types, kart spec sheets, simulation API
 source/track.c    3D circuit geometry (Catmull-Rom, elevation, curvature)
 source/game.c     vehicle dynamics, AI strategies/learning/adaptation, items
+source/config.c   dependency-free JSON config loader and validation
 source/main.c     Wii layer: GX renderer, menus, split screen, audio, input
+config/           editable cars, game settings, controls, and instructions
 tests/            host-side physics/AI tests (plain gcc, no Wii SDK)
 hbc/              Homebrew Channel metadata
 tools/            run-dolphin.sh launcher
@@ -263,16 +324,18 @@ The simulation is platform-independent C99, tested on the host:
 
 ```sh
 gcc -std=c99 -O2 -Wall -Werror -Isource \
-    tests/test_game.c source/game.c source/track.c -lm -o wiikart-test
+    tests/test_game.c source/game.c source/track.c source/config.c \
+    -lm -o wiikart-test
 ./wiikart-test
 ```
 
-Tests verify the physics against the spec sheets (measured stopping
+Tests verify JSON parsing and transactional fallback, the physics against
+the spec sheets (measured stopping
 distance vs quoted, grip-capped yaw rate, gravity on grades), the
 steering filter (ramp shape, self-centering, speed sensitivity, and that
 left really is left), track geometry and corner segmentation for all
 circuits, that a twelve-car grid fits on the road, item pickup and AI
-nitro use, and that the AI completes laps on every track — including
+power-up use, and that the AI completes laps on every track — including
 recovering from a botched hairpin by backing out, since a real car can't
 rotate in place.
 
@@ -325,6 +388,13 @@ checkpoint index could read off the front of `checkpoint_seg[]`, since
 `game_clampf` returns the low bound for it, `game_angle_wrap` bounds its
 input (at 1e9 a float's step exceeds 2*pi, so the loop could never end),
 and a non-finite frame time is refused.
+
+v1.3.0 adds coverage for the shipped JSON files, custom car insertion,
+invalid-roster rollback, partial settings overrides, and control
+translation. Recovery tests now verify the black hold, fade, five visible
+seconds of invincibility, collision immunity, and continued drivability.
+The deterministic Monarch stress run also proves that aggressive AI can
+overcommit and fall while the full field can still finish every circuit.
 
 ## Ideas for later
 

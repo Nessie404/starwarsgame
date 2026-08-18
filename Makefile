@@ -34,7 +34,7 @@ LDFLAGS	=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
 #---------------------------------------------------------------------------------
 # any extra libraries we wish to link with the project
 #---------------------------------------------------------------------------------
-LIBS	:=	-lwiikeyboard -lasnd -lwiiuse -lbte -logc -lm
+LIBS	:=	-lwiikeyboard -lasnd -lfat -lwiiuse -lbte -logc -lm
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing
@@ -94,7 +94,7 @@ export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib) \
 					-L$(LIBOGC_LIB)
 
-.PHONY: $(BUILD) clean
+.PHONY: $(BUILD) clean run dist
 
 #---------------------------------------------------------------------------------
 $(BUILD):
@@ -111,12 +111,14 @@ run:
 	wiiload $(TARGET).dol
 
 #---------------------------------------------------------------------------------
-# Assemble a Homebrew Channel app folder (requires a prior `make`)
+# Build and assemble a Homebrew Channel app folder
 #---------------------------------------------------------------------------------
-dist:
+dist: $(BUILD)
 	@mkdir -p dist/apps/wiikart
 	@cp $(TARGET).dol dist/apps/wiikart/boot.dol
 	@cp hbc/meta.xml dist/apps/wiikart/meta.xml
+	@rm -rf dist/apps/wiikart/config
+	@cp -r config dist/apps/wiikart/config
 	@[ -f hbc/icon.png ] && cp hbc/icon.png dist/apps/wiikart/icon.png || true
 	@echo "dist/apps/wiikart ready — copy 'apps' to an SD card, or open boot.dol in Dolphin"
 

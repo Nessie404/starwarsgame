@@ -2,7 +2,7 @@
  * WiiKart tracks: closed circuits sampled from Catmull-Rom splines over
  * hand-placed 3D control points (x, z ground plane; y elevation).
  *
- * Two circuits are stylized versions of real Colorado mountain passes:
+ * Four circuits are stylized versions of real Colorado mountain passes:
  *
  *  - BERTHOUD (US-40, Berthoud Pass): a stack of tight switchbacks up
  *    the west face, a short summit ridge, and a flowing descent down
@@ -15,6 +15,7 @@
  * roads: 6-10%% grades, ~15 m hairpin radii, two-lane width.
  */
 #include <math.h>
+#include <stddef.h>
 #include "game.h"
 
 #define SAMPLES_PER_CP 8
@@ -137,38 +138,43 @@ static const float CP_MONARCH[][3] = {
     /* switchback 3, just under the summit */
     { 162, 420,  73 },  { 124, 416,  76 },  { 108, 436,  79 },
     { 126, 456,  82 },  { 164, 462,  85 },
-    { 182, 500,  88 },  { 146, 528,  91 },  {  92, 528,  93 },
-    {  44, 508,  94 },  {   0, 526,  92 },  { -44, 556,  89 },
-    /* the descent: three more tight ones on the way down */
-    { -96, 548,  84 },  { -126, 512, 79 },  { -108, 476, 74 },
-    { -142, 452,  69 },  { -166, 412, 64 },  { -138, 378, 59 },
-    { -168, 344,  54 },  { -180, 300, 49 },  { -146, 268, 44 },
-    { -170, 228,  38 },  { -158, 184, 33 },  { -116, 168, 28 },
-    { -132, 126,  22 },  { -150,  84, 16 },  { -116,  46, 10 },
-    {  -66,  22,   4 },
+    /* extended summit shelf: it keeps climbing after the old turnaround,
+     * then folds back through two linked, exposed hairpins */
+    { 182, 500,  88 },  { 166, 538,  93 },  { 126, 566,  98 },
+    {  72, 560, 102 },  {  28, 582, 106 },  { -10, 620, 108 },
+    { -58, 646, 105 },  { -112, 638, 100 }, { -152, 604, 94 },
+    { -146, 564,  88 }, { -184, 536,  83 },
+    /* the longer descent: tightly linked bends leave little recovery
+     * room, and none of them has a guardrail */
+    { -214, 500, 77 },  { -198, 458, 71 },  { -158, 444, 68 },
+    { -184, 408, 63 },  { -216, 370, 58 },  { -204, 326, 52 },
+    { -160, 302, 47 },  { -190, 264, 42 },  { -202, 220, 37 },
+    { -166, 188, 32 },  { -122, 180, 29 },  { -150, 144, 24 },
+    { -170, 102, 18 },  { -142,  62, 12 },  {  -92,  34,  6 },
+    {  -42,  18,  3 },
 };
 static const float ITEMS_MONARCH[] = { 0.06f, 0.32f, 0.62f, 0.88f };
 
 static const TrackDef track_defs[TRACK_COUNT] = {
     { "CLASSIC",
       CP_CLASSIC,  (int)(sizeof(CP_CLASSIC)  / sizeof(CP_CLASSIC[0])),
-      5.0f, 13.0f, 0, 1, 1.00f, 1.00f,
+      5.6f, 13.6f, 0, 1, 1.00f, 1.00f,
       ITEMS_CLASSIC, 3 },
     { "BERTHOUD",
       CP_BERTHOUD, (int)(sizeof(CP_BERTHOUD) / sizeof(CP_BERTHOUD[0])),
-      4.2f,  8.5f, 1, 1, 1.00f, 0.62f,   /* grades down to ~15%          */
+      4.8f,  9.1f, 1, 1, 1.00f, 0.62f,   /* wider; grades stay ~15%      */
       ITEMS_BERTHOUD, 4 },
-    { "LOUELAND",   /* 'V' cannot be drawn on 7-segment glyphs */
+    { "LOVELAND",
       CP_LOVELAND, (int)(sizeof(CP_LOVELAND) / sizeof(CP_LOVELAND[0])),
-      5.4f,  6.6f, 1, 0, 1.00f, 0.78f, /* wider, unguarded, ~14% grades   */
+      6.0f,  7.2f, 1, 0, 1.00f, 0.78f, /* wider, unguarded, ~14% grades   */
       ITEMS_LOVELAND, 4 },
-    { "HENOSHA",    /* 'K' cannot be drawn on 7-segment glyphs either    */
+    { "KENOSHA",
       CP_KENOSHA,  (int)(sizeof(CP_KENOSHA)  / sizeof(CP_KENOSHA[0])),
-      6.0f, 11.0f, 1, 1, 0.72f, 1.55f, /* widest and longest, barriered   */
+      6.6f, 11.6f, 1, 1, 0.72f, 1.55f, /* widest and longest, barriered   */
       ITEMS_KENOSHA, 6 },
-    { "NONARCH",    /* 'M' cannot be drawn on 7-segment glyphs           */
+    { "MONARCH",
       CP_MONARCH,  (int)(sizeof(CP_MONARCH)  / sizeof(CP_MONARCH[0])),
-      3.8f,  4.8f, 1, 0, 0.78f, 1.00f, /* narrowest, unguarded, steepest  */
+      4.3f,  5.3f, 1, 0, 0.94f, 1.16f, /* longer, higher, still unguarded */
       ITEMS_MONARCH, 4 },
 };
 
@@ -195,12 +201,37 @@ static void catmull_rom(const float p0[3], const float p1[3],
 
 void track_init(Track *t, int track_id)
 {
+    track_init_with_settings(t, track_id, NULL);
+}
+
+void track_init_with_settings(Track *t, int track_id,
+                              const GameSettings *settings)
+{
     const TrackDef *d;
+    GameSettings defaults;
+    GameSettings checked;
+    char error[32];
     int i, s, k;
     float heading[TRACK_MAX_POINTS];
+    float scale, elevation_scale;
 
     if (track_id < 0 || track_id >= TRACK_COUNT) track_id = 0;
     d = &track_defs[track_id];
+    if (!settings) {
+        game_settings_defaults(&defaults);
+        settings = &defaults;
+    } else {
+        checked = *settings;
+        if (!game_settings_validate(&checked, error, (int)sizeof(error))) {
+            game_settings_defaults(&defaults);
+            settings = &defaults;
+        } else {
+            settings = &checked;
+        }
+    }
+    scale = d->scale * settings->track_scale_mult[track_id];
+    elevation_scale = d->y_scale *
+                      settings->track_elevation_mult[track_id];
 
     t->id = track_id;
     t->name = d->name;
@@ -218,10 +249,10 @@ void track_init(Track *t, int track_id)
             float pt[3];
             catmull_rom(p0, p1, p2, p3, (float)s / (float)SAMPLES_PER_CP, pt);
             /* a uniform scale lets a circuit be tuned for lap length
-             * without redrawing it; radii and grades scale with it */
-            t->px[k] = pt[0] * d->scale;
-            t->pz[k] = pt[1] * d->scale;
-            t->py[k] = pt[2] * d->scale * d->y_scale;
+             * without redrawing it; radii grow while grades stay stable */
+            t->px[k] = pt[0] * scale;
+            t->pz[k] = pt[1] * scale;
+            t->py[k] = pt[2] * scale * elevation_scale;
         }
     }
 
@@ -355,17 +386,21 @@ void track_init(Track *t, int track_id)
         }
     }
 
-    t->road_half = d->road_half;
-    t->wall_half = d->wall_half;
+    t->road_half = d->road_half * settings->track_width_mult[track_id];
+    t->wall_half = d->wall_half * settings->track_width_mult[track_id];
     t->alpine = d->alpine;
     t->has_walls = d->has_walls;
 
     /* Lap count from circuit length, so every race covers roughly the
      * same ground: four laps of the little speedway, two of a pass. */
     {
-        int laps = (int)((2600.0f / t->total_len) + 0.5f);
-        if (laps < 2) laps = 2;
-        if (laps > 4) laps = 4;
+        int laps = settings->track_laps[track_id];
+        if (laps <= 0) {
+            laps = (int)((settings->target_race_distance_m / t->total_len) +
+                         0.5f);
+            if (laps < settings->min_laps) laps = settings->min_laps;
+            if (laps > settings->max_laps) laps = settings->max_laps;
+        }
         t->laps = laps;
     }
 

@@ -1,0 +1,57 @@
+{
+  "_comment": "The Xbox column is a recommended physical mapping in Dolphin. The game receives the GameCube inputs in the gamecube section.",
+  "_wii_note": "Mario Kart Wii has no manual transmission. WiiKart SHIFT mode uses Wii Remote D-pad Up/Down, or Classic Controller ZR/ZL.",
+  "show_input_overlay": true,
+  "keyboard": {
+    "player1": {
+      "steer_left": ["A", "LEFT"],
+      "steer_right": ["D", "RIGHT"],
+      "accelerate": ["W", "UP"],
+      "brake": ["S", "DOWN"],
+      "handbrake": "SPACE",
+      "item": "X",
+      "shift_up": "E",
+      "shift_down": "Q",
+      "race_menu": "R",
+      "menu_confirm": "ENTER",
+      "menu_back": "ESC"
+    },
+    "player2": {
+      "steer_left": "J",
+      "steer_right": "L",
+      "accelerate": "I",
+      "brake": "K",
+      "handbrake": "P",
+      "item": "M",
+      "shift_up": "O",
+      "shift_down": "U",
+      "race_menu": "R"
+    }
+  },
+  "gamecube": {
+    "steer_left": ["STICK_LEFT", "DPAD_LEFT"],
+    "steer_right": ["STICK_RIGHT", "DPAD_RIGHT"],
+    "accelerate": ["A", "X"],
+    "brake": "B",
+    "handbrake": "Z",
+    "item": "Y",
+    "shift_up": "R",
+    "shift_down": "L",
+    "race_menu": "START",
+    "menu_confirm": ["A", "Z"],
+    "menu_back": "B"
+  },
+  "xbox_recommended": {
+    "steer_left": "LS LEFT",
+    "steer_right": "LS RIGHT",
+    "accelerate": "RT",
+    "brake": "LT",
+    "handbrake": "A",
+    "item": "X",
+    "shift_up": "RB",
+    "shift_down": "LB",
+    "race_menu": "START",
+    "menu_confirm": "A/RT",
+    "menu_back": "LT"
+  }
+}

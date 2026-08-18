@@ -3,13 +3,15 @@
  * compiler (no devkitPPC needed):
  *
  *   gcc -std=c99 -O2 -Wall -Werror -Isource \
- *       tests/test_game.c source/game.c source/track.c -lm -o wiikart-test
+ *       tests/test_game.c source/game.c source/track.c source/config.c \
+ *       -lm -o wiikart-test
  */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "game.h"
+#include "config.h"
 
 static int failures = 0;
 
@@ -70,6 +72,26 @@ static void teleport_lat(Game *g, Kart *k, int seg, float lat, float speed)
     k->lat = got;
     k->prog_raw = (float)k->seg + frac;
     k->total_progress = k->prog_raw;
+}
+
+/* Pick whichever shoulder points away from nearby folds in the circuit.
+ * That makes seam-adjacent cliff tests robust even when a wider road is
+ * close to another segment in plan view. */
+static void teleport_off_edge(Game *g, Kart *k, int seg, float speed)
+{
+    float distances[4] = { 6.0f, 10.0f, 16.0f, 24.0f };
+    int i, sign;
+    for (i = 0; i < 4; i++) {
+        for (sign = -1; sign <= 1; sign += 2) {
+            teleport_lat(g, k, seg,
+                         (g->track.wall_half + distances[i]) * (float)sign,
+                         speed);
+            if (fabsf(k->lat) > g->track.wall_half + 0.5f)
+                return;
+        }
+    }
+    CHECK(0, "%s segment %d has no reachable outside shoulder",
+          g->track.name, seg);
 }
 
 /* ------------------------------------------------------------------ */
@@ -320,9 +342,10 @@ static void test_ai_races_all_tracks(void)
                 Kart *k = &g.karts[i];
                 CHECK(!isnan(k->x) && !isnan(k->speed) && !isnan(k->heading),
                       "AI %d NaN on track %d frame %d", i, id, f);
-                CHECK(fabsf(k->lat) < g.track.wall_half + 2.0f,
-                      "AI %d outside the barriers on track %d (lat %.1f)",
-                      i, id, k->lat);
+                if (k->fall_t <= 0.0f && k->respawn_t <= 0.0f)
+                    CHECK(fabsf(k->lat) < g.track.wall_half + 2.0f,
+                          "AI %d outside the road without falling on track "
+                          "%d (lat %.1f)", i, id, k->lat);
                 if (failures) return;
                 if (k->lap > last_lap[i]) {
                     float lt = g.race_t - lap_start[i];
@@ -1223,7 +1246,7 @@ static void test_cliff_respawn(void)
           cp_before);
 
     /* now shove it off the side, well past the shoulder */
-    teleport_lat(&g, k, k->seg, g.track.wall_half + 6.0f, 12.0f);
+    teleport_off_edge(&g, k, k->seg, 12.0f);
     y_start = k->y;
     idle_inputs(in);
     for (f = 0; f < 60 * 3; f++) {
@@ -1250,13 +1273,53 @@ static void test_cliff_respawn(void)
     CHECK(k->seg == g.track.checkpoint_seg[cp_before],
           "respawned at segment %d, not checkpoint segment %d",
           k->seg, g.track.checkpoint_seg[cp_before]);
+    CHECK(k->respawn_t > g.settings.respawn_fade_seconds,
+          "respawn did not enter its black hold (%.2f s)", k->respawn_t);
+    CHECK(k->invincible_t >= k->respawn_t + 4.9f,
+          "respawn immunity is too short (%.2f s)", k->invincible_t);
+
+    /* Neither the blackout nor the visible flashing period may let a
+     * nearby rival shove the recovered car. */
+    {
+        Kart *rival = &g.karts[1];
+        Kart rival_before = *rival;
+        float safe_x = k->x, safe_z = k->z;
+        rival->x = k->x + 0.2f;
+        rival->z = k->z;
+        rival->y = k->y;
+        rival->seg = k->seg;
+        rival->lat = k->lat;
+        rival->speed = 0.0f;
+        game_update(&g, in, 1.0f / 60.0f);
+        CHECK(fabsf(k->x - safe_x) < 0.01f &&
+              fabsf(k->z - safe_z) < 0.01f,
+              "collision moved the car during blackout");
+
+        while (k->respawn_t > 0.0f)
+            game_update(&g, in, 1.0f / 60.0f);
+        safe_x = k->x;
+        safe_z = k->z;
+        rival->x = k->x + 0.2f;
+        rival->z = k->z;
+        rival->speed = 0.0f;
+        game_update(&g, in, 1.0f / 60.0f);
+        CHECK(k->invincible_t > 4.8f,
+              "visible invincibility expired during the fade");
+        CHECK(fabsf(k->x - safe_x) < 0.01f &&
+              fabsf(k->z - safe_z) < 0.01f,
+              "collision moved the flashing invincible car");
+        *rival = rival_before;
+    }
 
     /* and it must be drivable again afterwards */
     in[0].accel = 1;
-    for (f = 0; f < 120; f++)
+    for (f = 0; f < 180; f++)
         game_update(&g, in, 1.0f / 60.0f);
-    CHECK(k->speed > 3.0f, "car is dead after respawning (%.2f m/s)",
-          k->speed);
+    CHECK(k->speed > 3.0f,
+          "car is dead after respawning (%.2f m/s, fall %.2f, recover %.2f, "
+          "immune %.2f, lat %.2f, seg %d)",
+          k->speed, k->fall_t, k->respawn_t, k->invincible_t,
+          k->lat, k->seg);
     CHECK(!isnan(k->x) && !isnan(k->y), "respawn left NaNs behind");
 }
 
@@ -1293,7 +1356,7 @@ static void test_respawn_near_the_line(void)
 
             /* already past the shoulder, a few segments short of the line */
             seg = g.track.n - off;
-            teleport_lat(&g, k, seg, g.track.wall_half + 4.0f, 28.0f);
+            teleport_off_edge(&g, k, seg, 28.0f);
             k->last_checkpoint = track_checkpoint_for(&g.track, seg);
             if (k->last_checkpoint < 0)
                 k->last_checkpoint = 0;
@@ -1368,7 +1431,7 @@ static void test_respawn_bad_checkpoint(void)
     idle_inputs(in);
     k = &g.karts[0];
 
-    teleport_lat(&g, k, 40, g.track.wall_half + 5.0f, 14.0f);
+    teleport_off_edge(&g, k, 40, 14.0f);
     k->last_checkpoint = -3;               /* must not index backwards */
 
     for (f = 0; f < 60 * 4; f++) {
@@ -1401,7 +1464,7 @@ static void test_fall_is_visible(void)
     g.state = STATE_RACING;
     idle_inputs(in);
     k = &g.karts[0];
-    teleport_lat(&g, k, 60, g.track.wall_half + 5.0f, 20.0f);
+    teleport_off_edge(&g, k, 60, 20.0f);
 
     for (f = 0; f < 60 * 3; f++) {
         int seg;
@@ -1604,8 +1667,128 @@ static void test_ai_shift_styles(void)
     }
 }
 
+static void test_json_configuration(void)
+{
+    GameSettings settings;
+    ControlConfig controls;
+    Track widened;
+    char error[80];
+    const char *one_car =
+        "{\"cars\":[{\"name\":\"CUSTOM\",\"mass_kg\":1040,"
+        "\"power_hp\":180,\"brake_distance_100_kph_m\":35,"
+        "\"lateral_grip_g\":1.05,\"drag_area_m2\":0.61,"
+        "\"wheelbase_m\":2.50,\"offroad_grip\":0.50,"
+        "\"gear_top_speeds_kph\":[55,92,138,190,245]}]}";
+    const char *partial_settings =
+        "{\"_comment\":\"race\","
+        "\"respawn\":{\"black_hold_seconds\":1.5},"
+        "\"tracks\":{\"classic\":{\"width_multiplier\":1.2,"
+        "\"laps\":7}}}";
+
+    kart_specs_reset_defaults();
+    CHECK(config_load_cars_file("config/cars.json", error,
+                                (int)sizeof(error)),
+          "shipped cars.json did not load: %s", error);
+    CHECK(kart_spec_count == DEFAULT_SPEC_COUNT,
+          "shipped car count is %d", kart_spec_count);
+    CHECK(strcmp(kart_specs[1].name, "SPORT") == 0,
+          "shipped SPORT car disappeared");
+
+    CHECK(config_load_cars_text(one_car, error, (int)sizeof(error)),
+          "custom car did not load: %s", error);
+    CHECK(kart_spec_count == 1 &&
+          strcmp(kart_specs[0].name, "CUSTOM") == 0,
+          "custom roster was not committed");
+    CHECK(kart_specs[0].n_gears == 5 &&
+          fabsf(kart_specs[0].gear_top[4] - 245.0f / 3.6f) < 0.01f,
+          "custom gearing was not converted from km/h");
+    CHECK(!config_load_cars_text("{\"cars\":[{}]}", error,
+                                 (int)sizeof(error)),
+          "invalid car was accepted");
+    CHECK(kart_spec_count == 1 &&
+          strcmp(kart_specs[0].name, "CUSTOM") == 0,
+          "invalid JSON partially replaced the valid roster");
+    CHECK(!config_load_cars_text(
+              "{\"cars\":[{\"name\":\"BROKEN\" \"mass_kg\":1000}]}",
+              error, (int)sizeof(error)),
+          "JSON with a missing comma was accepted");
+    CHECK(kart_spec_count == 1 &&
+          strcmp(kart_specs[0].name, "CUSTOM") == 0,
+          "malformed JSON changed the valid roster");
+    kart_specs_reset_defaults();
+
+    game_settings_defaults(&settings);
+    CHECK(config_load_settings_file(&settings, "config/settings.json",
+                                    error, (int)sizeof(error)),
+          "shipped settings.json did not load: %s", error);
+    CHECK(fabsf(settings.ai_skill_mult - 0.97f) < 0.001f,
+          "AI skill setting did not load");
+    CHECK(config_load_settings_text(&settings, partial_settings, error,
+                                    (int)sizeof(error)),
+          "partial settings did not load: %s", error);
+    CHECK(fabsf(settings.respawn_black_seconds - 1.5f) < 0.001f,
+          "respawn setting did not change");
+    CHECK(!config_load_settings_text(&settings, "{\"ai\":5}", error,
+                                     (int)sizeof(error)),
+          "wrong settings section type was accepted");
+    track_init_with_settings(&widened, TRACK_CLASSIC, &settings);
+    CHECK(fabsf(widened.road_half - 5.6f * 1.2f) < 0.01f,
+          "track width multiplier was ignored (%.2f)", widened.road_half);
+    CHECK(widened.laps == 7,
+          "explicit track lap count was clamped to %d", widened.laps);
+
+    control_config_defaults(&controls);
+    CHECK(config_load_controls_file(&controls, "config/controls.json",
+                                    error, (int)sizeof(error)),
+          "shipped controls.json did not load: %s", error);
+    CHECK(controls.keyboard[0][CONTROL_ACCEL][0] == 'W',
+          "keyboard gas is not W");
+    CHECK((controls.gamecube[CONTROL_ACCEL] & GC_INPUT_A) != 0,
+          "GameCube A is not translated to gas");
+    CHECK(strcmp(controls.xbox_label[CONTROL_ACCEL], "RT") == 0,
+          "Xbox gas label is not RT");
+
+    printf("json config: %d cars, width x%.1f, gas W / RT -> %s\n",
+           kart_spec_count, settings.track_width_mult[TRACK_CLASSIC],
+           control_gamecube_name(controls.gamecube[CONTROL_ACCEL]));
+}
+
+/* The risky AI path is deliberate but repeatable: at least one aggressive
+ * driver should overcommit on unguarded Monarch, fall, and still recover
+ * well enough for the field to keep racing. */
+static void test_ai_can_fall(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_MONARCH);
+    Input in[MAX_HUMANS];
+    int f, i, falls = 0, aggressive_falls = 0;
+
+    game_init(&g, &cfg);
+    idle_inputs(in);
+    for (f = 0; f < 60 * 360; f++) {
+        int done = 1;
+        game_update(&g, in, 1.0f / 60.0f);
+        for (i = 1; i < NUM_KARTS; i++)
+            if (!g.karts[i].finished) done = 0;
+        if (done) break;
+    }
+    for (i = 1; i < NUM_KARTS; i++) {
+        falls += g.karts[i].falls;
+        if (g.karts[i].strategy == AI_LATE ||
+            g.karts[i].strategy == AI_CHARGER ||
+            g.karts[i].strategy == AI_DRAFTER)
+            aggressive_falls += g.karts[i].falls;
+    }
+    printf("fallible AI: %d cliff falls, %d by aggressive strategies\n",
+           falls, aggressive_falls);
+    CHECK(falls > 0, "no AI ever fell off unguarded Monarch");
+    CHECK(aggressive_falls > 0,
+          "aggressive strategies never paid for an overcommit");
+}
+
 int main(void)
 {
+    test_json_configuration();
     test_steering_filter();
     test_steer_sign();
     test_tracks_geometry();
@@ -1640,6 +1823,7 @@ int main(void)
     test_ai_uses_power_ups();
     test_no_rubber_banding();
     test_ai_shift_styles();
+    test_ai_can_fall();
     test_player_model_learns();
 
     if (failures) {

@@ -1,0 +1,75 @@
+# WiiKart future work
+
+These are design targets for releases after v1.3.0. They are deliberately
+not implemented in v1.3.0; details may change after testing, because apparently
+cars, mountains, and tires all object to being reduced to one convenient
+slider.
+
+## Roads, passes, and conditions
+
+- [ ] Add variable road width by segment or control point. Some sharp turns
+  should remain narrow and punishing; others should be tight in radius but
+  wide enough to support multiple lines and meaningful speed through the turn.
+- [ ] Rework the mountain-pass levels so their scenery, landmarks, elevation
+  transitions, roadside detail, and silhouettes are more visually distinctive.
+- [ ] Add winter variants of the mountain passes.
+- [ ] Add localized snow and ice hazards with visible boundaries and distinct
+  grip behavior.
+
+## Powertrain, boost, and instruments
+
+- [ ] Revisit grade and power behavior so acceleration is reduced more
+  convincingly uphill while cars retain or gain speed more naturally downhill.
+- [ ] Add a rechargeable nitro/boost resource and a clearly readable boost
+  gauge.
+- [ ] Add a JSON `turbo` capability and tuning block available only to cars
+  designed to use it.
+- [ ] Add per-car and optionally per-gear automatic shift ranges to `cars.json`,
+  including configurable upshift/downshift points rather than only limiter
+  speeds.
+- [ ] Add a numerical/digital tachometer alongside the existing rev band.
+- [ ] Make the tachometer band change colors as the engine moves through the
+  useful range, shift window, and limiter.
+
+## Drivers, AI, and persistent competition
+
+- [ ] Separate driver skill from personality. Build a field containing elite
+  aggressive drivers, poor drivers who overcommit, overly passive drivers,
+  and dependable safe drivers rather than eleven variations of "quite good."
+- [ ] Give every AI driver a unique name, character, visual identity, strengths,
+  weaknesses, and stable behavior profile.
+- [ ] Add a continuously updating on-screen leaderboard based on current race
+  order and keep it visible without covering the useful driving view.
+- [ ] Add persistent driver standings, records, and player progress across
+  sessions.
+- [ ] Record exceptional player laps and use their racing-line/braking data to
+  improve selected NPC behavior on later runs. Include reset/export controls
+  so a heroic accident does not become mandatory curriculum forever.
+
+## Laps and timing
+
+- [ ] Show a brief per-player lap-complete popup inside that player's viewport.
+- [ ] Track and display individual current, previous, and best lap times for
+  every human and AI driver.
+- [ ] Expand lap-count customization beyond the existing per-track JSON
+  override, including an accessible pre-race option and sensible validation.
+
+## Tires and surfaces
+
+- [ ] Replace the simple soft/medium/hard choice with compounds whose tradeoffs
+  matter over an entire race.
+- [ ] Prevent soft tires from being the automatic best choice by modeling a
+  useful combination of temperature, wear, rolling resistance, durability,
+  and surface compatibility.
+- [ ] Define dry, snow, and ice performance deliberately. Investigate whether
+  harder compounds should gain lower rolling resistance or durability on dry
+  pavement while winter-oriented/softer compounds gain cold, snow, and ice
+  grip; avoid granting extra acceleration or cornering grip merely because a
+  label says "hard."
+
+## Overall direction
+
+- [ ] Move the feel away from pure go-kart arcade racing and toward a low-poly
+  formula-car experience: more deliberate setup, braking, power delivery,
+  race information, driver identity, and consequence without losing readable
+  controls or quick races.
