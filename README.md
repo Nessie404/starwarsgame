@@ -7,7 +7,13 @@ Wii hardware through the Homebrew Channel.
 
 **Download:** grab `wiikart.zip` from the
 [latest release](https://github.com/Nessie404/starwarsgame/releases/latest),
-unzip, and open `wiikart.dol` in Dolphin.
+unzip, and open `wiikart.dol` in Dolphin. Older lines are published too:
+[v1.1.0](https://github.com/Nessie404/starwarsgame/releases/tag/v1.1.0),
+[v1.0.1](https://github.com/Nessie404/starwarsgame/releases/tag/v1.0.1) and
+the original arcade racer as
+[`wiikart-0.1.1.zip`](https://github.com/Nessie404/starwarsgame/releases/download/v0.1/wiikart-0.1.1.zip)
+on the [v0.1 release](https://github.com/Nessie404/starwarsgame/releases/tag/v0.1)
+(see `patches/README.md` for why 0.1.1 has no tag of its own).
 
 Version 1.2.0 is a semi-sim mountain racer: pick a car in the garage —
 its gearbox, tires and paint, all defined by real-world performance

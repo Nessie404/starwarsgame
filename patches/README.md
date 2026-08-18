@@ -16,3 +16,21 @@ runs that line's host test suite before building.
 
 To publish one: Actions -> release-patch -> Run workflow, with the base
 tag, the version and the patch path.
+
+## When a tag cannot be created
+
+`v0.1.1` has no tag or release of its own. Creating `refs/tags/v0.1.1`
+comes back `403 Resource not accessible by integration`, from both the git
+refs API and the releases API, while `v1.0.1` and `v1.1.0` were created
+without complaint seconds apart — so something repo-side refuses that
+name (a legacy tag-protection pattern under Settings -> Tags, or a
+ruleset, would look exactly like this; the rulesets API reports none).
+
+Rather than publish nothing, the workflow falls back to uploading the
+build to the **base** release as `wiikart-<version>.zip`. So v0.1.1 is
+downloadable from the v0.1 release:
+
+    https://github.com/Nessie404/starwarsgame/releases/download/v0.1/wiikart-0.1.1.zip
+
+If the tag restriction is lifted, re-running the workflow publishes a
+proper `v0.1.1` release and the fallback stops firing.

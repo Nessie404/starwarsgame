@@ -14,6 +14,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - name: Rename the first build to v0.1 and drop interim builds
         env:
           GH_TOKEN: ${{ github.token }}
@@ -44,6 +46,14 @@ jobs:
               gh release delete "$tag" --yes --cleanup-tag
             fi
           done
+
+          # v0.1.1 could not get a tag of its own (see patches/README.md),
+          # so its build hangs off this release as a second asset. Say which
+          # zip is which on the release page.
+          if gh release view v0.1 >/dev/null 2>&1; then
+            gh release edit v0.1 --title "WiiKart v0.1" \
+              --notes-file docs/release-notes/v0.1.md
+          fi
 
           echo "--- releases now ---"
           gh release list
