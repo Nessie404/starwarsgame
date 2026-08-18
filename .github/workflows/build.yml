@@ -90,12 +90,24 @@ jobs:
             TAG="build-${{ github.run_number }}"
           fi
           TITLE="WiiKart ${TAG}"
+          # Release notes live in the repo so they can be reviewed with the
+          # code that produced them; without a file the generic blurb is
+          # good enough.
+          NOTES_FILE="docs/release-notes/${TAG}.md"
+          if [[ -f "$NOTES_FILE" ]]; then
+            NOTES_ARG=(--notes-file "$NOTES_FILE")
+          else
+            NOTES_ARG=(--notes "Download wiikart.zip, unzip, and open wiikart.dol in the Dolphin emulator (or copy the apps folder to an SD card for a real Wii). See the README for controls.")
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" wiikart.zip --clobber
+            if [[ -f "$NOTES_FILE" ]]; then
+              gh release edit "$TAG" --title "$TITLE" "${NOTES_ARG[@]}"
+            fi
           else
             gh release create "$TAG" wiikart.zip \
               --target "${{ github.sha }}" \
               --title "$TITLE" \
-              --notes "Download wiikart.zip, unzip, and open wiikart.dol in the Dolphin emulator (or copy the apps folder to an SD card for a real Wii). See the README for controls." \
+              "${NOTES_ARG[@]}" \
               --latest
           fi
