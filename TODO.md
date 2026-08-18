@@ -5,6 +5,27 @@ not implemented in v1.3.0; details may change after testing, because apparently
 cars, mountains, and tires all object to being reduced to one convenient
 slider.
 
+## High priority: camera
+
+- [ ] Add a smooth reversing camera. As reverse speed increases, orbit the
+  chase camera progressively toward the front of the car so the view looks in
+  the direction the car is actually backing. Use speed-based interpolation,
+  damping, and a small dead zone so crossing through zero does not snap the
+  camera 180 degrees or make it hunt back and forth.
+- [ ] Return the camera smoothly to its normal forward chase position as the
+  car slows in reverse or begins moving forward again.
+- [ ] Make camera pitch follow the road/car pitch enough to preserve a
+  consistent viewing angle on climbs, crests, and descents. Smooth the response
+  so every small surface change does not become an involuntary camera nod.
+- [ ] Clamp pitch and vertical movement so the camera never settles too low,
+  points mostly into the pavement on a descent, or loses the road over a crest.
+- [ ] Keep the car's direction of travel and useful road-ahead area visible at
+  all times. Add speed-sensitive look-ahead while preserving terrain avoidance
+  and a readable amount of horizon.
+- [ ] Expose reverse-orbit speed, smoothing, pitch influence, pitch limits,
+  height, distance, and look-ahead as documented camera settings rather than
+  burying the final feel in constants.
+
 ## Roads, passes, and conditions
 
 - [ ] Add variable road width by segment or control point. Some sharp turns
@@ -12,6 +33,11 @@ slider.
   wide enough to support multiple lines and meaningful speed through the turn.
 - [ ] Rework the mountain-pass levels so their scenery, landmarks, elevation
   transitions, roadside detail, and silhouettes are more visually distinctive.
+- [ ] Add **Breakneck Pass**: a short circuit with large elevation changes,
+  narrow pavement, abrupt grade transitions, and no guardrails.
+- [ ] Add **Guanella Pass**: a medium-length circuit with relatively modest
+  overall elevation change, narrow pavement, no guardrails, and a
+  switchback-heavy layout.
 - [ ] Add winter variants of the mountain passes.
 - [ ] Add localized snow and ice hazards with visible boundaries and distinct
   grip behavior.
