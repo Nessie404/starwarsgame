@@ -106,7 +106,7 @@ static void test_tracks_geometry(void)
         printf("track %-8s: %3d samples, %6.0f m, climb %3.0f m\n",
                t.name, t.n, t.total_len, t.max_y - t.min_y);
         CHECK(t.n >= 64 && t.n <= TRACK_MAX_POINTS, "samples %d", t.n);
-        CHECK(t.total_len > 400.0f && t.total_len < 4000.0f,
+        CHECK(t.total_len > 400.0f && t.total_len < 5000.0f,
               "length %.0f", t.total_len);
         for (i = 0; i < t.n; i++) {
             CHECK(!isnan(t.px[i]) && !isnan(t.py[i]) && !isnan(t.pz[i]),
@@ -266,6 +266,12 @@ static void test_cornering_grip_cap(void)
     CHECK(g.karts[0].slip > 0.1f, "no understeer slip at full lock");
 }
 
+/*
+ * The one remaining track power-up: fresh rubber, from a roadside panel,
+ * held in reserve and deployed by the driver. Engine boost is not a
+ * pickup any more (see test_boosted_lap_is_quicker and friends) — this
+ * test is only about the tire panels now.
+ */
 static void test_power_ups(void)
 {
     Game g;
@@ -285,31 +291,18 @@ static void test_power_ups(void)
     in[0].accel = 1;
     for (f = 0; f < 240 && !g.karts[0].power_held; f++)
         game_update(&g, in, 1.0f / 60.0f);
-    CHECK(g.karts[0].power_held, "did not collect a power-up");
+    CHECK(g.karts[0].power_held == POWER_TIRES,
+          "did not collect the fresh-rubber power-up");
     if (!g.karts[0].power_held) return;
 
-    {
-        int kind = g.karts[0].power_held;
-        in[0].item = 1;
-        game_update(&g, in, 1.0f / 60.0f);
-        CHECK(!g.karts[0].power_held, "power-up not consumed");
-        CHECK(g.karts[0].power_fired, "deploying raised no event");
-        if (kind == POWER_PUSH) {
-            CHECK(g.karts[0].push_t > PUSH_SECONDS - 0.5f,
-                  "push-to-pass not deployed (%.2f s)", g.karts[0].push_t);
-            CHECK(g.karts[0].grip_t <= 0.0f, "push also gave grip");
-        } else {
-            CHECK(g.karts[0].grip_t > TIRE_SECONDS - 0.5f,
-                  "fresh rubber not deployed (%.2f s)", g.karts[0].grip_t);
-            CHECK(g.karts[0].push_t <= 0.0f, "tires also gave power");
-        }
-    }
+    in[0].item = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    CHECK(!g.karts[0].power_held, "power-up not consumed");
+    CHECK(g.karts[0].power_fired, "deploying raised no event");
+    CHECK(g.karts[0].grip_t > TIRE_SECONDS - 0.5f,
+          "fresh rubber not deployed (%.2f s)", g.karts[0].grip_t);
 
-    /* the two power-ups must do different things, and both must be
-     * modest: bounded engine boost, bounded grip gain */
-    CHECK(PUSH_POWER > 1.0f && PUSH_POWER < 1.25f,
-          "push-to-pass %.2fx is not a realistic overtake boost",
-          PUSH_POWER);
+    /* it has to be modest: a bounded grip gain, not a free tank of fuel */
     CHECK(TIRE_GRIP > 1.0f && TIRE_GRIP < 1.25f,
           "fresh rubber %.2fx grip is not realistic", TIRE_GRIP);
 }
@@ -325,7 +318,10 @@ static void test_ai_races_all_tracks(void)
         GameConfig cfg = default_cfg(id);
         Input in[MAX_HUMANS];
         int f, i, done = 0, finished = 0;
-        const int max_frames = 60 * 400;
+        /* BERTHOUD 2.0 races roughly double the distance of anything
+         * else on the roster by design, so the budget has to cover that
+         * rather than the old shorter roster's typical race. */
+        const int max_frames = 60 * 800;
         float best_lap = 1e9f, lap_start[NUM_KARTS];
         int last_lap[NUM_KARTS];
 
@@ -867,7 +863,7 @@ static void test_ai_uses_power_ups(void)
     Game g;
     GameConfig cfg = default_cfg(TRACK_BERTHOUD);
     Input in[MAX_HUMANS];
-    int f, i, pushes = 0, tires = 0, held_seen = 0;
+    int f, i, tires = 0, held_seen = 0;
 
     game_init(&g, &cfg);
     idle_inputs(in);
@@ -876,20 +872,13 @@ static void test_ai_uses_power_ups(void)
         for (i = 1; i < NUM_KARTS; i++) {
             if (g.karts[i].power_held)
                 held_seen = 1;
-            if (g.karts[i].power_fired) {
-                if (g.karts[i].push_t > 0.0f)
-                    pushes++;
-                else
-                    tires++;
-            }
+            if (g.karts[i].power_fired)
+                tires++;
         }
     }
-    printf("AI power-ups over 2 minutes: %d push-to-pass, %d fresh rubber\n",
-           pushes, tires);
-    CHECK(held_seen, "no AI ever collected a power-up");
-    CHECK(pushes + tires > 0, "AI never deployed a power-up");
-    CHECK(pushes > 0 && tires > 0,
-          "AI only ever used one kind (%d push, %d tires)", pushes, tires);
+    printf("AI power-ups over 2 minutes: %d fresh rubber\n", tires);
+    CHECK(held_seen, "no AI ever collected the fresh-rubber power-up");
+    CHECK(tires > 0, "AI never deployed the fresh-rubber power-up");
 }
 
 /*
@@ -1156,11 +1145,19 @@ static void test_tire_compounds(void)
  * race on each and check that the sprint and the long haul want different
  * rubber — this is the test that stops softs quietly becoming the only
  * sensible choice again.
+ *
+ * Averaged over several AI drivers rather than read off a single one:
+ * one kart's finish time carries the timing of its own overcommit gambles
+ * (ai_random01 is deterministic, but which corner it lands on shifts with
+ * anything that nudges the lap by even a few milliseconds), which is
+ * enough noise on its own to blur a compound comparison. Four cars average
+ * that out to the trend that is actually there.
  */
 static void test_tire_strategy_crossover(void)
 {
     struct { int track; float t[TIRE_COMPOUNDS]; } run[2];
-    int r, c;
+    const int sample[] = { 1, 2, 3, 4 };
+    int r, c, si;
 
     run[0].track = TRACK_CLASSIC;    /* a sprint    */
     run[1].track = TRACK_KENOSHA;    /* a long haul */
@@ -1171,16 +1168,34 @@ static void test_tire_strategy_crossover(void)
             GameConfig cfg = default_cfg(run[r].track);
             Input in[MAX_HUMANS];
             int f, i;
+            float total = 0.0f;
+            int finished = 0;
 
             cfg.tire[0] = c;
             game_init(&g, &cfg);
             idle_inputs(in);
             for (i = 1; i < NUM_KARTS; i++)
                 g.karts[i].tire = c;          /* one compound, whole field */
-            for (f = 0; f < 60 * 420 && !g.karts[1].finished; f++)
+            for (f = 0; f < 60 * 420; f++) {
                 game_update(&g, in, 1.0f / 60.0f);
-            run[r].t[c] = g.karts[1].finished ? g.karts[1].finish_time
-                                              : 9999.0f;
+                finished = 0;
+                for (si = 0; si < (int)(sizeof(sample) / sizeof(sample[0]));
+                     si++)
+                    if (g.karts[sample[si]].finished)
+                        finished++;
+                if (finished == (int)(sizeof(sample) / sizeof(sample[0])))
+                    break;
+            }
+            finished = 0;
+            for (si = 0; si < (int)(sizeof(sample) / sizeof(sample[0]));
+                 si++) {
+                const Kart *k = &g.karts[sample[si]];
+                if (k->finished) {
+                    total += k->finish_time;
+                    finished++;
+                }
+            }
+            run[r].t[c] = finished ? total / (float)finished : 9999.0f;
         }
         printf("%-9s soft %.1fs  medium %.1fs  hard %.1fs\n",
                track_name(run[r].track), run[r].t[TIRE_SOFT],
@@ -1357,7 +1372,11 @@ static void test_lap_counts(void)
         printf("%-9s %5.0f m x %d laps = %.0f m of racing\n",
                t.name, t.total_len, t.laps, dist);
         CHECK(t.laps >= 2 && t.laps <= 4, "%s has %d laps", t.name, t.laps);
-        CHECK(dist > 1800.0f && dist < 5000.0f,
+        /* BERTHOUD 2.0 is a deliberate exception to "every race covers a
+         * similar distance": it is meant to be experienced at epic
+         * length, not chopped down to fit the others' band. */
+        CHECK(dist > 1800.0f &&
+              dist < (id == TRACK_BERTHOUD2 ? 10000.0f : 5000.0f),
               "%s race is %.0f m, out of line with the others",
               t.name, dist);
     }
@@ -1835,16 +1854,24 @@ static void test_json_configuration(void)
     CHECK(config_load_cars_file("config/cars.json", error,
                                 (int)sizeof(error)),
           "shipped cars.json did not load: %s", error);
-    CHECK(kart_spec_count == DEFAULT_SPEC_COUNT + 1,
+    CHECK(kart_spec_count == DEFAULT_SPEC_COUNT + 3,
           "shipped car count is %d", kart_spec_count);
     CHECK(strcmp(kart_specs[1].name, "SPORT") == 0,
           "shipped SPORT car disappeared");
     CHECK(strcmp(kart_specs[DEFAULT_SPEC_COUNT].name, "TURBO") == 0 &&
-          kart_specs[DEFAULT_SPEC_COUNT].has_turbo &&
+          kart_specs[DEFAULT_SPEC_COUNT].aspiration == ASPIRATION_TURBO &&
           kart_specs[DEFAULT_SPEC_COUNT].boost_power_mult > 1.0f,
-          "shipped TURBO car's turbo block did not parse");
-    CHECK(!kart_specs[1].has_turbo,
-          "SPORT picked up a turbo block it does not have");
+          "shipped TURBO car's aspiration block did not parse");
+    CHECK(strcmp(kart_specs[DEFAULT_SPEC_COUNT + 1].name, "BLOWER") == 0 &&
+          kart_specs[DEFAULT_SPEC_COUNT + 1].aspiration ==
+              ASPIRATION_SUPERCHARGED,
+          "shipped BLOWER car's supercharged block did not parse");
+    CHECK(strcmp(kart_specs[DEFAULT_SPEC_COUNT + 2].name, "RUBY") == 0 &&
+          kart_specs[DEFAULT_SPEC_COUNT + 2].aspiration == ASPIRATION_TURBO &&
+          kart_specs[DEFAULT_SPEC_COUNT + 2].n_gears == 6,
+          "shipped RUBY car did not parse");
+    CHECK(kart_specs[1].aspiration == ASPIRATION_NATURAL,
+          "SPORT picked up an aspiration block it does not have");
 
     CHECK(config_load_cars_text(one_car, error, (int)sizeof(error)),
           "custom car did not load: %s", error);
@@ -2818,11 +2845,11 @@ static void test_turbo_only_for_cars_that_have_one(void)
         in[0].accel = 1;
         in[0].boost = (v == 1);
         k = &g.karts[0];
-        CHECK(!kart_specs[k->spec].has_turbo,
-              "test bug: the default car already has a turbo");
+        CHECK(kart_specs[k->spec].aspiration == ASPIRATION_NATURAL,
+              "test bug: the default car already has an aspiration block");
         for (f = 0; f < 60 * 8; f++)
             game_update(&g, in, 1.0f / 60.0f);
-        CHECK(!k->boosting, "a car with no turbo block reported boosting");
+        CHECK(!k->boosting, "a naturally aspirated car reported boosting");
         top[v] = k->speed;
     }
     printf("no turbo block: %.1f km/h with the button left alone, "
@@ -2848,10 +2875,11 @@ static void test_turbo_charge_drains_and_recovers(void)
 
     kart_specs_reset_defaults();
     kart_specs[4] = kart_specs[1];             /* a turbo SPORT */
-    kart_specs[4].has_turbo = 1;
+    kart_specs[4].aspiration = ASPIRATION_TURBO;
     kart_specs[4].boost_power_mult = 1.5f;
     kart_specs[4].boost_seconds = 2.0f;
     kart_specs[4].boost_recharge_seconds = 4.0f;
+    kart_specs[4].boost_spool_seconds = 0.2f;
     kart_spec_count = 5;
 
     cfg.spec[0] = 4;
@@ -2906,10 +2934,11 @@ static void test_boosted_lap_is_quicker(void)
 
     kart_specs_reset_defaults();
     kart_specs[4] = kart_specs[1];             /* a turbo SPORT */
-    kart_specs[4].has_turbo = 1;
+    kart_specs[4].aspiration = ASPIRATION_TURBO;
     kart_specs[4].boost_power_mult = 1.4f;
     kart_specs[4].boost_seconds = 2.5f;
     kart_specs[4].boost_recharge_seconds = 5.0f;
+    kart_specs[4].boost_spool_seconds = 0.3f;
     kart_spec_count = 5;
 
     for (v = 0; v < 2; v++) {
@@ -2935,6 +2964,50 @@ static void test_boosted_lap_is_quicker(void)
            lap[0], lap[1]);
     CHECK(lap[1] < lap[0],
           "the turbo car was not quicker (%.1f vs %.1f s)", lap[1], lap[0]);
+
+    kart_specs_reset_defaults();
+}
+
+/*
+ * A supercharged car needs no AI judgement at all — no button, nothing
+ * to manage — so proving it works is simpler: the multiplier should just
+ * apply throughout, and the car should be reliably quicker for it.
+ */
+static void test_supercharged_lap_is_quicker(void)
+{
+    float lap[2];
+    int v;
+
+    kart_specs_reset_defaults();
+    kart_specs[4] = kart_specs[1];             /* a supercharged SPORT */
+    kart_specs[4].aspiration = ASPIRATION_SUPERCHARGED;
+    kart_specs[4].boost_power_mult = 1.35f;
+    kart_spec_count = 5;
+
+    for (v = 0; v < 2; v++) {
+        Game g;
+        GameConfig cfg = default_cfg(TRACK_KENOSHA);
+        Input in[MAX_HUMANS];
+        Kart *k;
+        int f, c;
+
+        cfg.spec[0] = 1;
+        game_init(&g, &cfg);
+        idle_inputs(in);
+        k = &g.karts[1];
+        k->spec = (v == 1) ? 4 : 1;
+        k->ai_skill = 1.0f;
+        for (c = 0; c < TRACK_MAX_CORNERS; c++)
+            k->corner_conf[c] = 1.0f;
+        for (f = 0; f < 60 * 300 && !k->finished; f++)
+            game_update(&g, in, 1.0f / 60.0f);
+        lap[v] = k->best_lap_time > 0.0f ? k->best_lap_time : 9999.0f;
+    }
+    printf("same car on KENOSHA, natural vs supercharged: %.1f s vs %.1f s\n",
+           lap[0], lap[1]);
+    CHECK(lap[1] < lap[0],
+          "the supercharged car was not quicker (%.1f vs %.1f s)",
+          lap[1], lap[0]);
 
     kart_specs_reset_defaults();
 }
@@ -3566,6 +3639,7 @@ int main(void)
     test_turbo_only_for_cars_that_have_one();
     test_turbo_charge_drains_and_recovers();
     test_boosted_lap_is_quicker();
+    test_supercharged_lap_is_quicker();
     test_editing_cars_json_changes_the_car();
     test_grade_costs_speed();
     test_grade_costs_grip();

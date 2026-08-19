@@ -71,6 +71,11 @@ Left for later, now that the camera has somewhere to live:
 - [x] Add **Guanella Pass**: a medium-length circuit with relatively modest
   overall elevation change, narrow pavement, no guardrails, and a
   switchback-heavy layout. *(v1.6.0: 1986 m, seven hairpins, 7.8 m wide.)*
+- [x] Add **Berthoud Pass 2.0**: built from the real pass's own elevation
+  profile — a stack of switchbacks up, a summit, a stack down, a flat
+  loop-back through the valley floor, and a gentle climb back to a
+  start/finish at the lap's own middle elevation. *(v1.15.0: 3263 m, 86 m
+  of climb, 33 corners, tightest radius 7 m.)*
 - [ ] Add winter variants of the mountain passes.
 - [ ] Add localized snow and ice hazards with visible boundaries and distinct
   grip behavior.
@@ -83,19 +88,16 @@ Left for later, now that the camera has somewhere to live:
       falls off with cos, and both are scalable from the `hills` block.)*
 - [x] Add a rechargeable nitro/boost resource and a clearly readable boost
   gauge; add a JSON `turbo` capability and tuning block available only to
-  cars designed to use it. Done in v1.14.0: `boost_charge` on `Kart`
-  drains while the button is held (and only while the driver is also
-  accelerating — kart_step only spends engine power under `in->accel`, so
-  firing it at a speed already capped by the corner ahead would just
-  waste the charge for nothing) and recharges while off the throttle,
-  never while it. Gated per car by an optional `"turbo"` block in
-  `cars.json` (`power_multiplier`, `boost_seconds`, `recharge_seconds`);
-  the shipped file's `TURBO` car is the worked example. A gauge sits next
-  to the tire bar for a car that has one. AI decide for themselves when
-  to spend it (`ai_control`), which is also the end-to-end proof: a
-  turbo SPORT laps Berthoud at 72.6 s against a plain SPORT's 74.3 s,
-  same skill, same learned corner confidence
-  (`test_boosted_lap_is_quicker`).
+  cars designed to use it. Done in v1.14.0, replaced by a broader
+  `aspiration` system in v1.15.0.
+- [x] Move boost off the track entirely and onto the engine: naturally
+  aspirated, turbocharged, or supercharged, tunable per car instead of a
+  power-up to collect. Done in v1.15.0: `KartSpec.aspiration` is
+  `"turbo"` (rechargeable charge, a spool ramp, a button) or
+  `"supercharged"` (stateless flat power multiplier while on the
+  throttle, no button, no charge) or absent (naturally aspirated). Only
+  the fresh-tires power-up remains on track. `BLOWER` is the shipped
+  supercharged car.
 - [x] Add per-car and optionally per-gear automatic shift ranges to `cars.json`,
   including configurable upshift/downshift points rather than only limiter
   speeds. *(v1.7.0.)*

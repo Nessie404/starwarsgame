@@ -42,8 +42,7 @@
     }
   },
   "powerups": {
-    "push_power_multiplier": 1.13,
-    "push_seconds": 4.0,
+    "_comment": "Engine boost is not a track power-up any more — see the aspiration block in cars.json.",
     "fresh_tire_grip_multiplier": 1.10,
     "fresh_tire_seconds": 8.0
   },

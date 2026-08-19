@@ -796,7 +796,7 @@ static void audio_update(void)
     /* engine follows P1's speed; revs rise and fall with velocity */
     v = fabsf(k->speed);
     pitch = (int)(ENGINE_CYCLE * (34.0f + v * 4.4f));      /* Hz * cycle */
-    if (k->push_t > 0.0f) pitch = (int)(pitch * 1.10f);
+    if (k->boosting) pitch = (int)(pitch * 1.10f);
     if (pitch > 140000) pitch = 140000;
     vol = 70 + (int)(v * 2.2f);
     if (vol > 170) vol = 170;
@@ -1275,7 +1275,7 @@ static void draw_kart(const Track *t, const Kart *k)
 
     draw_car_model(k->x, by, k->z, yaw, pitch, k->steer_vis, col);
 
-    if (k->push_t > 0.0f) {
+    if (k->boosting) {
         float len = 1.1f * (0.7f + 0.3f * ((frame_no & 2) ? 1.0f : 0.4f));
         u8 fr = 255, fg = (frame_no & 2) ? 170 : 110;
         GX_Begin(GX_TRIANGLES, GX_VTXFMT0, 3);
@@ -1963,16 +1963,16 @@ static void draw_player_hud(int p)
              255, 220, 60, 240);
 
     /* speed, km/h — red while the marshal has cut the power, amber while
-     * push-to-pass is deployed */
+     * boosting */
     snprintf(buf, sizeof(buf), "%d", (int)(fabsf(k->speed) * 3.6f));
     if (k->wrong_way)
         hud_text(vx + 14.0f, vy + vh - 40.0f, 13.0f, 24.0f, buf,
                  245, 75, 65, 235);
     else
         hud_text(vx + 14.0f, vy + vh - 40.0f, 13.0f, 24.0f, buf,
-                 k->push_t > 0.0f ? 255 : 235,
-                 k->push_t > 0.0f ? 170 : 235,
-                 k->push_t > 0.0f ? 40 : 235, 235);
+                 k->boosting ? 255 : 235,
+                 k->boosting ? 170 : 235,
+                 k->boosting ?  40 : 235, 235);
 
     /* who you are chasing — and how they drive */
     if (game.cfg.n_humans == 1 && k->rank > 1 &&
@@ -2065,19 +2065,32 @@ static void draw_player_hud(int p)
         hud_rect(bx + 1.0f, by + 1.0f, 82.0f * life, 4.0f, lr, lg, lb, 235);
     }
 
-    /* the turbo gauge, next to the tire bar — only a car that has one
-     * gets the readout, same as it only gets the button */
-    if (kart_specs[k->spec].has_turbo) {
+    /*
+     * The boost readout, next to the tire bar — how it is shown depends
+     * on how the engine is fed. A turbo has a charge worth watching,
+     * so it gets the gauge and it lights up gold once boost_spool has
+     * actually built (turbo lag means the button and the power do not
+     * arrive together). A supercharger has nothing to run out of, so
+     * there is no gauge to draw — just a small label that lights up the
+     * instant it is doing anything, because that is genuinely all there
+     * is to know about it.
+     */
+    if (kart_specs[k->spec].aspiration == ASPIRATION_TURBO) {
         float bx2 = vx + vw - 202.0f, by2 = vy + vh - 26.0f;
         u8 br = k->boosting ? 255 : 120;
         u8 bg = k->boosting ? 205 : 190;
         u8 bb = k->boosting ?  60 : 235;
 
-        hud_text(bx2, by2 - 15.0f, 8.0f, 14.0f, "BOOST", 190, 195, 210, 200);
+        hud_text(bx2, by2 - 15.0f, 8.0f, 14.0f, "TURBO", 190, 195, 210, 200);
         hud_rect(bx2, by2, 84.0f, 6.0f, 15, 15, 20, 170);
         hud_rect(bx2 + 1.0f, by2 + 1.0f,
                  82.0f * game_clampf(k->boost_charge, 0.0f, 1.0f), 4.0f,
                  br, bg, bb, 235);
+    } else if (kart_specs[k->spec].aspiration == ASPIRATION_SUPERCHARGED) {
+        float bx2 = vx + vw - 202.0f, by2 = vy + vh - 26.0f;
+        hud_text(bx2, by2 - 4.0f, 9.0f, 15.0f, "SUPERCHARGED",
+                 k->boosting ? 255 : 150, k->boosting ? 205 : 160,
+                 k->boosting ?  60 : 190, k->boosting ? 235 : 170);
     }
 
     draw_leaderboard(p, vx, vy, vw, vh);
@@ -2090,26 +2103,18 @@ static void draw_player_hud(int p)
         hud_text(vx + vw * 0.5f - 60.0f, vy + vh * 0.5f, 14.0f, 24.0f,
                  "FALLING", 255, 120, 90, 240);
 
-    /* power-up in reserve, and the timer while one is deployed */
+    /* the one remaining track power-up: fresh rubber in reserve, and
+     * the timer while a set is actually being run in */
     if (k->power_held) {
-        const char *nm = power_name(k->power_held);
-        if (k->power_held == POWER_PUSH)
-            hud_text(vx + vw - 96.0f, vy + vh - 36.0f, 10.0f, 17.0f, nm,
-                     240, 180, 60, 235);
-        else
-            hud_text(vx + vw - 96.0f, vy + vh - 36.0f, 10.0f, 17.0f, nm,
-                     110, 225, 140, 235);
+        hud_text(vx + vw - 96.0f, vy + vh - 36.0f, 10.0f, 17.0f,
+                 power_name(k->power_held), 110, 225, 140, 235);
     }
-    if (k->push_t > 0.0f || k->grip_t > 0.0f) {
-        float frac = (k->push_t > 0.0f)
-                         ? k->push_t / game.settings.push_seconds
-                         : k->grip_t / game.settings.fresh_tire_seconds;
-        u8 cr = (k->push_t > 0.0f) ? 240 : 110;
-        u8 cg = (k->push_t > 0.0f) ? 175 : 225;
-        u8 cb = (k->push_t > 0.0f) ?  55 : 140;
+    if (k->grip_t > 0.0f) {
+        float frac = k->grip_t / game.settings.fresh_tire_seconds;
         hud_rect(vx + 14.0f, vy + vh - 12.0f, 90.0f, 6.0f, 15, 15, 20, 160);
         hud_rect(vx + 15.0f, vy + vh - 11.0f,
-                 88.0f * game_clampf(frac, 0.0f, 1.0f), 4.0f, cr, cg, cb, 230);
+                 88.0f * game_clampf(frac, 0.0f, 1.0f), 4.0f,
+                 110, 225, 140, 230);
     }
 }
 

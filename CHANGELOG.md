@@ -4,6 +4,57 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.15.0] - 2026-08-19
+
+### Changed
+
+- **Boost is an engine trait now, not a track pickup.** The old fresh-tires
+  *and* push-to-pass power-up pairing is gone; only fresh rubber remains as
+  a track power-up. In its place every `KartSpec` has an `aspiration` —
+  `"turbo"` or `"supercharged"`, or nothing for a naturally-aspirated car —
+  set from a new `"aspiration"` block in `cars.json` (`config.c`'s
+  `read_aspiration`, replacing `read_turbo`). A turbo keeps the old
+  rechargeable-charge behavior, now with a spool: press the button and
+  the boost ramps in over `spool_seconds` rather than snapping to full
+  power, drains while held, and recharges off the throttle. A supercharger
+  has no button, no charge and no lag at all — it is a flat power
+  multiplier applied to the engine any time the driver is on the throttle,
+  the way a stateless mechanical boost actually behaves. Both still only
+  help while `kart_step` is computing drive power under `in->accel`, which
+  is why the AI's own turbo heuristic keeps checking `in->accel` before
+  firing. `TURBO` moved to the new block; `BLOWER`, a new supercharged
+  car, is the worked example for the other kind.
+
+  Tested: `test_boosted_lap_is_quicker` (turbo) and the new
+  `test_supercharged_lap_is_quicker` (supercharger, on Kenosha, where
+  constant extra power doesn't cost a corner-entry overshoot penalty).
+
+### Added
+
+- **Berthoud Pass 2.0**, an eighth circuit built from the real pass's own
+  elevation profile rather than stylized from memory: three ramp-and-hairpin
+  switchbacks climbing one side, a short summit esses, four more descending
+  the other, a flat loop-back through the valley floor that turns the road
+  around, and a gentle climb back up to a start/finish that sits at the
+  lap's own middle elevation — below the summit, above the valley floor.
+  Each switchback is a real straight-ish ramp before the road folds back on
+  itself, the way an actual mountain road is built, rather than reversing
+  direction every few meters. 3263 m, 86 m of climb, 33 corners, tightest
+  radius 7 m.
+
+  Fixing the AI on this track also fixed two latent bugs any tight,
+  self-crossing track could have hit: `kart_place_on_grid` now hands
+  `track_locate` the segment its own backward walk already found instead
+  of asking for a global nearest-point search, since a switchback can loop
+  back close enough to itself in world space that the global search could
+  snap a grid slot onto the wrong pass entirely; and corner segmentation
+  is checked against a plausible curvature range in
+  `test_corner_segmentation`.
+
+- **RUBY**, a lightweight turbocharged 4-cylinder car for `cars.json`: six
+  gears (15/35/67/100/150/200 km/h), high horsepower for its 1080 kg curb
+  weight, and a high-pressure turbo tune (1.55x power multiplier).
+
 ## [1.14.0] - 2026-08-19
 
 ### Added

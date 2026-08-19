@@ -21,15 +21,15 @@ See [CHANGELOG.md](CHANGELOG.md) for the release-by-release inventory and
 v1.10.0, and [docs/HANDOFF.md](docs/HANDOFF.md) if you are picking this
 project up to work on it.
 
-Version 1.10.0 is a semi-sim mountain racer: pick a car in the garage —
-its gearbox, tires and paint, all defined by real-world performance
-numbers — then race a **field of eleven AI drivers who each race
-differently, shift differently, learn from their mistakes, and adapt to
-you**, over seven circuits including six stylized Colorado passes with
-real grades, switchbacks, cliffs and gravity. Lap counts are set per
-circuit (2–4 laps by default) so short circuits remain multi-lap. Think
-arcade fun with a driving model that expects you to brake for the
-hairpins.
+WiiKart is a semi-sim mountain racer: pick a car in the garage — its
+gearbox, tires, aspiration (naturally aspirated, turbocharged or
+supercharged) and paint, all defined by real-world performance numbers —
+then race a **field of eleven AI drivers who each race differently, shift
+differently, learn from their mistakes, and adapt to you**, over eight
+circuits including seven stylized Colorado passes with real grades,
+switchbacks, cliffs and gravity. Lap counts are set per circuit (2–4 laps
+by default) so short circuits remain multi-lap. Think arcade fun with a
+driving model that expects you to brake for the hairpins.
 
 **Version history**, oldest first:
 
@@ -170,13 +170,20 @@ hairpins.
 - **Split-screen multiplayer** for up to 4 players (horizontal split for
   2, quadrants for 3-4), with view culling so a full field still runs at
   frame rate in four-way split.
-- **Power-ups, kept inside what a race car can do.** Roadside panels hold
-  one of two things, and each panel always holds the same one so you can
-  aim for what you want: **push-to-pass** (+13% engine for 4 s, in the
-  region of IndyCar's real overtake boost) or **fresh rubber** (+10%
-  lateral grip for 8 s). Deploy with X / Y / −. The AI spend theirs the
-  way an engineer would — push-to-pass on open road with someone to
-  catch, fresh rubber just before a twisty stretch.
+- **Boost lives in the engine, not on the track.** A car's aspiration —
+  naturally aspirated, turbocharged, or supercharged, set per car in
+  `cars.json` — decides how it makes extra power. A turbo has a
+  rechargeable charge, a spool ramp, and a button (X / Y / − by default):
+  hold it for real extra engine power while the charge lasts, and it only
+  recharges off the throttle, never while you're also on it. A
+  supercharger has none of that — no button, no charge, no lag, just a
+  flat power multiplier any time you're accelerating, the way a
+  belt-driven blower actually behaves. The AI spend a turbo's charge the
+  way an engineer would: on open road with someone to catch, not at a
+  speed the next corner already caps them to.
+- **Fresh rubber**, the one power-up left on the roadside: +10% lateral
+  grip for 8 seconds, deployed the same way. The AI use it just before a
+  twisty stretch.
 - **No arcade cheats.** There is no rubber-banding (a test proves an AI
   left behind gets exactly the same power: 17.05 m/s either way), no
   floor boost pads, and no mini-turbo reward for sliding — the handbrake
@@ -269,6 +276,7 @@ pad under Dolphin) or Wii Remotes.
 | Up a gear | **E** | **O** | GC R | Right bumper | D-pad ↑ / Classic ZR |
 | Down a gear | **Q** | **U** | GC L | Left bumper | D-pad ↓ / Classic ZL |
 | Power-up | **X** | **M** | GC Y | X | − / Classic − |
+| Boost (turbo cars only) | **B** | **N** | GC / Xbox D-pad ↑ | D-pad ↑ | Classic D-pad ↑ |
 | Handbrake | Space | **P** | GC Z | A | Hold B |
 | Back to menu | **R** | **R** | GC Start | Start | + |
 | Quit | (EXIT row) | — | GC Z + Start | A + Start | HOME |
@@ -313,7 +321,7 @@ handbrake rotates the car but costs you speed, so use it to place the car,
 not to go faster. Watch the rev bar next to the gear number: shift at the
 top of the band, and come down a gear before a hairpin so you are not
 bogged on the exit. RALLY keeps 72% of its grip on dirt, TOURER only 35%.
-Save push-to-pass for a straight where you have someone to catch, and
+Save a turbo's charge for a straight where you have someone to catch, and
 fresh rubber for the run into a switchback section. On Loveland and
 Monarch there is nothing holding you on the road.
 

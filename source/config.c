@@ -494,14 +494,19 @@ static int valid_car(const KartSpec *s, char *error, int error_cap)
         return set_error(error, error_cap, "BAD WHEELBASE");
     if (s->offroad_grip < 0.05f || s->offroad_grip > 1.20f)
         return set_error(error, error_cap, "BAD DIRT GRIP");
-    if (s->has_turbo) {
+    if (s->aspiration == ASPIRATION_TURBO ||
+        s->aspiration == ASPIRATION_SUPERCHARGED) {
         if (s->boost_power_mult < 1.0f || s->boost_power_mult > 3.0f)
-            return set_error(error, error_cap, "BAD TURBO POWER");
+            return set_error(error, error_cap, "BAD ASPIRATION POWER");
+    }
+    if (s->aspiration == ASPIRATION_TURBO) {
         if (s->boost_seconds < 0.5f || s->boost_seconds > 30.0f)
             return set_error(error, error_cap, "BAD TURBO DURATION");
         if (s->boost_recharge_seconds < 0.5f ||
             s->boost_recharge_seconds > 60.0f)
             return set_error(error, error_cap, "BAD TURBO RECHARGE");
+        if (s->boost_spool_seconds < 0.0f || s->boost_spool_seconds > 5.0f)
+            return set_error(error, error_cap, "BAD TURBO SPOOL");
     }
     if (s->n_gears < 1 || s->n_gears > MAX_GEARS)
         return set_error(error, error_cap, "BAD GEAR COUNT");
@@ -571,30 +576,50 @@ static int read_shift_points(const char *json, const JsonToken *tokens,
 }
 
 /*
- * Optional per-car turbo. A car with no "turbo" block simply has none:
- * has_turbo stays 0 and the boost button is a no-op for it in the sim.
+ * Optional per-car aspiration: how the engine is fed. A car with no
+ * "aspiration" block is naturally aspirated — the default, and what
+ * every built-in car except TURBO is. "type" is "turbo" or
+ * "supercharged"; the tuning keys below it depend on which.
  */
-static int read_turbo(const char *json, const JsonToken *tokens,
-                      int count, int obj, KartSpec *s,
-                      char *error, int error_cap)
+static int read_aspiration(const char *json, const JsonToken *tokens,
+                           int count, int obj, KartSpec *s,
+                           char *error, int error_cap)
 {
-    int at = object_get(json, tokens, count, obj, "turbo");
+    int at = object_get(json, tokens, count, obj, "aspiration");
+    char type[16];
+    int type_at;
 
-    s->has_turbo = 0;
+    s->aspiration = ASPIRATION_NATURAL;
     s->boost_power_mult = 1.35f;
     s->boost_seconds = 2.5f;
     s->boost_recharge_seconds = 6.0f;
+    s->boost_spool_seconds = 0.4f;
     if (at < 0)
         return 1;
     if (tokens[at].type != JT_OBJECT)
-        return set_error(error, error_cap, "TURBO NEEDS OBJECT");
-    s->has_turbo = 1;
+        return set_error(error, error_cap, "ASPIRATION NEEDS OBJECT");
+
+    type_at = object_get(json, tokens, count, at, "type");
+    if (type_at < 0 || !token_string(json, &tokens[type_at], type,
+                                     (int)sizeof(type)))
+        return set_error(error, error_cap, "ASPIRATION NEEDS A TYPE");
+    if (strcmp(type, "turbo") == 0)
+        s->aspiration = ASPIRATION_TURBO;
+    else if (strcmp(type, "supercharged") == 0)
+        s->aspiration = ASPIRATION_SUPERCHARGED;
+    else
+        return set_error(error, error_cap, "UNKNOWN ASPIRATION TYPE");
+
     if (!optional_float(json, tokens, count, at, "power_multiplier",
-                        &s->boost_power_mult, error, error_cap) ||
-        !optional_float(json, tokens, count, at, "boost_seconds",
-                        &s->boost_seconds, error, error_cap) ||
-        !optional_float(json, tokens, count, at, "recharge_seconds",
-                        &s->boost_recharge_seconds, error, error_cap))
+                        &s->boost_power_mult, error, error_cap))
+        return 0;
+    if (s->aspiration == ASPIRATION_TURBO &&
+        (!optional_float(json, tokens, count, at, "boost_seconds",
+                         &s->boost_seconds, error, error_cap) ||
+         !optional_float(json, tokens, count, at, "recharge_seconds",
+                         &s->boost_recharge_seconds, error, error_cap) ||
+         !optional_float(json, tokens, count, at, "spool_seconds",
+                         &s->boost_spool_seconds, error, error_cap)))
         return 0;
     return 1;
 }
@@ -674,7 +699,7 @@ int config_load_cars_text(const char *json, char *error, int error_cap)
             free(tokens);
             return 0;
         }
-        if (!read_turbo(json, tokens, count, obj, s, error, error_cap)) {
+        if (!read_aspiration(json, tokens, count, obj, s, error, error_cap)) {
             free(tokens);
             return 0;
         }
@@ -852,11 +877,7 @@ int config_load_settings_text(GameSettings *settings, const char *json,
         goto fail;
     }
     if (obj >= 0 &&
-        (!optional_float(json, tokens, count, obj, "push_power_multiplier",
-                         &s.push_power_mult, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "push_seconds",
-                         &s.push_seconds, error, error_cap) ||
-         !optional_float(json, tokens, count, obj,
+        (!optional_float(json, tokens, count, obj,
                          "fresh_tire_grip_multiplier",
                          &s.fresh_tire_grip_mult, error, error_cap) ||
          !optional_float(json, tokens, count, obj, "fresh_tire_seconds",
@@ -1000,7 +1021,9 @@ int config_load_settings_text(GameSettings *settings, const char *json,
          !read_track_settings(&s, json, tokens, count, obj, TRACK_BREAKNECK,
                               "breakneck", error, error_cap) ||
          !read_track_settings(&s, json, tokens, count, obj, TRACK_GUANELLA,
-                              "guanella", error, error_cap))) goto fail;
+                              "guanella", error, error_cap) ||
+         !read_track_settings(&s, json, tokens, count, obj, TRACK_BERTHOUD2,
+                              "berthoud2", error, error_cap))) goto fail;
 
     if (!game_settings_validate(&s, error, error_cap)) goto fail;
     *settings = s;

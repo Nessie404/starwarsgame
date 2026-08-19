@@ -42,7 +42,11 @@ enum {
     TRACK_BREAKNECK = 5,  /* short, steep, abrupt, no barriers          */
     TRACK_GUANELLA = 6,   /* stylized Guanella Pass, switchback after
                            * switchback, unguarded                      */
-    TRACK_COUNT    = 7
+    TRACK_BERTHOUD2 = 7,  /* Berthoud Pass, drawn from its own elevation
+                           * profile: a stack of hairpins up one side, a
+                           * summit, a second stack down the other, a
+                           * valley loop-back, and a gentle climb home   */
+    TRACK_COUNT    = 8
 };
 
 typedef struct {
@@ -154,16 +158,39 @@ typedef struct {
     float auto_down[MAX_GEARS];
 
     /*
-     * Turbo: optional, and only a car with a `"turbo"` block in
-     * cars.json gets it (config.c sets has_turbo when it parses one).
-     * Held down it multiplies engine power for as long as the charge
-     * lasts; released, or never fitted, it does nothing.
+     * How the engine is fed: naturally aspirated (the default — nothing
+     * below applies), turbocharged, or supercharged. Set from an
+     * optional `"aspiration"` block in cars.json (config.c). This is
+     * what stands in for the old track power-up boost: there is no
+     * pickup any more, only what the engine itself can do, and every
+     * driver manages the same resource everyone else with the same
+     * engine has.
+     *
+     * Turbo: a boost_charge (see Kart) that drains while the button is
+     * held and recharges only off the throttle — recharging costs the
+     * speed accelerating would have bought, which is the trade the
+     * driver is actually making. It also spools: boost_power_mult is
+     * not available the instant the button is pressed, it ramps in over
+     * boost_spool_seconds, the way a real turbo takes a moment to build
+     * pressure, and falls away almost as fast once the throttle lifts.
+     *
+     * Supercharged: mechanically driven off the engine rather than
+     * exhaust flow, so there is no lag and nothing to run out of —
+     * boost_power_mult applies the instant the driver is accelerating
+     * and stops the instant they are not. No button, no management.
      */
-    int   has_turbo;
-    float boost_power_mult;       /* engine power multiplier while held  */
-    float boost_seconds;          /* how long a full charge lasts, held  */
-    float boost_recharge_seconds; /* how long a full recharge takes      */
+    int   aspiration;
+    float boost_power_mult;       /* engine power multiplier while it applies */
+    float boost_seconds;          /* turbo only: full charge, held           */
+    float boost_recharge_seconds; /* turbo only: full recharge, off throttle */
+    float boost_spool_seconds;    /* turbo only: lag before full boost       */
 } KartSpec;
+
+enum {
+    ASPIRATION_NATURAL     = 0,
+    ASPIRATION_TURBO       = 1,
+    ASPIRATION_SUPERCHARGED = 2
+};
 
 #define COOLDOWN_SECONDS 11.0f /* slowing-down lap: flag to a standstill */
 #define SHIFT_TIME    0.18f   /* seconds of cut drive while shifting    */
@@ -229,22 +256,17 @@ void kart_spec_default_shifts(KartSpec *s);
 #define STEER_RIGHT (+1.0f)
 
 /*
- * Power-ups, kept inside what a real racing car can do rather than
- * borrowing from karting: a bounded engine overtake boost of the
- * push-to-pass kind, and a spell of fresh rubber that raises grip. Both
- * are collected from roadside panels, held in reserve, and deployed by
- * the driver — there are no projectiles, no floor boosters and no free
- * speed for sliding the car about.
+ * The one remaining track power-up: a spell of fresh rubber, collected
+ * from roadside panels, held in reserve and deployed by the driver.
+ * Engine boost is not a pickup any more — see ASPIRATION_* below — so
+ * there are no projectiles, no floor boosters, no push-to-pass box and
+ * no free speed for sliding the car about.
  */
 enum {
     POWER_NONE  = 0,
-    POWER_PUSH  = 1,   /* push-to-pass: +PUSH_POWER engine for a while  */
-    POWER_TIRES = 2,   /* fresh rubber: +TIRE_GRIP lateral grip         */
-    POWER_TYPES = 2
+    POWER_TIRES = 1    /* fresh rubber: +TIRE_GRIP lateral grip         */
 };
 
-#define PUSH_POWER    1.13f   /* +13%, in the region of IndyCar P2P     */
-#define PUSH_SECONDS  4.0f
 #define TIRE_GRIP     1.10f
 #define TIRE_SECONDS  8.0f
 
@@ -296,9 +318,7 @@ struct GameSettings {
     float tire_off_window_grip[TIRE_COMPOUNDS];/* grip well outside it    */
     float tire_ambient_c;
 
-    /* power-ups */
-    float push_power_mult;
-    float push_seconds;
+    /* the one remaining track power-up */
     float fresh_tire_grip_mult;
     float fresh_tire_seconds;
 
@@ -513,7 +533,6 @@ typedef struct {
     int   respawned;      /* one-frame flag for the platform layer      */
     int   falls;          /* completed cliff falls (AI telemetry/tests) */
     int   drifting;       /* handbrake locked in, +1/-1 = direction     */
-    float push_t;         /* push-to-pass seconds remaining             */
     float tire_wear;      /* 0 = fresh, 1 = worn out                    */
     float tire_temp;      /* degrees C                                  */
     float tire_grip_now;  /* what the rubber is actually worth, 0..1+   */
@@ -521,10 +540,13 @@ typedef struct {
     int   power_held;     /* POWER_* currently in reserve               */
     int   prev_item_btn;
 
-    /* the turbo, for cars that have one (KartSpec.has_turbo). Drains
-     * while held down, recharges while off the throttle; see kart_step. */
-    float boost_charge;   /* 0 empty .. 1 full                          */
-    int   boosting;       /* one-frame: actually drawing on it right now */
+    /* engine boost, for a car with one (KartSpec.aspiration); see
+     * kart_step. boost_charge and boost_spool only mean anything for a
+     * turbo — a supercharger has nothing to run out of and no lag, so
+     * it only ever touches `boosting`. */
+    float boost_charge;   /* turbo: 0 empty .. 1 full                    */
+    float boost_spool;    /* turbo: 0 cold .. 1 on full boost            */
+    int   boosting;       /* one-frame: engine power is multiplied now  */
 
     /* role / livery */
     int   human;          /* -1 = AI, else human player index          */

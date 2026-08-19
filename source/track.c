@@ -242,6 +242,39 @@ static const float W_GUANELLA[] = {
    1.00f
 };
 
+/* ---------------- BERTHOUD PASS 2.0 ----------------
+ * Drawn from the real elevation profile rather than stylized from
+ * memory: three ramp-and-hairpin switchbacks climbing one side of the
+ * pass, a summit, four more descending the other side — each ramp a
+ * real straight-ish run wide apart from the next before the road folds
+ * back on itself, the way an actual switchback road is built rather
+ * than reversing every few meters — down to a valley floor, a flat
+ * loop-back through the valley that turns the road around, and a
+ * gentle climb back up to the start. The start and finish sits at the
+ * lap's own middle elevation: below the summit, above the valley floor
+ * it drops to.
+ */
+static const float CP_BERTHOUD2[][3] = {
+    {    0.0,    0.0,  126.0}, {  -70.0,   24.0,  137.1}, {    5.0,   24.0,  148.3},
+    {   80.0,   24.0,  159.5}, {  113.0,   55.9,  166.4}, {   80.0,   82.0,  172.7},
+    {    5.0,   82.0,  184.0}, {  -70.0,   82.0,  195.2}, { -103.0,  113.9,  202.1},
+    {  -70.0,  140.0,  208.4}, {    5.0,  140.0,  219.6}, {   80.0,  140.0,  230.8},
+    {  113.0,  171.9,  237.7}, {   80.0,  198.0,  244.0}, {  120.0,  228.0,  242.0},
+    {  162.0,  248.0,  244.0}, {  148.0,  214.0,  241.0}, {  142.0,  240.0,  232.2},
+    {  103.0,  240.0,  219.4}, {   64.0,  240.0,  206.6}, {   46.8,  275.2,  193.7},
+    {   64.0,  304.0,  182.7}, {  103.0,  304.0,  169.8}, {  142.0,  304.0,  157.0},
+    {  159.2,  339.2,  144.1}, {  142.0,  368.0,  133.1}, {  103.0,  368.0,  120.3},
+    {   64.0,  368.0,  107.4}, {   46.8,  403.2,   94.6}, {   64.0,  432.0,   83.5},
+    {  103.0,  432.0,   70.7}, {  142.0,  432.0,   57.9}, {  159.2,  467.2,   45.0},
+    {  142.0,  496.0,   34.0}, {  132.0,  530.0,   22.3}, {  120.0,  562.0,   13.2},
+    {  112.0,  592.0,    8.0}, {   82.0,  618.0,    8.0}, {   66.0,  586.0,    9.0},
+    {   88.0,  550.0,    8.0}, {  134.0,  546.0,    9.0}, {  164.0,  578.0,    8.0},
+    {  159.7,  495.4,   24.9}, {  151.5,  412.9,   41.7}, {  136.6,  330.3,   58.6},
+    {  113.2,  247.7,   75.4}, {   81.3,  165.1,   92.3}, {   42.5,   82.6,  109.1},
+};
+static const float ITEMS_BERTHOUD2[] = { 0.05f, 0.22f, 0.44f, 0.60f,
+                                         0.78f, 0.92f };
+
 static const TrackDef track_defs[TRACK_COUNT] = {
     { "CLASSIC",
       CP_CLASSIC,  (int)(sizeof(CP_CLASSIC)  / sizeof(CP_CLASSIC[0])),
@@ -271,6 +304,10 @@ static const TrackDef track_defs[TRACK_COUNT] = {
       CP_GUANELLA,  (int)(sizeof(CP_GUANELLA)  / sizeof(CP_GUANELLA[0])),
       3.9f,  4.8f, W_GUANELLA, 1, 0, 1.00f, 1.00f, /* switchbacks       */
       ITEMS_GUANELLA, 4 },
+    { "BERTHOUD 2.0",
+      CP_BERTHOUD2, (int)(sizeof(CP_BERTHOUD2) / sizeof(CP_BERTHOUD2[0])),
+      6.6f, 13.0f, NULL, 1, 1, 1.30f, 0.28f, /* big, guarded, real profile */
+      ITEMS_BERTHOUD2, 6 },
 };
 
 const char *track_name(int track_id)

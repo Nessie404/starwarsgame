@@ -19,7 +19,7 @@ It runs in the [Dolphin](https://dolphin-emu.org) emulator on a PC and on
 real Wii hardware through the Homebrew Channel. It contains no Nintendo
 code or assets and needs no game disc.
 
-Twelve cars race on seven circuits, four of them stylized Colorado
+Twelve cars race on eight circuits, five of them stylized Colorado
 mountain passes. The driving model is semi-realistic: real power and mass,
 braking distances, grip limits, gears, hills, and tires that heat up and
 wear out.
@@ -180,40 +180,109 @@ given identical skill and identical learned corner confidence, land
 within 1.4% of each other on Berthoud, while `test_skill_sets_pace` still
 shows skill alone worth 7.3%.
 
-### 7b. A rechargeable boost, and a `turbo` block in `cars.json` — done in v1.14.0
+### 7b. Boost as an engine trait, not a track power-up — done in v1.14.0, replaced in v1.15.0
 
-`Kart.boost_charge` (0..1) drains while the button is held and recharges
-while off the throttle — but only off the throttle, never while also
-holding it, which is the actual strategic trade-off ("recharging costs
-the speed accelerating would have bought"). The AI usage heuristic in
-`ai_control` learned that the hard way: firing boost while `in->accel` is
-already 0 (the car sitting at the speed the next corner's braking point
-allows) drains the charge for nothing, since `kart_step` only spends the
-power multiplier inside the `in->accel` branch — so it now also checks
-`in->accel` before firing, not just a clear road and enough charge.
+v1.14.0 shipped a rechargeable turbo as a `KartSpec.has_turbo` flag. v1.15.0
+replaced that with a general `KartSpec.aspiration` (`ASPIRATION_NATURAL`,
+`ASPIRATION_TURBO`, `ASPIRATION_SUPERCHARGED`), set from an `"aspiration"`
+object in `cars.json` and parsed by `read_aspiration` in `config.c`
+(`read_turbo` no longer exists). The old push-to-pass power-up is gone
+entirely — `POWER_PUSH` was removed from `game.h`'s power-up enum, and
+`PUSH_POWER`/`PUSH_SECONDS`/`push_power_mult`/`push_seconds` are gone from
+`settings.json` and `GameSettings`. Only fresh-tires (`POWER_TIRES`)
+remains as an on-track pickup; boost now comes entirely from the engine.
 
-Gated per car by `KartSpec.has_turbo` and three tunables
-(`boost_power_mult`, `boost_seconds`, `boost_recharge_seconds`), set from
-an optional `"turbo"` object in `cars.json` and parsed by `read_turbo` in
-`config.c`; a car with no block simply never sets `has_turbo`, and the
-button (`CONTROL_BOOST` in `config.h`) is a no-op for it. The shipped
-`config/cars.json` adds a fifth car, `TURBO`, as the worked example. The
-HUD draws a gauge next to the tire bar for a car that has one, colored by
-`Kart.boosting`, a one-frame flag for exactly that.
+**Turbo** keeps v1.14.0's rechargeable-charge behavior
+(`Kart.boost_charge`, 0..1, drains while the button is held and recharges
+while off the throttle, never while also holding it — "recharging costs
+the speed accelerating would have bought" is still the actual trade-off),
+plus a new spool: `Kart.boost_spool` ramps from 0 to 1 over
+`boost_spool_seconds` after the button is first pressed, so the power
+multiplier phases in rather than snapping to full boost, and decays back
+down once the button is released. Three more tunables in the
+`"aspiration"` block besides `power_multiplier`: `boost_seconds` (charge
+duration), `recharge_seconds`, `spool_seconds` (lag).
 
-No dedicated button exists for it on a bare Wii Remote or Wii Remote +
-Nunchuk — both are already out of spare buttons (see the comment beside
-`in->item` in `main.c`'s input reader for the full inventory). It works
-on keyboard, Classic Controller (D-pad up, unclaimed during a race) and
-GameCube/Xbox pads (`DPAD_UP` by default).
+**Supercharged** has none of that state. `kart_step`'s `switch
+(s->aspiration)` branch for `ASPIRATION_SUPERCHARGED` applies
+`boost_power_mult` unconditionally any time `in->accel` is set — no
+button, no charge, no lag, matching how a belt-driven mechanical
+supercharger actually behaves (always spinning with the engine). The HUD
+draws a "SUPERCHARGED" label (no gauge, since there's no charge to show)
+colored by `Kart.boosting` the same as the turbo gauge.
 
-Proof, in `tests/test_game.c`: `test_turbo_only_for_cars_that_have_one`
-(holding the button on a car with no turbo block changes nothing),
-`test_turbo_charge_drains_and_recovers` (both halves of "rechargeable",
-not just one), and `test_boosted_lap_is_quicker` — a turbo SPORT laps
-Berthoud in 72.6 s against a plain SPORT's 74.3 s, AI deciding for itself
-when to spend the charge, which is what actually proves the mechanism end
-to end rather than in isolation.
+Both aspirations still only affect the drive power inside `kart_step`'s
+`if (in->accel && !in->brake)` branch, which is why `ai_control`'s turbo
+firing heuristic checks `in->accel` before pulling the trigger — firing
+boost while not accelerating (already at the speed the corner ahead caps
+you to) wastes the charge and gains nothing; this was true for the turbo
+in v1.14.0 and stayed true writing the supercharger, which needed no
+button-firing heuristic at all since it's unconditional.
+
+`TURBO` (existing car) moved to the new block unchanged in feel. `BLOWER`
+is the new shipped supercharged car.
+
+Proof, in `tests/test_game.c`: `test_turbo_only_for_cars_that_have_one`,
+`test_turbo_charge_drains_and_recovers`, `test_boosted_lap_is_quicker`
+(all still turbo, updated for `aspiration`), plus the new
+`test_supercharged_lap_is_quicker` — run on Kenosha rather than Berthoud,
+because a twisty track's corner-entry overshoot penalty made the
+supercharger's *constant* extra power look like a wash or even a net loss
+in testing; Kenosha is open enough that unconditional extra power is
+simply faster (134.0 s supercharged vs 136.1 s natural, same car).
+
+### 7b′. Berthoud Pass 2.0, and what a switchback track has to get right — done in v1.15.0
+
+`TRACK_BERTHOUD2` in `track.c` is built from the real Berthoud Pass
+elevation profile: a stack of switchbacks up one side, a summit, a stack
+down the other, a flat loop-back through the valley floor, and a gentle
+climb back to a start/finish sitting at the lap's own middle elevation.
+
+The first version of this track (raw control points reversing lateral
+direction at *every single* control point, ~20 m apart) shipped 0 of 11
+AI finishing even with an extended time budget, no matter how wide the
+road was made — widening pavement did nothing because the problem was
+never clearance. A real switchback road is a straight-ish ramp, then a
+hairpin, then another ramp; the first version had no ramps at all, just
+hairpin after hairpin with no straight section for the AI's pure-pursuit
+steering to settle into between reversals. **Spacing between direction
+reversals matters more than road width for AI navigability.** The fix
+(see `CP_BERTHOUD2`) uses a repeating 5-point cycle borrowed from
+`CP_GUANELLA` (a track that already raced fine): three points sweeping
+laterally at roughly constant forward progress — the ramp — then two
+points hooking the lateral direction back while advancing forward — the
+hairpin — then the next cycle sweeps back the other way. Fewer, properly
+spaced corners raced cleanly where more, tightly-packed ones did not.
+
+Two more things this track's tight, self-crossing geometry exposed that
+any future switchback-heavy track would hit again:
+
+- **Elevation was hand-tuned per point at first and kept spiking to
+  absurd grades** (a duplicate point at the loop closure alone produced a
+  208% grade) whenever a short connector segment got the same per-point
+  share of a large elevation change as a long sweep segment did. Interpolate
+  elevation by *cumulative arc length* along the section instead of by
+  point index — a short hop gets a proportionally small elevation change,
+  a long one gets a proportionally large one, and local grade stays
+  roughly constant across both sweeps and hairpins.
+- **`kart_place_on_grid` calls `track_locate` with `hint = -1`** (a global
+  nearest-point search) after already walking the centerline backward to
+  find the exact intended segment. On every straight or gently-curved
+  track that's harmless, since the nearest point to a grid slot's world
+  position is always the segment it was placed on. On a track that loops
+  back close to itself in world space — which a switchback climbing next
+  to its own descent, or a track's own start/finish loop closure, both do
+  — the global search can snap the grid slot onto a spatially-nearby but
+  progress-wise-distant piece of road instead, which `test_full_grid_fits`
+  caught as karts starting "past the line." Fixed by passing the
+  already-known segment as the hint (`test_full_grid_fits`, `source/game.c`).
+  Any future track that brings the road close to itself anywhere, not just
+  near the line, should keep this in mind — `track_locate`'s global search
+  is only safe where the track stays well clear of itself.
+- Control points are capped at 55 (`TRACK_MAX_POINTS 440 / SAMPLES_PER_CP
+  8`, `track.c`) — silently truncated past that, which would break loop
+  closure with no warning. A 5-point ramp+hairpin cycle burns points fast;
+  budget cycles per section before hand-designing one.
 
 ### 7c. Persistent standings between races *(start here)*
 
