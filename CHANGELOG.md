@@ -55,6 +55,19 @@ artifacts and their longer descriptions remain available on the
   gears (15/35/67/100/150/200 km/h), high horsepower for its 1080 kg curb
   weight, and a high-pressure turbo tune (1.55x power multiplier).
 
+### Fixed
+
+- **The minimap was mirrored.** `draw_minimap` mapped world +Z to screen
+  "up" (`max_z - pz`); the same cross(forward, up) = right convention the
+  v1.0.1 steering fix verified against `guLookAt` says a rightward offset
+  on an eastward road is +Z, and +Z has to land *below* the line on a
+  non-mirrored map for that to read as south rather than a mirrored north.
+  Every point the minimap draws — the road, the finish-line gate, the
+  kart dots — now maps world +Z to screen +Y (down) instead, which
+  matches the actual track layout rather than its left-right mirror
+  image. Most noticeable on a track with real asymmetry, like the new
+  Berthoud Pass 2.0.
+
 ## [1.14.0] - 2026-08-19
 
 ### Added

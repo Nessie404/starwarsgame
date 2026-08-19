@@ -1572,6 +1572,17 @@ static float hud_text_width(float cw, const char *s)
     return w;
 }
 
+/*
+ * World +X maps to screen +X (right) and world +Z maps to screen +Y
+ * (down, since this is drawn in the top-left-origin HUD ortho set up by
+ * hud_ortho_fullscreen). That is the non-mirrored mapping: the same
+ * cross(forward, up) = right convention the v1.0.1 steering fix verified
+ * against guLookAt says a rightward offset at heading (dx,dz) = (1,0) is
+ * +Z, and +Z has to land below the line on screen for "right of an
+ * eastward road" to actually read as south/down rather than mirrored
+ * north/up. Mapping +Z to screen "up" instead (i.e. flipping this sign)
+ * mirrors the whole minimap left-for-right relative to the real track.
+ */
 static void draw_minimap(const Track *t, int with_karts,
                          float ox, float oy, float size)
 {
@@ -1586,7 +1597,7 @@ static void draw_minimap(const Track *t, int with_karts,
     for (i = 0; i <= t->n; i++) {
         int j = i % t->n;
         GX_Position3f32(ox + (t->px[j] - t->min_x) * scale,
-                        oy + (t->max_z - t->pz[j]) * scale, -5.0f);
+                        oy + (t->pz[j] - t->min_z) * scale, -5.0f);
         GX_Color4u8(240, 240, 240, 200);
     }
     GX_End();
@@ -1602,9 +1613,9 @@ static void draw_minimap(const Track *t, int with_karts,
                                                       * scale rather than
                                                       * true to width */
         float ax = ox + (t->px[0] + lx * half - t->min_x) * scale;
-        float ay = oy + (t->max_z - (t->pz[0] + lz * half)) * scale;
+        float ay = oy + ((t->pz[0] + lz * half) - t->min_z) * scale;
         float bx = ox + (t->px[0] - lx * half - t->min_x) * scale;
-        float by = oy + (t->max_z - (t->pz[0] - lz * half)) * scale;
+        float by = oy + ((t->pz[0] - lz * half) - t->min_z) * scale;
         int c;
 
         for (c = 0; c < 4; c++) {
@@ -1627,7 +1638,7 @@ static void draw_minimap(const Track *t, int with_karts,
         const Kart *k = &game.karts[i];
         const u8 *c = kart_color(k);
         float mx = ox + (k->x - t->min_x) * scale;
-        float my = oy + (t->max_z - k->z) * scale;
+        float my = oy + (k->z - t->min_z) * scale;
         float s = (k->human >= 0) ? 5.0f : 4.0f;
         hud_rect(mx - s * 0.5f, my - s * 0.5f, s, s, c[0], c[1], c[2], 255);
     }
