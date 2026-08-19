@@ -151,6 +151,7 @@ typedef struct {
     float auto_down[MAX_GEARS];
 } KartSpec;
 
+#define COOLDOWN_SECONDS 11.0f /* slowing-down lap: flag to a standstill */
 #define SHIFT_TIME    0.18f   /* seconds of cut drive while shifting    */
 #define AUTO_UP_FRAC   0.95f  /* default automatic upshift point        */
 #define AUTO_DOWN_FRAC 0.38f  /* default automatic downshift point      */
@@ -530,6 +531,20 @@ typedef struct {
     int   laps_done;      /* completed laps, counted at the line        */
     int   lap_event;      /* one-frame: crossed the line                */
     int   lap_best_event; /* one-frame: ...and it was a personal best   */
+
+    /* the slowing-down lap after the flag */
+    float cooldown_t;     /* seconds since the chequered flag           */
+    float cooldown_v0;    /* speed it crossed the line at               */
+    int   parked;         /* stopped after the flag, holding on the brake */
+
+    /*
+     * Going the wrong way. `wrong_way_t` counts how long the car has been
+     * pointing back down the circuit; past a moment of it a marshal
+     * helicopter drops in, and the engine is cut until the car turns
+     * round — which is what `wrong_way_power` is for.
+     */
+    float wrong_way_t;
+    int   wrong_way;      /* 1 once the helicopter is overhead           */
 
     /* results */
     int   rank;

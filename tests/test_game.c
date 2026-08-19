@@ -2398,6 +2398,109 @@ static void test_editing_cars_json_changes_the_car(void)
     kart_specs_reset_defaults();
 }
 
+/*
+ * The slowing-down lap. Crossing the line takes the car away from the
+ * player, so a stand-in driver has to bring it home: down the road, over
+ * to the side, to a stop — without going over the edge of an unguarded
+ * pass, and without selecting reverse and driving back into the field.
+ */
+static void test_cooldown_driver_brings_the_car_home(void)
+{
+    int ti;
+    int tracks[3];
+
+    tracks[0] = TRACK_MONARCH;    /* unguarded and twisty  */
+    tracks[1] = TRACK_GUANELLA;   /* unguarded switchbacks */
+    tracks[2] = TRACK_BERTHOUD;   /* barriered, for contrast */
+
+    for (ti = 0; ti < 3; ti++) {
+        Game g;
+        GameConfig cfg = default_cfg(tracks[ti]);
+        Input in[MAX_HUMANS];
+        Kart *k;
+        int f, off_road_frames = 0, reversed = 0;
+        float v_flag, fastest_after = 0.0f, distance;
+        float start_progress;
+
+        game_init(&g, &cfg);
+        g.state = STATE_RACING;
+        idle_inputs(in);
+        k = &g.karts[0];
+
+        /* on the road at racing speed, and the flag drops. No warm-up
+         * lap of full throttle and no steering first: that just puts the
+         * car in the barrier and measures the crash instead of the
+         * stand-in driver. */
+        teleport(&g, k, 12, 26.0f);
+        k->finished = 1;
+        k->finish_time = g.race_t;
+        k->cooldown_t = 0.0f;
+        k->cooldown_v0 = fabsf(k->speed);
+        v_flag = k->speed;
+        start_progress = k->total_progress;
+
+        for (f = 0; f < 60 * 30; f++) {
+            game_update(&g, in, 1.0f / 60.0f);
+            if (k->speed > fastest_after) fastest_after = k->speed;
+            if (k->speed < -0.5f) reversed = 1;
+            if (fabsf(k->lat) > track_wall_half(&g.track, k->seg) + 0.5f)
+                off_road_frames++;
+        }
+        distance = (k->total_progress - start_progress) *
+                   (g.track.total_len / (float)g.track.n);
+
+        printf("%-9s after the flag: %.0f km/h at the line, %.1f km/h 30 s "
+               "later, %.0f m driven, %d falls, %d frames off the road\n",
+               track_name(tracks[ti]), v_flag * 3.6f, k->speed * 3.6f,
+               distance, k->falls, off_road_frames);
+
+        CHECK(k->falls == 0, "%s: the finished car fell off %d time(s)",
+              track_name(tracks[ti]), k->falls);
+        CHECK(!reversed, "%s: the finished car drove backwards",
+              track_name(tracks[ti]));
+        CHECK(fabsf(k->speed) < 1.5f,
+              "%s: the finished car was still doing %.1f km/h after 30 s",
+              track_name(tracks[ti]), k->speed * 3.6f);
+        CHECK(fastest_after <= v_flag + 1.0f,
+              "%s: the finished car sped up after the flag (%.1f from %.1f)",
+              track_name(tracks[ti]), fastest_after, v_flag);
+        CHECK(distance > 30.0f,
+              "%s: the finished car only travelled %.0f m — it is supposed "
+              "to be driven home, not dropped", track_name(tracks[ti]),
+              distance);
+        CHECK(off_road_frames < 60,
+              "%s: the finished car spent %d frames off the road",
+              track_name(tracks[ti]), off_road_frames);
+    }
+}
+
+/*
+ * And it has to keep doing that while the rest of the field is still
+ * racing past it: a whole race, everyone finishing, nobody lost.
+ */
+static void test_whole_field_survives_the_flag(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_MONARCH);
+    Input in[MAX_HUMANS];
+    int f, i, falls_after_flag = 0;
+
+    game_init(&g, &cfg);
+    idle_inputs(in);
+    for (f = 0; f < 60 * 500; f++) {
+        game_update(&g, in, 1.0f / 60.0f);
+        for (i = 0; i < NUM_KARTS; i++)
+            if (g.karts[i].finished && g.karts[i].fall_t > 0.0f)
+                falls_after_flag++;
+        if (g.finish_count >= NUM_KARTS - 1)
+            break;
+    }
+    printf("after the flag on MONARCH: %d frames of finished cars falling\n",
+           falls_after_flag);
+    CHECK(falls_after_flag == 0,
+          "finished cars went over the edge for %d frames", falls_after_flag);
+}
+
 /* ------------------------------------------------------------------ */
 /* Driver identity                                                     */
 /* ------------------------------------------------------------------ */
@@ -3163,6 +3266,8 @@ int main(void)
     test_ai_shift_styles();
     test_ai_can_fall();
     test_player_model_learns();
+    test_cooldown_driver_brings_the_car_home();
+    test_whole_field_survives_the_flag();
     test_driver_field_has_characters();
     test_temperament_shows_on_track();
     test_skill_sets_pace();

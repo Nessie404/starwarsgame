@@ -1,0 +1,66 @@
+diff --git a/source/main.c b/source/main.c
+index dc7145d..7461ad1 100644
+--- a/source/main.c
++++ b/source/main.c
+@@ -2871,6 +2871,22 @@ static void video_setup(void)
+     VIDEO_Configure(rmode);
+ }
+ 
++/*
++ * Boot tracing.
++ *
++ * "Failed to init core" is all Dolphin says when it will not start a
++ * title, and it covers both "I could not load your executable" and "your
++ * executable died immediately". These lines go to the console Dolphin
++ * logs as OSREPORT, so the log says exactly how far the game got: if none
++ * of them appear, the game never ran an instruction and the problem is on
++ * the emulator side of the fence; if they stop at a stage, that stage is
++ * the culprit.
++ */
++static void boot_trace(const char *stage)
++{
++    printf("WIIKART boot: %s\n", stage);
++}
++
+ int main(int argc, char **argv)
+ {
+     void *gp_fifo;
+@@ -2879,18 +2895,26 @@ int main(int argc, char **argv)
+     u32 xfbHeight;
+     float dt;
+ 
++    SYS_STDIO_Report(true);
++    boot_trace("entered main");
++
+     VIDEO_Init();
++    boot_trace("video init");
+     WPAD_Init();
+     WPAD_SetDataFormat(WPAD_CHAN_0, WPAD_FMT_BTNS_ACC);
+     WPAD_SetDataFormat(WPAD_CHAN_1, WPAD_FMT_BTNS_ACC);
+     WPAD_SetDataFormat(WPAD_CHAN_2, WPAD_FMT_BTNS_ACC);
+     WPAD_SetDataFormat(WPAD_CHAN_3, WPAD_FMT_BTNS_ACC);
+     PAD_Init();
++    boot_trace("pads init");
+     if (KEYBOARD_Init(NULL) >= 0)
+         keyboard_ok = 1;
++    boot_trace("keyboard init");
+     load_editable_config(argc, argv);
++    boot_trace("config loaded");
+ 
+     video_setup();
++    boot_trace("video mode chosen");
+     frameBuffer[0] = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
+     frameBuffer[1] = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
+ 
+@@ -2901,9 +2925,11 @@ int main(int argc, char **argv)
+     if (rmode->viTVMode & VI_NON_INTERLACE)
+         VIDEO_WaitVSync();
+ 
++    boot_trace("framebuffers allocated");
+     gp_fifo = memalign(32, DEFAULT_FIFO_SIZE);
+     memset(gp_fifo, 0, DEFAULT_FIFO_SIZE);
+     GX_Init(gp_fifo, DEFAULT_FIFO_SIZE);
++    boot_trace("GX init");
+ 
+     GX_SetCopyClear(sky, 0x00ffffff);
+ 

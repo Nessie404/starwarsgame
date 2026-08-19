@@ -1272,6 +1272,118 @@ static float ai_power_scale(const Game *g, const Kart *k)
     return k->ai_skill * ai_strategies[k->strategy].power;
 }
 
+/*
+ * The slowing-down lap.
+ *
+ * Crossing the line takes the car away from the player, so something has
+ * to drive it: left to itself it coasts in a straight line, and on an
+ * unguarded pass a straight line ends over the edge. A stand-in driver
+ * takes the wheel, steers the car down the road, eases it to the side out
+ * of the way of the cars still racing, and brings it to a stop.
+ *
+ * It is deliberately not the racing AI. No throttle, no gambling on
+ * corners, and — importantly — none of the reverse-out recovery, which is
+ * what made handing a finished car to the AI look like it had lost its
+ * mind: it would stop, select reverse, and drive back down the circuit
+ * into the oncoming field.
+ */
+static void cooldown_control(Game *g, Kart *k, Input *in, float dt)
+{
+    const Track *t = &g->track;
+    float v = k->speed;
+    float look, d, target, shoulder;
+    int seg;
+
+    memset(in, 0, sizeof(*in));
+    k->cooldown_t += dt;
+
+    /* aim well down the road, further the faster it is still going */
+    look = game_clampf(6.0f + fabsf(v) * 0.55f, 6.0f, 26.0f);
+    seg = k->seg;
+    d = 0.0f;
+    while (d < look) {
+        d += t->seg_len[seg];
+        seg = (seg + 1) % t->n;
+    }
+
+    /*
+     * Pull over: ease across to whichever side it is already nearer,
+     * about two thirds of the way out, so the racing line stays clear.
+     */
+    shoulder = track_road_half(t, seg) * 0.62f;
+    if (k->lat < 0.0f)
+        shoulder = -shoulder;
+
+    {
+        float txp = t->px[seg] - t->dz[seg] * shoulder;
+        float tzp = t->pz[seg] + t->dx[seg] * shoulder;
+        float desired = atan2f(tzp - k->z, txp - k->x);
+        float diff = game_angle_wrap(desired - k->heading);
+        in->steer = game_clampf(diff * 2.0f, -1.0f, 1.0f);
+    }
+
+    /*
+     * Speed: come down from whatever it crossed the line at to a stop
+     * over COOLDOWN_SECONDS, braking only when it is running ahead of
+     * that. The brake is released below walking pace because holding it
+     * at a standstill is what selects reverse gear — the car parks
+     * itself instead (see kart_step).
+     */
+    target = k->cooldown_v0 *
+             (1.0f - game_clampf(k->cooldown_t / COOLDOWN_SECONDS,
+                                 0.0f, 1.0f));
+
+    /*
+     * ...but the ramp is not the only limit. Coming off the line at
+     * racing speed there are still corners to negotiate, and a cool-down
+     * driver who only obeys a clock drives straight over the edge of an
+     * unguarded pass. Scan the road ahead and take the slowest corner in
+     * it as a cap, conservatively — this is a slowing-down lap, not a
+     * qualifying run.
+     */
+    {
+        const KartSpec *sp = &kart_specs[k->spec];
+        float mu = sp->lat_g * GRAVITY *
+                   (k->tire_grip_now > 0.1f ? k->tire_grip_now : 1.0f);
+        float scan = 0.0f;
+        int s2 = k->seg;
+        float cap = 1.0e9f;
+
+        while (scan < 55.0f) {
+            float c = t->curv[s2];
+            if (c > 1.0e-4f) {
+                /* how fast the corner can be taken, with plenty in hand,
+                 * and how much of that is reachable by the time we get
+                 * there given the braking distance available */
+                float v_corner = sqrtf(mu / c) * 0.72f;
+                float reachable = sqrtf(v_corner * v_corner +
+                                        2.0f * 0.45f *
+                                        (V100 * V100 /
+                                         (2.0f * sp->brake_dist_100)) * scan);
+                if (reachable < cap)
+                    cap = reachable;
+            }
+            scan += t->seg_len[s2];
+            s2 = (s2 + 1) % t->n;
+        }
+        if (cap < target)
+            target = cap;
+    }
+
+    if (v > 1.6f && v > target + 0.4f)
+        in->brake = 1;
+
+    /*
+     * Any near-stop after the first second counts as parked. Waiting for
+     * the clock to run out is not enough: a car that has braked to a halt
+     * for a hairpin would spend the remaining seconds rolling back down
+     * the hill it stopped on, which is exactly the reversing this was
+     * meant to get rid of.
+     */
+    if (fabsf(v) < 0.9f && k->cooldown_t > 1.0f)
+        k->parked = 1;
+}
+
 static void kart_step(Game *g, Kart *k, const Input *in, float dt,
                       float power_scale)
 {
@@ -1503,6 +1615,16 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->heading = game_angle_wrap(k->heading + yaw * dt);
     }
     k->steer_vis += (steer - k->steer_vis) * 10.0f * dt;
+    /*
+     * A car that has finished and come to a stop is standing on its
+     * brakes, not in neutral: without this it rolls back down whatever
+     * hill it stopped on, and Monarch has plenty of those. It reads as
+     * the car driving backwards through the race it has just finished.
+     */
+    if (k->parked) {
+        v = 0.0f;
+        k->slip = 0.0f;
+    }
     k->speed = v;
 
     /* --- integrate --- */
@@ -1756,18 +1878,16 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
         Input in;
         float scale = 1.0f;
 
-        if (k->human >= 0) {
-            /* A finished car coasts. It used to fall through to the AI
-             * branch, which then drove it on AI fields a human kart never
-             * had — zero skill and zero corner confidence, i.e. brake for
-             * everything — so a player who crossed the line watched their
-             * car stand on the brakes and reverse back down the circuit
-             * through the cars still racing. */
-            if (k->finished) {
-                memset(&in, 0, sizeof(in));
-            } else {
-                in = inputs[k->human];
-            }
+        if (k->finished) {
+            /*
+             * Past the flag, a stand-in driver brings the car home. This
+             * is for the AI too: a finished AI car left racing carries on
+             * attacking corners it has no reason to attack, and falls off
+             * the mountain doing it.
+             */
+            cooldown_control(g, k, &in, dt);
+        } else if (k->human >= 0) {
+            in = inputs[k->human];
         } else {
             /* ease onto the tactical line rather than darting sideways,
              * and give more room to a human who has been leaning on us */
@@ -1834,6 +1954,8 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
         if (!k->finished && k->lap >= g->track.laps) {
             k->finished = 1;
             k->finish_time = g->race_t;
+            k->cooldown_t = 0.0f;
+            k->cooldown_v0 = fabsf(k->speed);
             g->finish_count++;
             k->final_rank = g->finish_count;
             if (k->human >= 0) {

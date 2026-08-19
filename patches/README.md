@@ -10,6 +10,7 @@ builds it with devkitPPC and publishes the zip.
 |-------|----------|-----------|----------|
 | `v0.1.1.patch` | `v0.1` | `v0.1.1` | Procedural ASND sound, WASD keyboard, and the steering-polarity fix on the original arcade kart racer |
 | `v1.0.1.patch` | `v1.0` | `v1.0.1` | The steering-polarity fix only — no other behaviour change from v1.0 |
+| `v1.5.1-boot-trace.patch` | `v1.5.0` | `v1.5.1` | Boot tracing only, for the "Failed to init core" report (issue #1). No gameplay change. |
 
 Both are verified to apply cleanly to their base tags, and the workflow
 runs that line's host test suite before building.
