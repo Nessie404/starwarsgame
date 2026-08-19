@@ -122,6 +122,8 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   leaderboard.
 - **v1.13**: a real apex-based racing line, so pace comes from skill
   rather than from which sheet a driver happens to run.
+- **v1.14**: a rechargeable turbo, gated per car by a `turbo` block in
+  `cars.json`.
 
 ---
 
@@ -178,18 +180,42 @@ given identical skill and identical learned corner confidence, land
 within 1.4% of each other on Berthoud, while `test_skill_sets_pace` still
 shows skill alone worth 7.3%.
 
-### 7b. A rechargeable boost, and a `turbo` block in `cars.json` *(start here)*
+### 7b. A rechargeable boost, and a `turbo` block in `cars.json` — done in v1.14.0
 
-Add `boost_charge` (0–1) to `Kart`, recharging when off the throttle and
-draining while deployed; a button to fire it (add an action in
-`config.h`'s `CONTROL_*` list, bind it in `controls.json` and in
-`main.c`'s input reading); a gauge on the HUD next to the tire bar. Gate
-it per car with an optional `"turbo": { ... }` object in `cars.json`
-parsed in `config.c` — only cars that have one get the button. Test: a car
-without a turbo block cannot boost; charge falls while boosting and
-recovers when lifting; a boosted lap is quicker than an unboosted one.
+`Kart.boost_charge` (0..1) drains while the button is held and recharges
+while off the throttle — but only off the throttle, never while also
+holding it, which is the actual strategic trade-off ("recharging costs
+the speed accelerating would have bought"). The AI usage heuristic in
+`ai_control` learned that the hard way: firing boost while `in->accel` is
+already 0 (the car sitting at the speed the next corner's braking point
+allows) drains the charge for nothing, since `kart_step` only spends the
+power multiplier inside the `in->accel` branch — so it now also checks
+`in->accel` before firing, not just a clear road and enough charge.
 
-### 7c. Persistent standings between races
+Gated per car by `KartSpec.has_turbo` and three tunables
+(`boost_power_mult`, `boost_seconds`, `boost_recharge_seconds`), set from
+an optional `"turbo"` object in `cars.json` and parsed by `read_turbo` in
+`config.c`; a car with no block simply never sets `has_turbo`, and the
+button (`CONTROL_BOOST` in `config.h`) is a no-op for it. The shipped
+`config/cars.json` adds a fifth car, `TURBO`, as the worked example. The
+HUD draws a gauge next to the tire bar for a car that has one, colored by
+`Kart.boosting`, a one-frame flag for exactly that.
+
+No dedicated button exists for it on a bare Wii Remote or Wii Remote +
+Nunchuk — both are already out of spare buttons (see the comment beside
+`in->item` in `main.c`'s input reader for the full inventory). It works
+on keyboard, Classic Controller (D-pad up, unclaimed during a race) and
+GameCube/Xbox pads (`DPAD_UP` by default).
+
+Proof, in `tests/test_game.c`: `test_turbo_only_for_cars_that_have_one`
+(holding the button on a car with no turbo block changes nothing),
+`test_turbo_charge_drains_and_recovers` (both halves of "rechargeable",
+not just one), and `test_boosted_lap_is_quicker` — a turbo SPORT laps
+Berthoud in 72.6 s against a plain SPORT's 74.3 s, AI deciding for itself
+when to spend the charge, which is what actually proves the mechanism end
+to end rather than in isolation.
+
+### 7c. Persistent standings between races *(start here)*
 
 There is no save file at all yet — everything resets when the game exits.
 You would write a small file next to the config (`sd:/apps/wiikart/`),

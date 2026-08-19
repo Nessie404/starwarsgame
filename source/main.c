@@ -486,6 +486,9 @@ static void read_player_input(int p, Input *in, float dt)
                                       WPAD_CLASSIC_BUTTON_Y)) != 0;
             in->hop   |= (wheld[p] & (WPAD_CLASSIC_BUTTON_FULL_R |
                                       WPAD_CLASSIC_BUTTON_FULL_L)) != 0;
+            /* the Classic Controller's D-pad only steers left/right in
+             * a race, so up is free for boost */
+            in->boost |= (wheld[p] & WPAD_CLASSIC_BUTTON_UP) != 0;
             tilt_ok = 0;
         }
         if (tilt_ok) {
@@ -524,6 +527,7 @@ static void read_player_input(int p, Input *in, float dt)
         in->brake |= (gc & control_config.gamecube[CONTROL_BRAKE]) != 0;
         in->hop   |= (gc & control_config.gamecube[CONTROL_HANDBRAKE]) != 0;
         in->item  |= (gc & control_config.gamecube[CONTROL_ITEM]) != 0;
+        in->boost |= (gc & control_config.gamecube[CONTROL_BOOST]) != 0;
         in->gear_up |= (gc & control_config.gamecube[CONTROL_GEAR_UP]) != 0;
         in->gear_down |=
             (gc & control_config.gamecube[CONTROL_GEAR_DOWN]) != 0;
@@ -537,6 +541,7 @@ static void read_player_input(int p, Input *in, float dt)
         in->brake |= key_actions[p][CONTROL_BRAKE];
         in->hop |= key_actions[p][CONTROL_HANDBRAKE];
         in->item |= key_actions[p][CONTROL_ITEM];
+        in->boost |= key_actions[p][CONTROL_BOOST];
         in->gear_up |= key_actions[p][CONTROL_GEAR_UP];
         in->gear_down |= key_actions[p][CONTROL_GEAR_DOWN];
     }
@@ -2060,6 +2065,21 @@ static void draw_player_hud(int p)
         hud_rect(bx + 1.0f, by + 1.0f, 82.0f * life, 4.0f, lr, lg, lb, 235);
     }
 
+    /* the turbo gauge, next to the tire bar — only a car that has one
+     * gets the readout, same as it only gets the button */
+    if (kart_specs[k->spec].has_turbo) {
+        float bx2 = vx + vw - 202.0f, by2 = vy + vh - 26.0f;
+        u8 br = k->boosting ? 255 : 120;
+        u8 bg = k->boosting ? 205 : 190;
+        u8 bb = k->boosting ?  60 : 235;
+
+        hud_text(bx2, by2 - 15.0f, 8.0f, 14.0f, "BOOST", 190, 195, 210, 200);
+        hud_rect(bx2, by2, 84.0f, 6.0f, 15, 15, 20, 170);
+        hud_rect(bx2 + 1.0f, by2 + 1.0f,
+                 82.0f * game_clampf(k->boost_charge, 0.0f, 1.0f), 4.0f,
+                 br, bg, bb, 235);
+    }
+
     draw_leaderboard(p, vx, vy, vw, vh);
     draw_finish_marker(p, vx, vy, vw, vh);
     draw_wrong_way_marker(p, vx, vy, vw, vh);
@@ -2101,6 +2121,7 @@ static int displayed_action_on(int p, int action)
     case CONTROL_BRAKE:     return in->brake;
     case CONTROL_HANDBRAKE: return in->hop;
     case CONTROL_ITEM:      return in->item;
+    case CONTROL_BOOST:     return in->boost;
     case CONTROL_GEAR_UP:   return in->gear_up;
     case CONTROL_GEAR_DOWN: return in->gear_down;
     case CONTROL_RACE_MENU:
@@ -2158,7 +2179,7 @@ static void draw_input_translator(int p)
     if (!control_config.show_input_overlay || game.cfg.n_humans != 1)
         return;
 
-    hud_rect(x - 6.0f, y - 8.0f, 414.0f, 142.0f,
+    hud_rect(x - 6.0f, y - 8.0f, 414.0f, 156.0f,
              8, 12, 22, 185);
     hud_text(x, y, 5.2f, 9.0f, "ACTION KEY:RAW XBOX DOLPHIN:RAW GAME",
              130, 205, 255, 245);
@@ -2190,6 +2211,7 @@ static void draw_input_translator(int p)
     draw_binding_line(p, x, y, "BRAKE", CONTROL_BRAKE); y += 14.0f;
     draw_binding_line(p, x, y, "HAND", CONTROL_HANDBRAKE); y += 14.0f;
     draw_binding_line(p, x, y, "ITEM", CONTROL_ITEM); y += 14.0f;
+    draw_binding_line(p, x, y, "BOOST", CONTROL_BOOST); y += 14.0f;
     draw_binding_line(p, x, y, "UP", CONTROL_GEAR_UP); y += 14.0f;
     draw_binding_line(p, x, y, "DOWN", CONTROL_GEAR_DOWN); y += 14.0f;
     draw_binding_line(p, x, y, "MENU", CONTROL_RACE_MENU); y += 14.0f;

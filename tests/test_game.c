@@ -1835,10 +1835,16 @@ static void test_json_configuration(void)
     CHECK(config_load_cars_file("config/cars.json", error,
                                 (int)sizeof(error)),
           "shipped cars.json did not load: %s", error);
-    CHECK(kart_spec_count == DEFAULT_SPEC_COUNT,
+    CHECK(kart_spec_count == DEFAULT_SPEC_COUNT + 1,
           "shipped car count is %d", kart_spec_count);
     CHECK(strcmp(kart_specs[1].name, "SPORT") == 0,
           "shipped SPORT car disappeared");
+    CHECK(strcmp(kart_specs[DEFAULT_SPEC_COUNT].name, "TURBO") == 0 &&
+          kart_specs[DEFAULT_SPEC_COUNT].has_turbo &&
+          kart_specs[DEFAULT_SPEC_COUNT].boost_power_mult > 1.0f,
+          "shipped TURBO car's turbo block did not parse");
+    CHECK(!kart_specs[1].has_turbo,
+          "SPORT picked up a turbo block it does not have");
 
     CHECK(config_load_cars_text(one_car, error, (int)sizeof(error)),
           "custom car did not load: %s", error);
@@ -2785,6 +2791,155 @@ static void test_racing_line_pace_is_not_the_sheet(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Turbo                                                               */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A car with no "turbo" block in cars.json simply has none: has_turbo
+ * stays 0, and every built-in car is exactly that. Hold both the
+ * throttle and the boost button down together and the car should reach
+ * precisely the speed it would have reached had boost never existed —
+ * proof the button is a genuine no-op, not just quietly weak.
+ */
+static void test_turbo_only_for_cars_that_have_one(void)
+{
+    float top[2];
+    int v;
+
+    for (v = 0; v < 2; v++) {
+        Game g;
+        GameConfig cfg = default_cfg(TRACK_CLASSIC);
+        Input in[MAX_HUMANS];
+        Kart *k;
+        int f;
+
+        game_init(&g, &cfg);
+        idle_inputs(in);
+        in[0].accel = 1;
+        in[0].boost = (v == 1);
+        k = &g.karts[0];
+        CHECK(!kart_specs[k->spec].has_turbo,
+              "test bug: the default car already has a turbo");
+        for (f = 0; f < 60 * 8; f++)
+            game_update(&g, in, 1.0f / 60.0f);
+        CHECK(!k->boosting, "a car with no turbo block reported boosting");
+        top[v] = k->speed;
+    }
+    printf("no turbo block: %.1f km/h with the button left alone, "
+           "%.1f km/h holding it down\n", top[0] * 3.6f, top[1] * 3.6f);
+    CHECK(fabsf(top[0] - top[1]) < 0.01f,
+          "holding boost changed a non-turbo car's speed (%.1f vs %.1f km/h)",
+          top[0] * 3.6f, top[1] * 3.6f);
+}
+
+/*
+ * A turbo car: charge should fall while the button is held and the
+ * engine actually benefits, then climb back while off the throttle. Both
+ * halves of "rechargeable" have to hold, not just one.
+ */
+static void test_turbo_charge_drains_and_recovers(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    Kart *k;
+    int f;
+    float after_drain, after_recover;
+
+    kart_specs_reset_defaults();
+    kart_specs[4] = kart_specs[1];             /* a turbo SPORT */
+    kart_specs[4].has_turbo = 1;
+    kart_specs[4].boost_power_mult = 1.5f;
+    kart_specs[4].boost_seconds = 2.0f;
+    kart_specs[4].boost_recharge_seconds = 4.0f;
+    kart_spec_count = 5;
+
+    cfg.spec[0] = 4;
+    game_init(&g, &cfg);
+    idle_inputs(in);
+    k = &g.karts[0];
+    CHECK(fabsf(k->boost_charge - 1.0f) < 0.001f,
+          "a turbo car did not start the grid with a full charge");
+
+    /* clear the pre-race countdown, which does not advance the sim, so
+     * the timed measurements below cover only real driving seconds */
+    while (g.state == STATE_COUNTDOWN)
+        game_update(&g, in, 1.0f / 60.0f);
+
+    /* hold the throttle and the boost button: charge should drain over
+     * boost_seconds, and the car should visibly be drawing on it */
+    in[0].accel = 1;
+    in[0].boost = 1;
+    for (f = 0; f < 60 * 1; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    after_drain = k->boost_charge;
+    CHECK(k->boosting, "a turbo car with charge did not report boosting");
+    CHECK(after_drain < 0.7f && after_drain > 0.3f,
+          "one second of boosting out of a 2 s charge left %.2f, expected "
+          "roughly half", after_drain);
+
+    /* let go, and lift off the throttle: charge should climb back */
+    in[0].boost = 0;
+    in[0].accel = 0;
+    for (f = 0; f < 60 * 1; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    after_recover = k->boost_charge;
+    CHECK(!k->boosting, "boosting stayed on after the button was released");
+    CHECK(after_recover > after_drain,
+          "charge did not recover off the throttle (%.2f -> %.2f)",
+          after_drain, after_recover);
+
+    kart_specs_reset_defaults();   /* do not poison later tests */
+}
+
+/*
+ * The whole point: a car that actually uses its turbo should lap
+ * quicker than the identical car without one, everything else — mass,
+ * power, grip, skill, learned corner confidence — held equal. The AI's
+ * own judgement decides when to fire it (ai_control), which is also
+ * what proves the mechanism works end to end, not just in isolation.
+ */
+static void test_boosted_lap_is_quicker(void)
+{
+    float lap[2];
+    int v;
+
+    kart_specs_reset_defaults();
+    kart_specs[4] = kart_specs[1];             /* a turbo SPORT */
+    kart_specs[4].has_turbo = 1;
+    kart_specs[4].boost_power_mult = 1.4f;
+    kart_specs[4].boost_seconds = 2.5f;
+    kart_specs[4].boost_recharge_seconds = 5.0f;
+    kart_spec_count = 5;
+
+    for (v = 0; v < 2; v++) {
+        Game g;
+        GameConfig cfg = default_cfg(TRACK_BERTHOUD);
+        Input in[MAX_HUMANS];
+        Kart *k;
+        int f, c;
+
+        cfg.spec[0] = 1;             /* human's own car does not matter */
+        game_init(&g, &cfg);
+        idle_inputs(in);
+        k = &g.karts[1];
+        k->spec = (v == 1) ? 4 : 1;  /* plain SPORT, then the turbo SPORT */
+        k->ai_skill = 1.0f;
+        for (c = 0; c < TRACK_MAX_CORNERS; c++)
+            k->corner_conf[c] = 1.0f;
+        for (f = 0; f < 60 * 300 && !k->finished; f++)
+            game_update(&g, in, 1.0f / 60.0f);
+        lap[v] = k->best_lap_time > 0.0f ? k->best_lap_time : 9999.0f;
+    }
+    printf("same car on BERTHOUD, no turbo vs turbo: %.1f s vs %.1f s\n",
+           lap[0], lap[1]);
+    CHECK(lap[1] < lap[0],
+          "the turbo car was not quicker (%.1f vs %.1f s)", lap[1], lap[0]);
+
+    kart_specs_reset_defaults();
+}
+
+/* ------------------------------------------------------------------ */
 /* Lap timing                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -3408,6 +3563,9 @@ int main(void)
     test_temperament_shows_on_track();
     test_skill_sets_pace();
     test_racing_line_pace_is_not_the_sheet();
+    test_turbo_only_for_cars_that_have_one();
+    test_turbo_charge_drains_and_recovers();
+    test_boosted_lap_is_quicker();
     test_editing_cars_json_changes_the_car();
     test_grade_costs_speed();
     test_grade_costs_grip();

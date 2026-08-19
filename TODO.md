@@ -81,10 +81,21 @@ Left for later, now that the camera has somewhere to live:
   convincingly uphill while cars retain or gain speed more naturally downhill.
       *(v1.7.0: gravity uses sin rather than tan of the road angle, tire load
       falls off with cos, and both are scalable from the `hills` block.)*
-- [ ] Add a rechargeable nitro/boost resource and a clearly readable boost
-  gauge.
-- [ ] Add a JSON `turbo` capability and tuning block available only to cars
-  designed to use it.
+- [x] Add a rechargeable nitro/boost resource and a clearly readable boost
+  gauge; add a JSON `turbo` capability and tuning block available only to
+  cars designed to use it. Done in v1.14.0: `boost_charge` on `Kart`
+  drains while the button is held (and only while the driver is also
+  accelerating — kart_step only spends engine power under `in->accel`, so
+  firing it at a speed already capped by the corner ahead would just
+  waste the charge for nothing) and recharges while off the throttle,
+  never while it. Gated per car by an optional `"turbo"` block in
+  `cars.json` (`power_multiplier`, `boost_seconds`, `recharge_seconds`);
+  the shipped file's `TURBO` car is the worked example. A gauge sits next
+  to the tire bar for a car that has one. AI decide for themselves when
+  to spend it (`ai_control`), which is also the end-to-end proof: a
+  turbo SPORT laps Berthoud at 72.6 s against a plain SPORT's 74.3 s,
+  same skill, same learned corner confidence
+  (`test_boosted_lap_is_quicker`).
 - [x] Add per-car and optionally per-gear automatic shift ranges to `cars.json`,
   including configurable upshift/downshift points rather than only limiter
   speeds. *(v1.7.0.)*

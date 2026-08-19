@@ -834,6 +834,8 @@ void game_init(Game *g, const GameConfig *cfg)
                                : i - g->cfg.n_humans);
         k->rank = i + 1;
         k->gear = 0;
+        k->boost_charge = 1.0f;   /* a turbo car starts the grid full;
+                                   * a no-op for one without */
         k->tire_wear = 0.0f;
         k->tire_temp = g->settings.tire_ambient_c + 6.0f;   /* out of the
                                                              * paddock */
@@ -1186,6 +1188,19 @@ static void ai_control(const Game *g, Kart *k, Input *in, float dt)
             in->item = 1;
         }
     }
+
+    /*
+     * The turbo is fuel, not a pickup, so a driver with one spends it on
+     * a straight rather than saving it for a corner it would only be
+     * wasted on, and never on a sliver too thin to be worth the trade.
+     * Extra engine power only turns into extra speed while the car is
+     * actually accelerating (kart_step only applies P under in->accel) —
+     * firing it once already at the speed this corner's braking point
+     * allows would just drain the charge for nothing.
+     */
+    if (s->has_turbo && in->accel && k->boost_charge > 0.5f &&
+        t->curv[k->seg] < 0.02f)
+        in->boost = 1;
 }
 
 /*
@@ -1490,6 +1505,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     k->respawned = 0;
     k->lap_event = 0;
     k->lap_best_event = 0;
+    k->boosting = 0;
 
     if (k->invincible_t > 0.0f) {
         k->invincible_t -= dt;
@@ -1573,6 +1589,28 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     if (k->grip_t > 0.0f) {
         mu_a *= g->settings.fresh_tire_grip_mult;
         k->grip_t -= dt;
+    }
+
+    /*
+     * The turbo. Only a car with one (has_turbo, from a `turbo` block in
+     * cars.json) responds to the button at all. Held down it drains the
+     * charge over boost_seconds and multiplies engine power for as long
+     * as any charge is left; let go — or never touch it — and the charge
+     * comes back over boost_recharge_seconds, but only while off the
+     * throttle, so recharging costs the speed accelerating would have
+     * bought. That trade is the whole point: it is fuel, not a button
+     * that is free to mash.
+     */
+    if (s->has_turbo) {
+        if (in->boost && k->boost_charge > 0.0f) {
+            k->boost_charge -= dt / s->boost_seconds;
+            if (k->boost_charge < 0.0f) k->boost_charge = 0.0f;
+            P *= s->boost_power_mult;
+            k->boosting = 1;
+        } else if (!in->accel) {
+            k->boost_charge += dt / s->boost_recharge_seconds;
+            if (k->boost_charge > 1.0f) k->boost_charge = 1.0f;
+        }
     }
 
     /*

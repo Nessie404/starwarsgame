@@ -52,6 +52,25 @@
       "gear_top_speeds_kph": [54.0, 90.0, 133.2, 180.0, 230.4, 284.4],
       "automatic_upshift_fraction": 0.95,
       "automatic_downshift_fraction": 0.38
+    },
+    {
+      "_comment": "The only built-in car with a turbo block, as a working example. Add one to any car to give it the boost button.",
+      "name": "TURBO",
+      "mass_kg": 900,
+      "power_hp": 155,
+      "brake_distance_100_kph_m": 37,
+      "lateral_grip_g": 0.95,
+      "drag_area_m2": 0.64,
+      "wheelbase_m": 2.40,
+      "offroad_grip": 0.45,
+      "gear_top_speeds_kph": [46.8, 79.2, 118.8, 162.0, 216.0],
+      "automatic_upshift_fraction": 0.95,
+      "automatic_downshift_fraction": 0.38,
+      "turbo": {
+        "power_multiplier": 1.40,
+        "boost_seconds": 2.5,
+        "recharge_seconds": 5.0
+      }
     }
   ]
 }

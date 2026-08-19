@@ -4,6 +4,33 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.14.0] - 2026-08-19
+
+### Added
+
+- **A rechargeable turbo**, gated per car by an optional `"turbo"` block
+  in `cars.json` (`power_multiplier`, `boost_seconds`,
+  `recharge_seconds`) — a car with no block never gets the button. The
+  charge starts full, drains while the button is held, and recharges
+  while off the throttle, never while it: recharging costs the speed
+  accelerating would have bought, which is the actual trade-off. The
+  AI's own usage heuristic (`ai_control`) only fires it while also
+  accelerating, since `kart_step` only spends the extra engine power
+  inside the `in->accel` branch — holding it at a speed the corner ahead
+  already caps would just drain the charge for nothing. A gauge sits
+  next to the tire bar for a car that has one. The shipped
+  `config/cars.json` adds a fifth car, `TURBO`, as the worked example.
+  Reachable by keyboard (`B` / `N`), Classic Controller (D-pad up), and
+  GameCube/Xbox pads (`DPAD_UP` by default, editable in `controls.json`)
+  — a bare Wii Remote or Wii Remote + Nunchuk has no button left to
+  spare for it.
+
+  Tested: a car with no turbo block cannot boost no matter how hard the
+  button is held; charge falls while boosting and climbs back while
+  lifting; a turbo SPORT laps Berthoud at 72.6 s against a plain
+  SPORT's 74.3 s, same skill, same learned corner confidence, with the
+  AI deciding for itself when to spend it.
+
 ## [1.13.0] - 2026-08-19
 
 ### Changed

@@ -73,6 +73,29 @@ giving a per-gear list. The upshift and downshift points must stay at
 least 0.20 apart, otherwise the box would change up into its own
 downshift point and hunt; a file that asks for that is refused whole.
 
+### Giving a car a turbo
+
+Add a `"turbo"` object and the boost button does something for that car;
+leave it out and the button is a no-op, same as every built-in car except
+the example `TURBO`. All three keys are optional:
+
+| Key | Default | What it does |
+|---|---|---|
+| `power_multiplier` | 1.35 | Engine power while the button is held, 1.0–3.0 |
+| `boost_seconds` | 2.5 | How long a full charge lasts held down, 0.5–30 |
+| `recharge_seconds` | 6.0 | How long a full recharge takes, 0.5–60 |
+
+It is fuel, not a pickup: the charge starts full, drains while the button
+is held (and only actually helps while the driver is also accelerating —
+holding it at a speed the corner ahead already caps does nothing but
+waste the charge), and comes back while off the throttle. A player reaches
+it with **B** (player 1) / **N** (player 2) on the keyboard, **D-pad up**
+on a Classic Controller, or the GameCube binding below — there is no
+dedicated button for it on a bare Wii Remote or Wii Remote + Nunchuk, both
+of which are already out of spare buttons. The AI decides for itself when
+to use it: on a straight, with meaningful charge in hand, and only while
+it would actually be accelerating anyway.
+
 ## `settings.json`
 
 This file exposes the main tuning surfaces:

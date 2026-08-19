@@ -152,6 +152,17 @@ typedef struct {
      */
     float auto_up[MAX_GEARS];
     float auto_down[MAX_GEARS];
+
+    /*
+     * Turbo: optional, and only a car with a `"turbo"` block in
+     * cars.json gets it (config.c sets has_turbo when it parses one).
+     * Held down it multiplies engine power for as long as the charge
+     * lasts; released, or never fitted, it does nothing.
+     */
+    int   has_turbo;
+    float boost_power_mult;       /* engine power multiplier while held  */
+    float boost_seconds;          /* how long a full charge lasts, held  */
+    float boost_recharge_seconds; /* how long a full recharge takes      */
 } KartSpec;
 
 #define COOLDOWN_SECONDS 11.0f /* slowing-down lap: flag to a standstill */
@@ -375,6 +386,7 @@ typedef struct {
     int   item;      /* deploy held power-up (edge-detected by the sim) */
     int   gear_up;   /* upshift  (edge-detected by the sim)             */
     int   gear_down; /* downshift                                       */
+    int   boost;     /* turbo, held down; no-op without a turbo car     */
 } Input;
 
 /* ------------------------------------------------------------------ */
@@ -508,6 +520,11 @@ typedef struct {
     float grip_t;         /* fresh-rubber seconds remaining             */
     int   power_held;     /* POWER_* currently in reserve               */
     int   prev_item_btn;
+
+    /* the turbo, for cars that have one (KartSpec.has_turbo). Drains
+     * while held down, recharges while off the throttle; see kart_step. */
+    float boost_charge;   /* 0 empty .. 1 full                          */
+    int   boosting;       /* one-frame: actually drawing on it right now */
 
     /* role / livery */
     int   human;          /* -1 = AI, else human player index          */
