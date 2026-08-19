@@ -1,4 +1,4 @@
-# WiiKart 1.10.0
+# WiiKart
 
 An original racing game built as **Nintendo Wii homebrew**. It compiles to
 a real Wii executable (`wiikart.dol`) that runs in the
@@ -78,6 +78,24 @@ driving model that expects you to brake for the hairpins.
   were actually read.
 - **v1.10.0** — the rivals become people: skill, nerve, aggression and
   how hard they are on their tires, separate from the way they drive.
+- **v1.11.0** — the fix for a build defect that could make a whole release
+  refuse to boot on some Dolphin installs (unrounded DOL section sizes),
+  plus an AI takeover so a finished car coasts to a stop instead of being
+  left with no driver. **v1.11.1** rounds the section sizes properly —
+  v1.11.0 only fixed the file-length half of the same defect.
+- **v1.12.0** — a marshal helicopter for driving the wrong way, judged on
+  net progress along the track rather than heading, and a quieter HUD.
+- **v1.13.0** — the AI drives an actual racing line now instead of holding
+  a fixed lateral offset all lap, so pace comes from skill and not from
+  which strategy sheet a driver happened to be dealt.
+- **v1.14.0** — a rechargeable turbo: hold the button for real extra
+  engine power while the charge lasts, and it only recharges off the
+  throttle. Gated per car by a `turbo` block in `cars.json`.
+- **v1.15.0** — boost moves off the track and into the engine entirely:
+  every car has an aspiration (naturally aspirated, turbocharged, or
+  supercharged) instead of a push-to-pass power-up to collect. Adds
+  Berthoud Pass 2.0, an eighth circuit built from the real pass's
+  elevation profile, and RUBY, a lightweight turbocharged car.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -120,12 +138,13 @@ driving model that expects you to brake for the hairpins.
   car understeers wide, scrubbing speed. Gravity acts along the road
   grade: climbs cost speed, descents give it back.
 - **Car selection with real spec sheets.** The included RACER, SPORT,
-  RALLY and TOURER are defined by horsepower, curb weight, stopping
-  distance, lateral g, drag area, wheelbase, dirt grip and per-gear
-  limiter speeds. The menu derives 0-100 time and top speed from the same
-  equations the physics uses. The roster now comes from `cars.json`, so a
-  fifth car is an added JSON object, not a C surgery.
-- **Five circuits**, all measured rather than guessed. Lap counts are set
+  RALLY, TOURER, TURBO, BLOWER and RUBY are defined by horsepower, curb
+  weight, stopping distance, lateral g, drag area, wheelbase, dirt grip,
+  aspiration and per-gear limiter speeds. The menu derives 0-100 time and
+  top speed from the same equations the physics uses. The roster comes
+  from `cars.json`, so another car is an added JSON object, not a C
+  surgery.
+- **Eight circuits**, all measured rather than guessed. Lap counts are set
   per circuit so every race covers a similar distance:
 
   | Circuit | Length | Width | Corners | Tightest | Climb | Steepest | Rails | Laps |
@@ -135,12 +154,16 @@ driving model that expects you to brake for the hairpins.
   | LOVELAND (US-6) | 1699 m | 12.0 m | 11 | 12 m | 61 m | 14% | **no** | 2 |
   | KENOSHA (US-285) | 2172 m | 13.2 m | 43 | 15 m | 58 m | 10% | yes | 2 |
   | MONARCH (US-50) | 2167 m | 8.6 m | 33 | 9 m | 118 m | 19% | **no** | 2 |
+  | BREAKNECK | 945 m | 7.4 m | 13 | 29 m | 44 m | 29% | **no** | 3 |
+  | GUANELLA | 1986 m | 7.8 m | 15 | 6 m | 64 m | 19% | **no** | 2 |
+  | BERTHOUD 2.0 | 3263 m | 13.2 m | 33 | 7 m | 86 m | 21% | yes | 2 |
 
-  **Kenosha** remains the widest, flowing one and narrowly the longest.
-  **Monarch** now runs nearly as long, adds an extended summit/descent,
-  climbs 118 m, tightens to roughly a 9 m radius, and still has no rails.
-  Every road gained about 10–15% pavement width, but Monarch gained more
-  ways to spend it badly.
+  **Kenosha** ties Berthoud 2.0 as the widest and is still the longest of
+  the original five. **Monarch** climbs the most of that group and has no
+  rails. **Breakneck** is the steepest anywhere on the roster and the
+  shortest pass; **Guanella** has the tightest hairpin (6 m); **Berthoud
+  2.0** climbs the most overall and is built from the real pass's own
+  elevation profile rather than stylized from memory.
 - **Gearboxes.** Every car has a real gearbox — 4 to 6 gears, each with a
   road speed at the limiter. Where you are in the band decides your power:
   bog it below a third of the band and it pulls badly, sit on the limiter

@@ -19,7 +19,7 @@ It runs in the [Dolphin](https://dolphin-emu.org) emulator on a PC and on
 real Wii hardware through the Homebrew Channel. It contains no Nintendo
 code or assets and needs no game disc.
 
-Twelve cars race on eight circuits, five of them stylized Colorado
+Twelve cars race on eight circuits, seven of them stylized Colorado
 mountain passes. The driving model is semi-realistic: real power and mass,
 braking distances, grip limits, gears, hills, and tires that heat up and
 wear out.
@@ -61,7 +61,7 @@ push, and the release appears.
 |---|---|
 | `source/game.h` | Every shared type and constant. Start here. |
 | `source/game.c` | The simulation: physics, gears, tires, AI drivers, lap timing. Portable C99 — no Wii headers. |
-| `source/track.c` | The seven circuits, built from control points into a sampled centreline with widths, corners and checkpoints. Portable. |
+| `source/track.c` | The eight circuits, built from control points into a sampled centreline with widths, corners and checkpoints. Portable. |
 | `source/camera.c` | The chase camera. Portable, and tested. |
 | `source/config.c` | The JSON parser and the loaders for the three config files. Portable. |
 | `source/main.c` | **The only Wii-specific file**: video, controllers, sound, 3D rendering, HUD, menus. Cannot be compiled or tested on a PC. |
@@ -124,6 +124,11 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   rather than from which sheet a driver happens to run.
 - **v1.14**: a rechargeable turbo, gated per car by a `turbo` block in
   `cars.json`.
+- **v1.15**: boost moves off the track and into the engine — every car has
+  an `aspiration` (natural, turbo or supercharged) instead of a
+  push-to-pass power-up; Berthoud Pass 2.0, an eighth circuit built from
+  the real pass's own elevation profile; RUBY, a lightweight turbocharged
+  car; and a mirrored minimap fixed.
 
 ---
 
