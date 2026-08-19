@@ -4,3 +4,8 @@ dist/
 *.elf
 *.map
 wiikart-test
+
+# Python bytecode, from importing tools/validate_dol.py as a module when
+# checking a batch of DOLs by hand
+__pycache__/
+*.pyc
