@@ -98,6 +98,12 @@ Left for later, now that the camera has somewhere to live:
   throttle, no button, no charge) or absent (naturally aspirated). Only
   the fresh-tires power-up remains on track. `BLOWER` is the shipped
   supercharged car.
+- [x] Retire boost and the fresh-tires power-up entirely. Done in v1.16.0:
+  no aspiration system, no roadside item panel, no boost button. A car's
+  power is just its plain horsepower figure; tires only wear over a
+  race, with no mid-lap refresh. `TURBO` and `BLOWER`, which existed
+  solely to demonstrate the removed engine mechanic, are gone from the
+  garage; `RUBY` stays as a plain naturally-aspirated car.
 - [x] Add per-car and optionally per-gear automatic shift ranges to `cars.json`,
   including configurable upshift/downshift points rather than only limiter
   speeds. *(v1.7.0.)*

@@ -4,6 +4,36 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.16.0] - 2026-08-19
+
+### Removed
+
+- **Boost and the fresh-rubber power-up are both gone.** v1.15.0 moved
+  boost off the track and into the engine as an `aspiration` system
+  (`"turbo"` / `"supercharged"`); this release removes that system
+  entirely rather than replacing it again. There is no `KartSpec`
+  aspiration, no boost button, no boost gauge, and no roadside item
+  panel — a car's power is just its plain horsepower figure, full stop.
+  Tires still wear over a race exactly as before, but nothing ever
+  refreshes them mid-lap any more: picking a compound is a bet on the
+  whole race distance, not a resource collected and spent lap to lap.
+
+  `TURBO` and `BLOWER` are removed from `cars.json` — both existed
+  solely as worked examples of the aspiration mechanic, and stripped of
+  it they were either a near-duplicate of `SPORT` or a strictly worse
+  `TOURER`. `RUBY` keeps its own identity (six gears, 1080 kg, high
+  horsepower) as a plain naturally-aspirated car; only its turbo
+  characteristic is gone.
+
+  Retuning the tire model was necessary once tires could no longer ever
+  be refreshed: the previous wear rates were calibrated assuming
+  periodic resets from the (now-removed) fresh-rubber panel, so without
+  them softs wore out completely partway through even a short sprint.
+  Wear rates for all three compounds are lower across the board
+  (`tire_wear_rate`: medium 0.0080, soft 0.0200, hard 0.0018), tuned so
+  softs still win a sprint and mediums/hards still win a long race with
+  a real, measured margin (`test_tire_strategy_crossover`).
+
 ## [1.15.0] - 2026-08-19
 
 ### Changed

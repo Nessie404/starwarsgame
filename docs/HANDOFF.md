@@ -129,6 +129,11 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   push-to-pass power-up; Berthoud Pass 2.0, an eighth circuit built from
   the real pass's own elevation profile; RUBY, a lightweight turbocharged
   car; and a mirrored minimap fixed.
+- **v1.16**: boost and the fresh-tires power-up are both retired — no
+  aspiration system, no item panel, no boost button. `TURBO` and
+  `BLOWER` are gone from the garage; `RUBY` stays as a plain
+  naturally-aspirated car. Tire wear rates retuned now that nothing
+  ever refreshes them mid-race.
 
 ---
 
@@ -185,56 +190,48 @@ given identical skill and identical learned corner confidence, land
 within 1.4% of each other on Berthoud, while `test_skill_sets_pace` still
 shows skill alone worth 7.3%.
 
-### 7b. Boost as an engine trait, not a track power-up — done in v1.14.0, replaced in v1.15.0
+### 7b. Boost and the fresh-tires power-up — removed in v1.16.0
 
-v1.14.0 shipped a rechargeable turbo as a `KartSpec.has_turbo` flag. v1.15.0
-replaced that with a general `KartSpec.aspiration` (`ASPIRATION_NATURAL`,
-`ASPIRATION_TURBO`, `ASPIRATION_SUPERCHARGED`), set from an `"aspiration"`
-object in `cars.json` and parsed by `read_aspiration` in `config.c`
-(`read_turbo` no longer exists). The old push-to-pass power-up is gone
-entirely — `POWER_PUSH` was removed from `game.h`'s power-up enum, and
-`PUSH_POWER`/`PUSH_SECONDS`/`push_power_mult`/`push_seconds` are gone from
-`settings.json` and `GameSettings`. Only fresh-tires (`POWER_TIRES`)
-remains as an on-track pickup; boost now comes entirely from the engine.
+This mechanic has a longer history than most: v1.14.0 shipped a
+rechargeable turbo as `KartSpec.has_turbo`; v1.15.0 generalized that into
+`KartSpec.aspiration` (natural/turbo/supercharged) and retired the old
+push-to-pass power-up in favor of it, keeping only fresh-tires on track.
+v1.16.0 removes the whole thing — no aspiration system, no boost button,
+no item panel at all. If you're looking for `ASPIRATION_TURBO`,
+`Kart.boost_charge`, `read_aspiration`, `track_item_row`, `POWER_TIRES`,
+`CONTROL_BOOST` or `CONTROL_ITEM`, none of them exist any more; a car's
+power is just its plain `power_hp` figure, nothing multiplies it, and
+`KartSpec`/`Kart`/`Track`/`GameSettings` all lost the fields that used to
+back this (see the v1.16.0 `CHANGELOG.md` entry for the full list). Tires
+still wear exactly as before (that part of the tire model is untouched)
+— what's gone is any way to reset that wear mid-race.
 
-**Turbo** keeps v1.14.0's rechargeable-charge behavior
-(`Kart.boost_charge`, 0..1, drains while the button is held and recharges
-while off the throttle, never while also holding it — "recharging costs
-the speed accelerating would have bought" is still the actual trade-off),
-plus a new spool: `Kart.boost_spool` ramps from 0 to 1 over
-`boost_spool_seconds` after the button is first pressed, so the power
-multiplier phases in rather than snapping to full boost, and decays back
-down once the button is released. Three more tunables in the
-`"aspiration"` block besides `power_multiplier`: `boost_seconds` (charge
-duration), `recharge_seconds`, `spool_seconds` (lag).
+`TURBO` and `BLOWER` are gone from `cars.json`: both existed purely to
+demonstrate the aspiration mechanic, and their underlying chassis specs
+were either a near-duplicate of `SPORT` or a strictly worse `TOURER` once
+the multiplier was taken away, so there was nothing left worth keeping
+them for. `RUBY` (six gears, 1080 kg, high horsepower) keeps its own
+identity as a plain naturally-aspirated car — only the turbo
+characteristic it shipped with in v1.15.0 is gone.
 
-**Supercharged** has none of that state. `kart_step`'s `switch
-(s->aspiration)` branch for `ASPIRATION_SUPERCHARGED` applies
-`boost_power_mult` unconditionally any time `in->accel` is set — no
-button, no charge, no lag, matching how a belt-driven mechanical
-supercharger actually behaves (always spinning with the engine). The HUD
-draws a "SUPERCHARGED" label (no gauge, since there's no charge to show)
-colored by `Kart.boosting` the same as the turbo gauge.
+Removing the fresh-tires refresh meant the tire wear model needed
+retuning: it had been calibrated assuming periodic resets from the
+panel, so without any reset at all softs wore down to nothing partway
+through even a short sprint and lost their sprint advantage entirely.
+Current `tire_wear_rate`: medium 0.0080, soft 0.0200, hard 0.0018 (all
+in `game_settings_defaults`, `game.c`, and mirrored in
+`config/settings.json`'s `tires` block — keep those two in sync if you
+touch either). `test_tire_strategy_crossover` is the test that would
+catch this drifting out of balance again: softs quicker on a short
+sprint (Classic), mediums/hards quicker on a long haul (Kenosha),
+averaged across four AI karts to keep overcommit-gamble RNG timing from
+being the actual thing the test measures.
 
-Both aspirations still only affect the drive power inside `kart_step`'s
-`if (in->accel && !in->brake)` branch, which is why `ai_control`'s turbo
-firing heuristic checks `in->accel` before pulling the trigger — firing
-boost while not accelerating (already at the speed the corner ahead caps
-you to) wastes the charge and gains nothing; this was true for the turbo
-in v1.14.0 and stayed true writing the supercharger, which needed no
-button-firing heuristic at all since it's unconditional.
-
-`TURBO` (existing car) moved to the new block unchanged in feel. `BLOWER`
-is the new shipped supercharged car.
-
-Proof, in `tests/test_game.c`: `test_turbo_only_for_cars_that_have_one`,
-`test_turbo_charge_drains_and_recovers`, `test_boosted_lap_is_quicker`
-(all still turbo, updated for `aspiration`), plus the new
-`test_supercharged_lap_is_quicker` — run on Kenosha rather than Berthoud,
-because a twisty track's corner-entry overshoot penalty made the
-supercharger's *constant* extra power look like a wash or even a net loss
-in testing; Kenosha is open enough that unconditional extra power is
-simply faster (134.0 s supercharged vs 136.1 s natural, same car).
+If a boost mechanic comes back some day, it should probably not be the
+same shape as either past attempt — a track pickup felt arcade-y, and an
+engine multiplier turned out to be a lot of state (charge, spool, a
+button, a gauge) for a fairly small effect. Worth deciding what problem
+it's actually solving before rebuilding it.
 
 ### 7b′. Berthoud Pass 2.0, and what a switchback track has to get right — done in v1.15.0
 

@@ -73,52 +73,6 @@ giving a per-gear list. The upshift and downshift points must stay at
 least 0.20 apart, otherwise the box would change up into its own
 downshift point and hunt; a file that asks for that is refused whole.
 
-### Giving a car an aspiration
-
-There is no track power-up for engine boost — no box to drive over, no
-random draw. What a car can do is entirely down to how its engine is
-fed, and that is a property of the car, not the road. Every car is
-naturally aspirated (nothing below applies) unless it says otherwise with
-an `"aspiration"` object:
-
-```json
-"aspiration": { "type": "turbo", "power_multiplier": 1.40 }
-```
-
-`"type"` is `"turbo"` or `"supercharged"`. Everything else is optional:
-
-| Key | Applies to | Default | What it does |
-|---|---|---|---|
-| `power_multiplier` | both | 1.35 | Engine power while boost applies, 1.0–3.0 |
-| `boost_seconds` | turbo | 2.5 | How long a full charge lasts held down, 0.5–30 |
-| `recharge_seconds` | turbo | 6.0 | How long a full recharge takes, 0.5–60 |
-| `spool_seconds` | turbo | 0.4 | How long the button takes to reach full boost, 0–5 |
-
-**Turbo** is fuel, not a pickup: the charge starts full, drains while the
-button is held (and only actually helps while the driver is also
-accelerating — holding it at a speed the corner ahead already caps does
-nothing but waste the charge), and comes back only while off the
-throttle. It also spools: pressing the button does not deliver
-`power_multiplier` instantly, it ramps in over `spool_seconds` the way a
-real turbo takes a moment to build exhaust pressure, and falls away three
-times as fast once the throttle lifts. A player reaches the button with
-**B** (player 1) / **N** (player 2) on the keyboard, **D-pad up** on a
-Classic Controller, or the GameCube binding below — there is no dedicated
-button for it on a bare Wii Remote or Wii Remote + Nunchuk, both of which
-are already out of spare buttons. The AI decides for itself when to use
-it: on a straight, with meaningful charge in hand, and only while it
-would actually be accelerating anyway.
-
-**Supercharged** is simpler and has no button at all: it is driven
-mechanically off the engine rather than exhaust flow, so there is nothing
-to run out of and no lag. `power_multiplier` applies the instant the
-driver is accelerating and stops the instant they are not — every driver
-of a supercharged car gets it, human or AI, with nothing to manage.
-
-`config/cars.json` ships one of each as a worked example: `TURBO`,
-`BLOWER` (supercharged), and every other built-in car naturally
-aspirated.
-
 ## `settings.json`
 
 This file exposes the main tuning surfaces:
@@ -130,7 +84,6 @@ This file exposes the main tuning surfaces:
   grip that wear costs, the temperature each wants and how wide its window
   is, how fast it heats and cools, and how much grip is left outside the
   window — plus the ambient air temperature they cool towards;
-- power-up multipliers;
 - AI pace, braking, safe-road use, and overcommit behavior;
 - cliff fall, blackout, fade, invincibility, and flash timing;
 - how long a human can drive the wrong way before the marshal helicopter

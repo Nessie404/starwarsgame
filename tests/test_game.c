@@ -126,7 +126,6 @@ static void test_tracks_geometry(void)
         } else {
             CHECK(t.max_y - t.min_y < 1.0f, "classic not flat");
         }
-        CHECK(t.n_items > 0, "track %d has no item rows", id);
     }
 }
 
@@ -264,47 +263,6 @@ static void test_cornering_grip_cap(void)
     CHECK(yaw_rate <= cap * 1.05f, "yaw %.2f exceeds grip cap %.2f",
           yaw_rate, cap);
     CHECK(g.karts[0].slip > 0.1f, "no understeer slip at full lock");
-}
-
-/*
- * The one remaining track power-up: fresh rubber, from a roadside panel,
- * held in reserve and deployed by the driver. Engine boost is not a
- * pickup any more (see test_boosted_lap_is_quicker and friends) — this
- * test is only about the tire panels now.
- */
-static void test_power_ups(void)
-{
-    Game g;
-    GameConfig cfg = default_cfg(TRACK_CLASSIC);
-    Input in[MAX_HUMANS];
-    int f;
-
-    game_init(&g, &cfg);
-    g.state = STATE_RACING;
-    idle_inputs(in);
-
-    /* drive through the item row from just before it */
-    {
-        int seg = (g.track.item_seg[0] - 2 + g.track.n) % g.track.n;
-        teleport(&g, &g.karts[0], seg, 10.0f);
-    }
-    in[0].accel = 1;
-    for (f = 0; f < 240 && !g.karts[0].power_held; f++)
-        game_update(&g, in, 1.0f / 60.0f);
-    CHECK(g.karts[0].power_held == POWER_TIRES,
-          "did not collect the fresh-rubber power-up");
-    if (!g.karts[0].power_held) return;
-
-    in[0].item = 1;
-    game_update(&g, in, 1.0f / 60.0f);
-    CHECK(!g.karts[0].power_held, "power-up not consumed");
-    CHECK(g.karts[0].power_fired, "deploying raised no event");
-    CHECK(g.karts[0].grip_t > TIRE_SECONDS - 0.5f,
-          "fresh rubber not deployed (%.2f s)", g.karts[0].grip_t);
-
-    /* it has to be modest: a bounded grip gain, not a free tank of fuel */
-    CHECK(TIRE_GRIP > 1.0f && TIRE_GRIP < 1.25f,
-          "fresh rubber %.2fx grip is not realistic", TIRE_GRIP);
 }
 
 /* The whole AI field must be able to finish a full race on every track,
@@ -855,32 +813,6 @@ static void test_player_model_learns(void)
 }
 
 
-/* AI must actually spend the power-ups they collect. Nothing else in the
- * game hands out push-to-pass or fresh rubber any more, so any deployment
- * seen here was a deliberate decision by a driver. */
-static void test_ai_uses_power_ups(void)
-{
-    Game g;
-    GameConfig cfg = default_cfg(TRACK_BERTHOUD);
-    Input in[MAX_HUMANS];
-    int f, i, tires = 0, held_seen = 0;
-
-    game_init(&g, &cfg);
-    idle_inputs(in);
-    for (f = 0; f < 60 * 120; f++) {
-        game_update(&g, in, 1.0f / 60.0f);
-        for (i = 1; i < NUM_KARTS; i++) {
-            if (g.karts[i].power_held)
-                held_seen = 1;
-            if (g.karts[i].power_fired)
-                tires++;
-        }
-    }
-    printf("AI power-ups over 2 minutes: %d fresh rubber\n", tires);
-    CHECK(held_seen, "no AI ever collected the fresh-rubber power-up");
-    CHECK(tires > 0, "AI never deployed the fresh-rubber power-up");
-}
-
 /*
  * No rubber-banding. The same AI car, from a standstill on the same piece
  * of road, must accelerate identically whether the human is right next to
@@ -1243,35 +1175,6 @@ static void test_tires_need_work(void)
     CHECK(k->tire_temp < temp0 + 5.0f,
           "a parked car heated its tires to %.0fC", k->tire_temp);
 }
-
-/* Fresh rubber means fresh: the power-up clears the wear it has done. */
-static void test_fresh_rubber_resets_wear(void)
-{
-    Game g;
-    GameConfig cfg = default_cfg(TRACK_BERTHOUD);
-    Input in[MAX_HUMANS];
-    Kart *k;
-    int f;
-    float worn;
-
-    cfg.tire[0] = TIRE_SOFT;
-    game_init(&g, &cfg);
-    idle_inputs(in);
-    k = &g.karts[0];
-    for (f = 0; f < 60 * 90; f++)
-        game_update(&g, in, 1.0f / 60.0f);
-    worn = k->tire_wear;
-
-    k->power_held = POWER_TIRES;
-    in[0].item = 1;
-    game_update(&g, in, 1.0f / 60.0f);
-    printf("fresh rubber: wear %.2f -> %.2f, temp %.0fC\n", worn,
-           k->tire_wear, k->tire_temp);
-    CHECK(worn > 0.01f, "the car never wore its tires (%.3f)", worn);
-    CHECK(k->tire_wear < 0.001f, "fresh rubber left %.2f of wear",
-          k->tire_wear);
-}
-
 
 
 /* The passes: which are barriered, and the shape of the new ones. */
@@ -1741,24 +1644,6 @@ static void test_nan_hardening(void)
            "(x %.1f speed %.1f)\n", k->x, k->speed);
 }
 
-/* Every track's item rows must fit the array they are written into. */
-static void test_item_rows_fit(void)
-{
-    int id;
-    for (id = 0; id < TRACK_COUNT; id++) {
-        Track t;
-        int i;
-        track_init(&t, id);
-        CHECK(t.n_items >= 0 && t.n_items <= TRACK_MAX_ITEMS,
-              "%s declares %d item rows, max is %d", track_name(id),
-              t.n_items, TRACK_MAX_ITEMS);
-        for (i = 0; i < t.n_items; i++)
-            CHECK(t.item_seg[i] >= 0 && t.item_seg[i] < t.n,
-                  "%s item row %d sits on segment %d of %d",
-                  track_name(id), i, t.item_seg[i], t.n);
-    }
-}
-
 /* A barriered track must still hold cars in rather than dropping them. */
 static void test_guardrails_still_hold(void)
 {
@@ -1854,24 +1739,13 @@ static void test_json_configuration(void)
     CHECK(config_load_cars_file("config/cars.json", error,
                                 (int)sizeof(error)),
           "shipped cars.json did not load: %s", error);
-    CHECK(kart_spec_count == DEFAULT_SPEC_COUNT + 3,
+    CHECK(kart_spec_count == DEFAULT_SPEC_COUNT + 1,
           "shipped car count is %d", kart_spec_count);
     CHECK(strcmp(kart_specs[1].name, "SPORT") == 0,
           "shipped SPORT car disappeared");
-    CHECK(strcmp(kart_specs[DEFAULT_SPEC_COUNT].name, "TURBO") == 0 &&
-          kart_specs[DEFAULT_SPEC_COUNT].aspiration == ASPIRATION_TURBO &&
-          kart_specs[DEFAULT_SPEC_COUNT].boost_power_mult > 1.0f,
-          "shipped TURBO car's aspiration block did not parse");
-    CHECK(strcmp(kart_specs[DEFAULT_SPEC_COUNT + 1].name, "BLOWER") == 0 &&
-          kart_specs[DEFAULT_SPEC_COUNT + 1].aspiration ==
-              ASPIRATION_SUPERCHARGED,
-          "shipped BLOWER car's supercharged block did not parse");
-    CHECK(strcmp(kart_specs[DEFAULT_SPEC_COUNT + 2].name, "RUBY") == 0 &&
-          kart_specs[DEFAULT_SPEC_COUNT + 2].aspiration == ASPIRATION_TURBO &&
-          kart_specs[DEFAULT_SPEC_COUNT + 2].n_gears == 6,
+    CHECK(strcmp(kart_specs[DEFAULT_SPEC_COUNT].name, "RUBY") == 0 &&
+          kart_specs[DEFAULT_SPEC_COUNT].n_gears == 6,
           "shipped RUBY car did not parse");
-    CHECK(kart_specs[1].aspiration == ASPIRATION_NATURAL,
-          "SPORT picked up an aspiration block it does not have");
 
     CHECK(config_load_cars_text(one_car, error, (int)sizeof(error)),
           "custom car did not load: %s", error);
@@ -2818,201 +2692,6 @@ static void test_racing_line_pace_is_not_the_sheet(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Turbo                                                               */
-/* ------------------------------------------------------------------ */
-
-/*
- * A car with no "turbo" block in cars.json simply has none: has_turbo
- * stays 0, and every built-in car is exactly that. Hold both the
- * throttle and the boost button down together and the car should reach
- * precisely the speed it would have reached had boost never existed —
- * proof the button is a genuine no-op, not just quietly weak.
- */
-static void test_turbo_only_for_cars_that_have_one(void)
-{
-    float top[2];
-    int v;
-
-    for (v = 0; v < 2; v++) {
-        Game g;
-        GameConfig cfg = default_cfg(TRACK_CLASSIC);
-        Input in[MAX_HUMANS];
-        Kart *k;
-        int f;
-
-        game_init(&g, &cfg);
-        idle_inputs(in);
-        in[0].accel = 1;
-        in[0].boost = (v == 1);
-        k = &g.karts[0];
-        CHECK(kart_specs[k->spec].aspiration == ASPIRATION_NATURAL,
-              "test bug: the default car already has an aspiration block");
-        for (f = 0; f < 60 * 8; f++)
-            game_update(&g, in, 1.0f / 60.0f);
-        CHECK(!k->boosting, "a naturally aspirated car reported boosting");
-        top[v] = k->speed;
-    }
-    printf("no turbo block: %.1f km/h with the button left alone, "
-           "%.1f km/h holding it down\n", top[0] * 3.6f, top[1] * 3.6f);
-    CHECK(fabsf(top[0] - top[1]) < 0.01f,
-          "holding boost changed a non-turbo car's speed (%.1f vs %.1f km/h)",
-          top[0] * 3.6f, top[1] * 3.6f);
-}
-
-/*
- * A turbo car: charge should fall while the button is held and the
- * engine actually benefits, then climb back while off the throttle. Both
- * halves of "rechargeable" have to hold, not just one.
- */
-static void test_turbo_charge_drains_and_recovers(void)
-{
-    Game g;
-    GameConfig cfg = default_cfg(TRACK_CLASSIC);
-    Input in[MAX_HUMANS];
-    Kart *k;
-    int f;
-    float after_drain, after_recover;
-
-    kart_specs_reset_defaults();
-    kart_specs[4] = kart_specs[1];             /* a turbo SPORT */
-    kart_specs[4].aspiration = ASPIRATION_TURBO;
-    kart_specs[4].boost_power_mult = 1.5f;
-    kart_specs[4].boost_seconds = 2.0f;
-    kart_specs[4].boost_recharge_seconds = 4.0f;
-    kart_specs[4].boost_spool_seconds = 0.2f;
-    kart_spec_count = 5;
-
-    cfg.spec[0] = 4;
-    game_init(&g, &cfg);
-    idle_inputs(in);
-    k = &g.karts[0];
-    CHECK(fabsf(k->boost_charge - 1.0f) < 0.001f,
-          "a turbo car did not start the grid with a full charge");
-
-    /* clear the pre-race countdown, which does not advance the sim, so
-     * the timed measurements below cover only real driving seconds */
-    while (g.state == STATE_COUNTDOWN)
-        game_update(&g, in, 1.0f / 60.0f);
-
-    /* hold the throttle and the boost button: charge should drain over
-     * boost_seconds, and the car should visibly be drawing on it */
-    in[0].accel = 1;
-    in[0].boost = 1;
-    for (f = 0; f < 60 * 1; f++)
-        game_update(&g, in, 1.0f / 60.0f);
-    after_drain = k->boost_charge;
-    CHECK(k->boosting, "a turbo car with charge did not report boosting");
-    CHECK(after_drain < 0.7f && after_drain > 0.3f,
-          "one second of boosting out of a 2 s charge left %.2f, expected "
-          "roughly half", after_drain);
-
-    /* let go, and lift off the throttle: charge should climb back */
-    in[0].boost = 0;
-    in[0].accel = 0;
-    for (f = 0; f < 60 * 1; f++)
-        game_update(&g, in, 1.0f / 60.0f);
-    after_recover = k->boost_charge;
-    CHECK(!k->boosting, "boosting stayed on after the button was released");
-    CHECK(after_recover > after_drain,
-          "charge did not recover off the throttle (%.2f -> %.2f)",
-          after_drain, after_recover);
-
-    kart_specs_reset_defaults();   /* do not poison later tests */
-}
-
-/*
- * The whole point: a car that actually uses its turbo should lap
- * quicker than the identical car without one, everything else — mass,
- * power, grip, skill, learned corner confidence — held equal. The AI's
- * own judgement decides when to fire it (ai_control), which is also
- * what proves the mechanism works end to end, not just in isolation.
- */
-static void test_boosted_lap_is_quicker(void)
-{
-    float lap[2];
-    int v;
-
-    kart_specs_reset_defaults();
-    kart_specs[4] = kart_specs[1];             /* a turbo SPORT */
-    kart_specs[4].aspiration = ASPIRATION_TURBO;
-    kart_specs[4].boost_power_mult = 1.4f;
-    kart_specs[4].boost_seconds = 2.5f;
-    kart_specs[4].boost_recharge_seconds = 5.0f;
-    kart_specs[4].boost_spool_seconds = 0.3f;
-    kart_spec_count = 5;
-
-    for (v = 0; v < 2; v++) {
-        Game g;
-        GameConfig cfg = default_cfg(TRACK_BERTHOUD);
-        Input in[MAX_HUMANS];
-        Kart *k;
-        int f, c;
-
-        cfg.spec[0] = 1;             /* human's own car does not matter */
-        game_init(&g, &cfg);
-        idle_inputs(in);
-        k = &g.karts[1];
-        k->spec = (v == 1) ? 4 : 1;  /* plain SPORT, then the turbo SPORT */
-        k->ai_skill = 1.0f;
-        for (c = 0; c < TRACK_MAX_CORNERS; c++)
-            k->corner_conf[c] = 1.0f;
-        for (f = 0; f < 60 * 300 && !k->finished; f++)
-            game_update(&g, in, 1.0f / 60.0f);
-        lap[v] = k->best_lap_time > 0.0f ? k->best_lap_time : 9999.0f;
-    }
-    printf("same car on BERTHOUD, no turbo vs turbo: %.1f s vs %.1f s\n",
-           lap[0], lap[1]);
-    CHECK(lap[1] < lap[0],
-          "the turbo car was not quicker (%.1f vs %.1f s)", lap[1], lap[0]);
-
-    kart_specs_reset_defaults();
-}
-
-/*
- * A supercharged car needs no AI judgement at all — no button, nothing
- * to manage — so proving it works is simpler: the multiplier should just
- * apply throughout, and the car should be reliably quicker for it.
- */
-static void test_supercharged_lap_is_quicker(void)
-{
-    float lap[2];
-    int v;
-
-    kart_specs_reset_defaults();
-    kart_specs[4] = kart_specs[1];             /* a supercharged SPORT */
-    kart_specs[4].aspiration = ASPIRATION_SUPERCHARGED;
-    kart_specs[4].boost_power_mult = 1.35f;
-    kart_spec_count = 5;
-
-    for (v = 0; v < 2; v++) {
-        Game g;
-        GameConfig cfg = default_cfg(TRACK_KENOSHA);
-        Input in[MAX_HUMANS];
-        Kart *k;
-        int f, c;
-
-        cfg.spec[0] = 1;
-        game_init(&g, &cfg);
-        idle_inputs(in);
-        k = &g.karts[1];
-        k->spec = (v == 1) ? 4 : 1;
-        k->ai_skill = 1.0f;
-        for (c = 0; c < TRACK_MAX_CORNERS; c++)
-            k->corner_conf[c] = 1.0f;
-        for (f = 0; f < 60 * 300 && !k->finished; f++)
-            game_update(&g, in, 1.0f / 60.0f);
-        lap[v] = k->best_lap_time > 0.0f ? k->best_lap_time : 9999.0f;
-    }
-    printf("same car on KENOSHA, natural vs supercharged: %.1f s vs %.1f s\n",
-           lap[0], lap[1]);
-    CHECK(lap[1] < lap[0],
-          "the supercharged car was not quicker (%.1f vs %.1f s)",
-          lap[1], lap[0]);
-
-    kart_specs_reset_defaults();
-}
-
-/* ------------------------------------------------------------------ */
 /* Lap timing                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -3597,7 +3276,6 @@ int main(void)
     test_braking_distance();
     test_gravity_grade();
     test_cornering_grip_cap();
-    test_power_ups();
     test_gear_power_curve();
     test_gearboxes_sane();
     test_shifting();
@@ -3605,7 +3283,6 @@ int main(void)
     test_tire_compounds();
     test_tire_strategy_crossover();
     test_tires_need_work();
-    test_fresh_rubber_resets_wear();
     test_track_roster();
     test_lap_counts();
     test_cliff_respawn();
@@ -3615,7 +3292,6 @@ int main(void)
     test_fall_is_visible();
     test_finished_human_coasts();
     test_nan_hardening();
-    test_item_rows_fit();
     test_corner_segmentation();
     test_full_grid_fits();
     test_ai_races_all_tracks();
@@ -3623,7 +3299,6 @@ int main(void)
     test_ai_strategies_differ();
     test_ai_learns_from_mistakes();
     test_ai_adapts_to_player();
-    test_ai_uses_power_ups();
     test_no_rubber_banding();
     test_ai_shift_styles();
     test_ai_can_fall();
@@ -3636,10 +3311,6 @@ int main(void)
     test_temperament_shows_on_track();
     test_skill_sets_pace();
     test_racing_line_pace_is_not_the_sheet();
-    test_turbo_only_for_cars_that_have_one();
-    test_turbo_charge_drains_and_recovers();
-    test_boosted_lap_is_quicker();
-    test_supercharged_lap_is_quicker();
     test_editing_cars_json_changes_the_car();
     test_grade_costs_speed();
     test_grade_costs_grip();

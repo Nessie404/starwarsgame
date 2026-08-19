@@ -54,46 +54,7 @@
       "automatic_downshift_fraction": 0.38
     },
     {
-      "_comment": "A turbocharged example. Add the same aspiration block to any car to give it the boost button and turbo lag.",
-      "name": "TURBO",
-      "mass_kg": 900,
-      "power_hp": 155,
-      "brake_distance_100_kph_m": 37,
-      "lateral_grip_g": 0.95,
-      "drag_area_m2": 0.64,
-      "wheelbase_m": 2.40,
-      "offroad_grip": 0.45,
-      "gear_top_speeds_kph": [46.8, 79.2, 118.8, 162.0, 216.0],
-      "automatic_upshift_fraction": 0.95,
-      "automatic_downshift_fraction": 0.38,
-      "aspiration": {
-        "type": "turbo",
-        "power_multiplier": 1.40,
-        "boost_seconds": 2.5,
-        "recharge_seconds": 5.0,
-        "spool_seconds": 0.4
-      }
-    },
-    {
-      "_comment": "A supercharged example: no button, no charge to run out of — power_multiplier just applies the instant the driver is accelerating.",
-      "name": "BLOWER",
-      "mass_kg": 1450,
-      "power_hp": 380,
-      "brake_distance_100_kph_m": 38,
-      "lateral_grip_g": 0.90,
-      "drag_area_m2": 0.68,
-      "wheelbase_m": 2.75,
-      "offroad_grip": 0.30,
-      "gear_top_speeds_kph": [50.0, 85.0, 125.0, 170.0, 220.0],
-      "automatic_upshift_fraction": 0.95,
-      "automatic_downshift_fraction": 0.38,
-      "aspiration": {
-        "type": "supercharged",
-        "power_multiplier": 1.20
-      }
-    },
-    {
-      "_comment": "Lightweight, high-revving turbo four — a hot hatch built to be thrown at a mountain pass.",
+      "_comment": "Lightweight, high-revving four — a hot hatch built to be thrown at a mountain pass.",
       "name": "RUBY",
       "mass_kg": 1080,
       "power_hp": 310,
@@ -104,14 +65,7 @@
       "offroad_grip": 0.40,
       "gear_top_speeds_kph": [15, 35, 67, 100, 150, 200],
       "automatic_upshift_fraction": 0.95,
-      "automatic_downshift_fraction": 0.38,
-      "aspiration": {
-        "type": "turbo",
-        "power_multiplier": 1.55,
-        "boost_seconds": 2.0,
-        "recharge_seconds": 6.0,
-        "spool_seconds": 0.5
-      }
+      "automatic_downshift_fraction": 0.38
     }
   ]
 }

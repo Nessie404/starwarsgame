@@ -3,9 +3,9 @@
  *
  * This header and its companions game.c / track.c are platform-independent
  * plain C99: they contain the whole simulation (3D track geometry with
- * elevation, physically-based vehicle dynamics, AI, items, laps, ranking)
- * and depend only on libm. The Wii-specific rendering / input / audio
- * lives in main.c.
+ * elevation, physically-based vehicle dynamics, AI, laps, ranking) and
+ * depend only on libm. The Wii-specific rendering / input / audio lives
+ * in main.c.
  *
  * Physics works in SI units: meters, seconds, kilograms. Vehicle
  * behaviour is derived from real-world performance parameters (power,
@@ -28,7 +28,6 @@ typedef struct GameSettings GameSettings;
 /* ------------------------------------------------------------------ */
 
 #define TRACK_MAX_POINTS 440
-#define TRACK_MAX_ITEMS  8
 #define TRACK_MAX_CORNERS 72
 #define TRACK_MAX_CHECKPOINTS 40
 #define CHECKPOINT_SPACING 12      /* samples between checkpoints      */
@@ -77,8 +76,6 @@ typedef struct {
      */
     float road_half_seg[TRACK_MAX_POINTS];
     float wall_half_seg[TRACK_MAX_POINTS];
-    int   item_seg[TRACK_MAX_ITEMS];/* power-up panel rows               */
-    int   n_items;
     int   alpine;                   /* 1 = mountain theme (rock skirts)  */
     int   has_walls;                /* 0 = unguarded drop off the edge   */
     int   laps;                     /* race distance, set from length    */
@@ -110,8 +107,6 @@ const char *track_name(int track_id);
  * (positive = right of travel) and surface elevation at that point. */
 void track_locate(const Track *t, float x, float z, int hint,
                   int *seg, float *frac, float *lat, float *y);
-
-int track_item_row(const Track *t, int seg);   /* -1 or item row index */
 
 /* half-width of the road, and of the barrier line, at one segment */
 float track_road_half(const Track *t, int seg);
@@ -156,41 +151,7 @@ typedef struct {
      */
     float auto_up[MAX_GEARS];
     float auto_down[MAX_GEARS];
-
-    /*
-     * How the engine is fed: naturally aspirated (the default — nothing
-     * below applies), turbocharged, or supercharged. Set from an
-     * optional `"aspiration"` block in cars.json (config.c). This is
-     * what stands in for the old track power-up boost: there is no
-     * pickup any more, only what the engine itself can do, and every
-     * driver manages the same resource everyone else with the same
-     * engine has.
-     *
-     * Turbo: a boost_charge (see Kart) that drains while the button is
-     * held and recharges only off the throttle — recharging costs the
-     * speed accelerating would have bought, which is the trade the
-     * driver is actually making. It also spools: boost_power_mult is
-     * not available the instant the button is pressed, it ramps in over
-     * boost_spool_seconds, the way a real turbo takes a moment to build
-     * pressure, and falls away almost as fast once the throttle lifts.
-     *
-     * Supercharged: mechanically driven off the engine rather than
-     * exhaust flow, so there is no lag and nothing to run out of —
-     * boost_power_mult applies the instant the driver is accelerating
-     * and stops the instant they are not. No button, no management.
-     */
-    int   aspiration;
-    float boost_power_mult;       /* engine power multiplier while it applies */
-    float boost_seconds;          /* turbo only: full charge, held           */
-    float boost_recharge_seconds; /* turbo only: full recharge, off throttle */
-    float boost_spool_seconds;    /* turbo only: lag before full boost       */
 } KartSpec;
-
-enum {
-    ASPIRATION_NATURAL     = 0,
-    ASPIRATION_TURBO       = 1,
-    ASPIRATION_SUPERCHARGED = 2
-};
 
 #define COOLDOWN_SECONDS 11.0f /* slowing-down lap: flag to a standstill */
 #define SHIFT_TIME    0.18f   /* seconds of cut drive while shifting    */
@@ -255,23 +216,6 @@ void kart_spec_default_shifts(KartSpec *s);
 #define STEER_LEFT  (-1.0f)
 #define STEER_RIGHT (+1.0f)
 
-/*
- * The one remaining track power-up: a spell of fresh rubber, collected
- * from roadside panels, held in reserve and deployed by the driver.
- * Engine boost is not a pickup any more — see ASPIRATION_* below — so
- * there are no projectiles, no floor boosters, no push-to-pass box and
- * no free speed for sliding the car about.
- */
-enum {
-    POWER_NONE  = 0,
-    POWER_TIRES = 1    /* fresh rubber: +TIRE_GRIP lateral grip         */
-};
-
-#define TIRE_GRIP     1.10f
-#define TIRE_SECONDS  8.0f
-
-const char *power_name(int power);
-
 /* ------------------------------------------------------------------ */
 /* User-tunable simulation settings                                   */
 /* ------------------------------------------------------------------ */
@@ -317,10 +261,6 @@ struct GameSettings {
     float tire_cool_rate[TIRE_COMPOUNDS];      /* fraction of the gap per s */
     float tire_off_window_grip[TIRE_COMPOUNDS];/* grip well outside it    */
     float tire_ambient_c;
-
-    /* the one remaining track power-up */
-    float fresh_tire_grip_mult;
-    float fresh_tire_seconds;
 
     /* AI. overcommit_chance is checked once on each sufficiently tight,
      * unguarded corner and is scaled by the strategy's attack rating. */
@@ -403,10 +343,8 @@ typedef struct {
     int   accel;
     int   brake;
     int   hop;       /* handbrake                                       */
-    int   item;      /* deploy held power-up (edge-detected by the sim) */
     int   gear_up;   /* upshift  (edge-detected by the sim)             */
     int   gear_down; /* downshift                                       */
-    int   boost;     /* turbo, held down; no-op without a turbo car     */
 } Input;
 
 /* ------------------------------------------------------------------ */
@@ -458,8 +396,8 @@ enum {
     AI_LATE     = 1,   /* brakes far too late, then learns better       */
     AI_INSIDE   = 2,   /* hugs the inside, tight and defensive          */
     AI_DEFENDER = 3,   /* covers the line you like to pass on           */
-    AI_CHARGER  = 4,   /* dives for overtakes, spends its item at once  */
-    AI_DRAFTER  = 5,   /* sits in your mirrors, saves its item to pounce */
+    AI_CHARGER  = 4,   /* dives for every gap, brakes late               */
+    AI_DRAFTER  = 5,   /* sits in your mirrors, waits to pounce          */
     AI_CRUISER  = 6,   /* cautious, smooth, wide lines                  */
     AI_STRATEGY_COUNT  = 7
 };
@@ -475,7 +413,6 @@ typedef struct {
                             * negative — see ai_tactical_line             */
     float defend;          /* 0..1 tendency to cover a chasing human    */
     float attack;          /* 0..1 tendency to dive for an overtake     */
-    float power_wait;      /* seconds it holds a power-up before using  */
     float power;           /* engine trim                              */
     /* Shifting style: where in the rev band this driver changes up, how
      * early it grabs a lower gear on the way into a corner, and how
@@ -536,17 +473,6 @@ typedef struct {
     float tire_wear;      /* 0 = fresh, 1 = worn out                    */
     float tire_temp;      /* degrees C                                  */
     float tire_grip_now;  /* what the rubber is actually worth, 0..1+   */
-    float grip_t;         /* fresh-rubber seconds remaining             */
-    int   power_held;     /* POWER_* currently in reserve               */
-    int   prev_item_btn;
-
-    /* engine boost, for a car with one (KartSpec.aspiration); see
-     * kart_step. boost_charge and boost_spool only mean anything for a
-     * turbo — a supercharger has nothing to run out of and no lag, so
-     * it only ever touches `boosting`. */
-    float boost_charge;   /* turbo: 0 empty .. 1 full                    */
-    float boost_spool;    /* turbo: 0 cold .. 1 on full boost            */
-    int   boosting;       /* one-frame: engine power is multiplied now  */
 
     /* role / livery */
     int   human;          /* -1 = AI, else human player index          */
@@ -566,7 +492,6 @@ typedef struct {
     int   learn_events;                      /* adaptations made so far  */
     int   mistakes;                          /* corners actually botched */
     float line_target;                       /* smoothed tactical line   */
-    float power_timer;                       /* how long it has held one */
     float overcommit_t;                      /* deliberate AI overreach  */
     float overcommit_line;                   /* risky outside line, m    */
     int   risk_corner;                       /* last corner risk-tested  */
@@ -602,9 +527,7 @@ typedef struct {
     int   final_rank;
 
     /* one-frame event flags for the platform layer */
-    int   power_fired;    /* deployed a power-up this frame             */
     int   hit_wall;
-    int   got_item;       /* collected a power-up this frame            */
 } Kart;
 
 enum {
@@ -631,7 +554,6 @@ typedef struct {
     GameConfig cfg;
     GameSettings settings;
     Kart  karts[NUM_KARTS];       /* karts[0..n_humans-1] are human    */
-    float item_respawn[TRACK_MAX_ITEMS][3];  /* per row, 3 boxes across */
     PlayerModel pmodel[MAX_HUMANS];
     int   state;
     float countdown;

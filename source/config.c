@@ -494,20 +494,6 @@ static int valid_car(const KartSpec *s, char *error, int error_cap)
         return set_error(error, error_cap, "BAD WHEELBASE");
     if (s->offroad_grip < 0.05f || s->offroad_grip > 1.20f)
         return set_error(error, error_cap, "BAD DIRT GRIP");
-    if (s->aspiration == ASPIRATION_TURBO ||
-        s->aspiration == ASPIRATION_SUPERCHARGED) {
-        if (s->boost_power_mult < 1.0f || s->boost_power_mult > 3.0f)
-            return set_error(error, error_cap, "BAD ASPIRATION POWER");
-    }
-    if (s->aspiration == ASPIRATION_TURBO) {
-        if (s->boost_seconds < 0.5f || s->boost_seconds > 30.0f)
-            return set_error(error, error_cap, "BAD TURBO DURATION");
-        if (s->boost_recharge_seconds < 0.5f ||
-            s->boost_recharge_seconds > 60.0f)
-            return set_error(error, error_cap, "BAD TURBO RECHARGE");
-        if (s->boost_spool_seconds < 0.0f || s->boost_spool_seconds > 5.0f)
-            return set_error(error, error_cap, "BAD TURBO SPOOL");
-    }
     if (s->n_gears < 1 || s->n_gears > MAX_GEARS)
         return set_error(error, error_cap, "BAD GEAR COUNT");
     for (g = 0; g < s->n_gears; g++) {
@@ -572,55 +558,6 @@ static int read_shift_points(const char *json, const JsonToken *tokens,
             }
         }
     }
-    return 1;
-}
-
-/*
- * Optional per-car aspiration: how the engine is fed. A car with no
- * "aspiration" block is naturally aspirated — the default, and what
- * every built-in car except TURBO is. "type" is "turbo" or
- * "supercharged"; the tuning keys below it depend on which.
- */
-static int read_aspiration(const char *json, const JsonToken *tokens,
-                           int count, int obj, KartSpec *s,
-                           char *error, int error_cap)
-{
-    int at = object_get(json, tokens, count, obj, "aspiration");
-    char type[16];
-    int type_at;
-
-    s->aspiration = ASPIRATION_NATURAL;
-    s->boost_power_mult = 1.35f;
-    s->boost_seconds = 2.5f;
-    s->boost_recharge_seconds = 6.0f;
-    s->boost_spool_seconds = 0.4f;
-    if (at < 0)
-        return 1;
-    if (tokens[at].type != JT_OBJECT)
-        return set_error(error, error_cap, "ASPIRATION NEEDS OBJECT");
-
-    type_at = object_get(json, tokens, count, at, "type");
-    if (type_at < 0 || !token_string(json, &tokens[type_at], type,
-                                     (int)sizeof(type)))
-        return set_error(error, error_cap, "ASPIRATION NEEDS A TYPE");
-    if (strcmp(type, "turbo") == 0)
-        s->aspiration = ASPIRATION_TURBO;
-    else if (strcmp(type, "supercharged") == 0)
-        s->aspiration = ASPIRATION_SUPERCHARGED;
-    else
-        return set_error(error, error_cap, "UNKNOWN ASPIRATION TYPE");
-
-    if (!optional_float(json, tokens, count, at, "power_multiplier",
-                        &s->boost_power_mult, error, error_cap))
-        return 0;
-    if (s->aspiration == ASPIRATION_TURBO &&
-        (!optional_float(json, tokens, count, at, "boost_seconds",
-                         &s->boost_seconds, error, error_cap) ||
-         !optional_float(json, tokens, count, at, "recharge_seconds",
-                         &s->boost_recharge_seconds, error, error_cap) ||
-         !optional_float(json, tokens, count, at, "spool_seconds",
-                         &s->boost_spool_seconds, error, error_cap)))
-        return 0;
     return 1;
 }
 
@@ -696,10 +633,6 @@ int config_load_cars_text(const char *json, char *error, int error_cap)
         }
         if (!read_shift_points(json, tokens, count, obj, s, error,
                                error_cap)) {
-            free(tokens);
-            return 0;
-        }
-        if (!read_aspiration(json, tokens, count, obj, s, error, error_cap)) {
             free(tokens);
             return 0;
         }
@@ -871,18 +804,6 @@ int config_load_settings_text(GameSettings *settings, const char *json,
         !optional_float(json, tokens, count, obj, "ambient_c",
                         &s.tire_ambient_c, error, error_cap)) goto fail;
 
-    obj = object_get(json, tokens, count, 0, "powerups");
-    if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
-        set_error(error, error_cap, "POWERUPS NEED OBJECT");
-        goto fail;
-    }
-    if (obj >= 0 &&
-        (!optional_float(json, tokens, count, obj,
-                         "fresh_tire_grip_multiplier",
-                         &s.fresh_tire_grip_mult, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "fresh_tire_seconds",
-                         &s.fresh_tire_seconds, error, error_cap))) goto fail;
-
     obj = object_get(json, tokens, count, 0, "ai");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
         set_error(error, error_cap, "AI NEEDS OBJECT");
@@ -1053,12 +974,12 @@ int config_load_settings_file(GameSettings *settings, const char *path,
 
 static const char *action_keys[CONTROL_ACTION_COUNT] = {
     "steer_left", "steer_right", "accelerate", "brake", "handbrake",
-    "item", "boost", "shift_up", "shift_down", "race_menu", "menu_confirm",
+    "shift_up", "shift_down", "race_menu", "menu_confirm",
     "menu_back"
 };
 
 static const char *action_labels[CONTROL_ACTION_COUNT] = {
-    "LEFT", "RIGHT", "GAS", "BRAKE", "HANDBRAKE", "ITEM", "BOOST",
+    "LEFT", "RIGHT", "GAS", "BRAKE", "HANDBRAKE",
     "SHIFT UP", "SHIFT DOWN", "MENU", "CONFIRM", "BACK"
 };
 
@@ -1147,8 +1068,6 @@ void control_config_defaults(ControlConfig *c)
     bind_key(c, 0, CONTROL_BRAKE, 0, 'S');
     bind_key(c, 0, CONTROL_BRAKE, 1, GAME_KEY_DOWN);
     bind_key(c, 0, CONTROL_HANDBRAKE, 0, GAME_KEY_SPACE);
-    bind_key(c, 0, CONTROL_ITEM, 0, 'X');
-    bind_key(c, 0, CONTROL_BOOST, 0, 'B');
     bind_key(c, 0, CONTROL_GEAR_UP, 0, 'E');
     bind_key(c, 0, CONTROL_GEAR_DOWN, 0, 'Q');
     bind_key(c, 0, CONTROL_RACE_MENU, 0, 'R');
@@ -1160,8 +1079,6 @@ void control_config_defaults(ControlConfig *c)
     bind_key(c, 1, CONTROL_ACCEL, 0, 'I');
     bind_key(c, 1, CONTROL_BRAKE, 0, 'K');
     bind_key(c, 1, CONTROL_HANDBRAKE, 0, 'P');
-    bind_key(c, 1, CONTROL_ITEM, 0, 'M');
-    bind_key(c, 1, CONTROL_BOOST, 0, 'N');
     bind_key(c, 1, CONTROL_GEAR_UP, 0, 'O');
     bind_key(c, 1, CONTROL_GEAR_DOWN, 0, 'U');
     bind_key(c, 1, CONTROL_RACE_MENU, 0, 'R');
@@ -1173,8 +1090,6 @@ void control_config_defaults(ControlConfig *c)
     c->gamecube[CONTROL_ACCEL] = GC_INPUT_A | GC_INPUT_X;
     c->gamecube[CONTROL_BRAKE] = GC_INPUT_B;
     c->gamecube[CONTROL_HANDBRAKE] = GC_INPUT_Z;
-    c->gamecube[CONTROL_ITEM] = GC_INPUT_Y;
-    c->gamecube[CONTROL_BOOST] = GC_INPUT_DPAD_UP;
     c->gamecube[CONTROL_GEAR_UP] = GC_INPUT_R;
     c->gamecube[CONTROL_GEAR_DOWN] = GC_INPUT_L;
     c->gamecube[CONTROL_RACE_MENU] = GC_INPUT_START;
@@ -1186,8 +1101,6 @@ void control_config_defaults(ControlConfig *c)
     snprintf(c->xbox_label[CONTROL_ACCEL], CONTROL_LABEL_LEN, "RT");
     snprintf(c->xbox_label[CONTROL_BRAKE], CONTROL_LABEL_LEN, "LT");
     snprintf(c->xbox_label[CONTROL_HANDBRAKE], CONTROL_LABEL_LEN, "A");
-    snprintf(c->xbox_label[CONTROL_ITEM], CONTROL_LABEL_LEN, "X");
-    snprintf(c->xbox_label[CONTROL_BOOST], CONTROL_LABEL_LEN, "DPAD UP");
     snprintf(c->xbox_label[CONTROL_GEAR_UP], CONTROL_LABEL_LEN, "RB");
     snprintf(c->xbox_label[CONTROL_GEAR_DOWN], CONTROL_LABEL_LEN, "LB");
     snprintf(c->xbox_label[CONTROL_RACE_MENU], CONTROL_LABEL_LEN, "START");

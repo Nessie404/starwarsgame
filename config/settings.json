@@ -24,27 +24,22 @@
     "ambient_c": 18.0,
     "medium": {
       "grip_multiplier": 1.00, "drag_multiplier": 1.00,
-      "rolling_multiplier": 1.00, "wear_rate_per_second": 0.0180,
+      "rolling_multiplier": 1.00, "wear_rate_per_second": 0.0080,
       "grip_lost_when_worn": 0.15, "optimal_temp_c": 84, "temp_window_c": 34,
       "heat_rate": 20.0, "cool_rate": 0.065, "off_window_grip": 0.86
     },
     "soft": {
       "grip_multiplier": 1.08, "drag_multiplier": 1.04,
-      "rolling_multiplier": 1.06, "wear_rate_per_second": 0.0390,
-      "grip_lost_when_worn": 0.22, "optimal_temp_c": 78, "temp_window_c": 26,
+      "rolling_multiplier": 1.06, "wear_rate_per_second": 0.0200,
+      "grip_lost_when_worn": 0.28, "optimal_temp_c": 78, "temp_window_c": 26,
       "heat_rate": 23.0, "cool_rate": 0.065, "off_window_grip": 0.80
     },
     "hard": {
       "grip_multiplier": 0.96, "drag_multiplier": 0.97,
-      "rolling_multiplier": 0.90, "wear_rate_per_second": 0.0080,
-      "grip_lost_when_worn": 0.09, "optimal_temp_c": 88, "temp_window_c": 42,
+      "rolling_multiplier": 0.90, "wear_rate_per_second": 0.0018,
+      "grip_lost_when_worn": 0.07, "optimal_temp_c": 88, "temp_window_c": 42,
       "heat_rate": 17.0, "cool_rate": 0.065, "off_window_grip": 0.88
     }
-  },
-  "powerups": {
-    "_comment": "Engine boost is not a track power-up any more — see the aspiration block in cars.json.",
-    "fresh_tire_grip_multiplier": 1.10,
-    "fresh_tire_seconds": 8.0
   },
   "ai": {
     "_comment": "Lower skill slows the field. Overcommit chance is tested once per sufficiently tight unguarded corner and scaled by driver aggression.",

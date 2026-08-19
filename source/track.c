@@ -32,8 +32,6 @@ typedef struct {
     int   has_walls;          /* 0 = unguarded: the edge is a drop      */
     float scale;              /* uniform scale on the control points    */
     float y_scale;            /* extra scale on elevation only           */
-    /* power-up panel rows, as fractions of the lap [0..1) */
-    const float *item_frac;  int n_items;
 } TrackDef;
 
 /* ---------------- CLASSIC: flat speedway ---------------- */
@@ -43,7 +41,6 @@ static const float CP_CLASSIC[][3] = {
     {   0,  90, 0 }, { -30, 110, 0 }, { -70, 105, 0 }, { -95,  75, 0 },
     { -90,  40, 0 }, { -60,  25, 0 }, { -40,   5, 0 },
 };
-static const float ITEMS_CLASSIC[] = { 0.09f, 0.52f, 0.83f };
 
 /* ---------------- BERTHOUD PASS ---------------- */
 /*
@@ -68,7 +65,6 @@ static const float CP_BERTHOUD[][3] = {
     { -128, 104, 30 }, { -104,  66, 20 }, {  -74,  34, 10 },
     {  -36,  10,  3 },
 };
-static const float ITEMS_BERTHOUD[] = { 0.04f, 0.30f, 0.55f, 0.88f };
 
 /* ---------------- LOVELAND PASS ---------------- */
 /*
@@ -91,7 +87,6 @@ static const float CP_LOVELAND[][3] = {
     { -162, 166, 36 }, { -116, 128, 26 }, {  -68,  74, 13 },
     {  -32,  30,  5 },
 };
-static const float ITEMS_LOVELAND[] = { 0.05f, 0.28f, 0.55f, 0.86f };
 
 /* ---------------- KENOSHA PASS ----------------
  * The long one. US-285 over Kenosha is a broad, sweeping road across open
@@ -118,8 +113,6 @@ static const float CP_KENOSHA[][3] = {
     { -178, 214, 13 },  { -146, 170, 11 },  { -178, 124,  9 },
     { -164,  74,  6 },  { -110,  56,  4 },  {  -66,  16,  2 },
 };
-static const float ITEMS_KENOSHA[] = { 0.04f, 0.22f, 0.40f, 0.58f,
-                                       0.74f, 0.90f };
 
 /* ---------------- MONARCH PASS ----------------
  * The hard one. US-50 over Monarch is a narrow shelf road with switchback
@@ -156,7 +149,6 @@ static const float CP_MONARCH[][3] = {
     { -170, 102, 18 },  { -142,  62, 12 },  {  -92,  34,  6 },
     {  -42,  18,  3 },
 };
-static const float ITEMS_MONARCH[] = { 0.06f, 0.32f, 0.62f, 0.88f };
 
 /* ---------------- BREAKNECK PASS ---------------- */
 static const float CP_BREAKNECK[][3] = {
@@ -183,8 +175,6 @@ static const float CP_GUANELLA[][3] = {
     {   128,   -95,   19 }, {    70,  -140,   11 }, {   -10,  -158,    5 }, {   -85,  -145,    1 },
     {  -125,  -125,   -1 },
 };
-static const float ITEMS_BREAKNECK[] = { 0.14f, 0.55f, 0.85f };
-static const float ITEMS_GUANELLA[] = { 0.10f, 0.38f, 0.66f, 0.90f };
 
 /*
  * Width profiles, one multiplier per control point, eased between them.
@@ -272,42 +262,32 @@ static const float CP_BERTHOUD2[][3] = {
     {  159.7,  495.4,   24.9}, {  151.5,  412.9,   41.7}, {  136.6,  330.3,   58.6},
     {  113.2,  247.7,   75.4}, {   81.3,  165.1,   92.3}, {   42.5,   82.6,  109.1},
 };
-static const float ITEMS_BERTHOUD2[] = { 0.05f, 0.22f, 0.44f, 0.60f,
-                                         0.78f, 0.92f };
 
 static const TrackDef track_defs[TRACK_COUNT] = {
     { "CLASSIC",
       CP_CLASSIC,  (int)(sizeof(CP_CLASSIC)  / sizeof(CP_CLASSIC[0])),
-      5.6f, 13.6f, NULL, 0, 1, 1.00f, 1.00f,
-      ITEMS_CLASSIC, 3 },
+      5.6f, 13.6f, NULL, 0, 1, 1.00f, 1.00f },
     { "BERTHOUD",
       CP_BERTHOUD, (int)(sizeof(CP_BERTHOUD) / sizeof(CP_BERTHOUD[0])),
-      4.8f,  9.1f, W_BERTHOUD, 1, 1, 1.00f, 0.62f, /* grades stay ~15%  */
-      ITEMS_BERTHOUD, 4 },
+      4.8f,  9.1f, W_BERTHOUD, 1, 1, 1.00f, 0.62f /* grades stay ~15%  */ },
     { "LOVELAND",
       CP_LOVELAND, (int)(sizeof(CP_LOVELAND) / sizeof(CP_LOVELAND[0])),
-      6.0f,  7.2f, W_LOVELAND, 1, 0, 1.00f, 0.78f, /* unguarded, ~14%   */
-      ITEMS_LOVELAND, 4 },
+      6.0f,  7.2f, W_LOVELAND, 1, 0, 1.00f, 0.78f /* unguarded, ~14%   */ },
     { "KENOSHA",
       CP_KENOSHA,  (int)(sizeof(CP_KENOSHA)  / sizeof(CP_KENOSHA[0])),
-      6.6f, 11.6f, NULL, 1, 1, 0.72f, 1.55f, /* longest, barriered      */
-      ITEMS_KENOSHA, 6 },
+      6.6f, 11.6f, NULL, 1, 1, 0.72f, 1.55f /* longest, barriered      */ },
     { "MONARCH",
       CP_MONARCH,  (int)(sizeof(CP_MONARCH)  / sizeof(CP_MONARCH[0])),
-      4.3f,  5.3f, W_MONARCH, 1, 0, 0.94f, 1.16f, /* high, unguarded    */
-      ITEMS_MONARCH, 4 },
+      4.3f,  5.3f, W_MONARCH, 1, 0, 0.94f, 1.16f /* high, unguarded    */ },
     { "BREAKNECK",
       CP_BREAKNECK, (int)(sizeof(CP_BREAKNECK) / sizeof(CP_BREAKNECK[0])),
-      3.7f,  4.5f, W_BREAKNECK, 1, 0, 1.15f, 0.32f, /* steep, unguarded */
-      ITEMS_BREAKNECK, 3 },
+      3.7f,  4.5f, W_BREAKNECK, 1, 0, 1.15f, 0.32f /* steep, unguarded */ },
     { "GUANELLA",
       CP_GUANELLA,  (int)(sizeof(CP_GUANELLA)  / sizeof(CP_GUANELLA[0])),
-      3.9f,  4.8f, W_GUANELLA, 1, 0, 1.00f, 1.00f, /* switchbacks       */
-      ITEMS_GUANELLA, 4 },
+      3.9f,  4.8f, W_GUANELLA, 1, 0, 1.00f, 1.00f /* switchbacks       */ },
     { "BERTHOUD 2.0",
       CP_BERTHOUD2, (int)(sizeof(CP_BERTHOUD2) / sizeof(CP_BERTHOUD2[0])),
-      6.6f, 13.0f, NULL, 1, 1, 1.30f, 0.28f, /* big, guarded, real profile */
-      ITEMS_BERTHOUD2, 6 },
+      6.6f, 13.0f, NULL, 1, 1, 1.30f, 0.28f /* big, guarded, real profile */ },
 };
 
 const char *track_name(int track_id)
@@ -586,11 +566,6 @@ void track_init_with_settings(Track *t, int track_id,
     for (i = 0; i < t->n && t->n_checkpoints < TRACK_MAX_CHECKPOINTS;
          i += CHECKPOINT_SPACING)
         t->checkpoint_seg[t->n_checkpoints++] = i;
-
-    t->n_items = d->n_items < TRACK_MAX_ITEMS ? d->n_items
-                                              : TRACK_MAX_ITEMS;
-    for (i = 0; i < d->n_items && i < TRACK_MAX_ITEMS; i++)
-        t->item_seg[i] = (int)(d->item_frac[i] * (float)t->n) % t->n;
 }
 
 float track_road_half(const Track *t, int seg)
@@ -617,15 +592,6 @@ int track_checkpoint_for(const Track *t, int seg)
     if (cp < 0) cp = 0;
     if (cp >= t->n_checkpoints) cp = t->n_checkpoints - 1;
     return cp;
-}
-
-int track_item_row(const Track *t, int seg)
-{
-    int i;
-    for (i = 0; i < t->n_items; i++)
-        if (t->item_seg[i] == seg)
-            return i;
-    return -1;
 }
 
 void track_locate(const Track *t, float x, float z, int hint,

@@ -22,8 +22,7 @@ v1.10.0, and [docs/HANDOFF.md](docs/HANDOFF.md) if you are picking this
 project up to work on it.
 
 WiiKart is a semi-sim mountain racer: pick a car in the garage — its
-gearbox, tires, aspiration (naturally aspirated, turbocharged or
-supercharged) and paint, all defined by real-world performance numbers —
+gearbox, tires and paint, all defined by real-world performance numbers —
 then race a **field of eleven AI drivers who each race differently, shift
 differently, learn from their mistakes, and adapt to you**, over eight
 circuits including seven stylized Colorado passes with real grades,
@@ -96,6 +95,12 @@ driving model that expects you to brake for the hairpins.
   supercharged) instead of a push-to-pass power-up to collect. Adds
   Berthoud Pass 2.0, an eighth circuit built from the real pass's
   elevation profile, and RUBY, a lightweight turbocharged car.
+- **v1.16.0** — boost and the fresh-rubber power-up are both retired.
+  There is no aspiration system and no roadside item panel any more:
+  every car is defined by its plain horsepower figure, and tires only
+  get worse over a race, never refreshed mid-lap. `TURBO` and `BLOWER`,
+  which existed solely to demonstrate the removed engine mechanic, are
+  gone from the garage; `RUBY` stays as a plain naturally-aspirated car.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -106,11 +111,11 @@ driving model that expects you to brake for the hairpins.
 - **A grid of twelve, and nobody drives like anyone else.** Eleven AI
   rivals share out seven strategy sheets — BALANCED, LATE (brakes far too
   late), INSIDE (tight and defensive), DEFENDER (covers your favourite
-  passing side), CHARGER (dives for every gap, spends its power-up at
-  once), DRAFTER (sits in your mirrors saving it), CRUISER (cautious,
-  wide, smooth). Each sheet sets its racing line, how it brakes, how it
-  overtakes, when it spends a power-up, **and how it shifts** — where in
-  the rev band it changes up, how early it comes down the box under
+  passing side), CHARGER (dives for every gap, brakes late), DRAFTER
+  (sits in your mirrors, waits to pounce), CRUISER (cautious, wide,
+  smooth). Each sheet sets its racing line, how it brakes, how it
+  overtakes, **and how it shifts** — where in the rev band it changes up,
+  how early it comes down the box under
   braking, and how crisply it does it. CRUISER short-shifts and rides the
   torque; LATE hangs on to the limiter and pays for it in shift time.
   On unguarded corners the attack-minded sheets also have a small,
@@ -138,12 +143,11 @@ driving model that expects you to brake for the hairpins.
   car understeers wide, scrubbing speed. Gravity acts along the road
   grade: climbs cost speed, descents give it back.
 - **Car selection with real spec sheets.** The included RACER, SPORT,
-  RALLY, TOURER, TURBO, BLOWER and RUBY are defined by horsepower, curb
-  weight, stopping distance, lateral g, drag area, wheelbase, dirt grip,
-  aspiration and per-gear limiter speeds. The menu derives 0-100 time and
-  top speed from the same equations the physics uses. The roster comes
-  from `cars.json`, so another car is an added JSON object, not a C
-  surgery.
+  RALLY, TOURER and RUBY are defined by horsepower, curb weight, stopping
+  distance, lateral g, drag area, wheelbase, dirt grip and per-gear
+  limiter speeds. The menu derives 0-100 time and top speed from the same
+  equations the physics uses. The roster comes from `cars.json`, so
+  another car is an added JSON object, not a C surgery.
 - **Eight circuits**, all measured rather than guessed. Lap counts are set
   per circuit so every race covers a similar distance:
 
@@ -193,20 +197,11 @@ driving model that expects you to brake for the hairpins.
 - **Split-screen multiplayer** for up to 4 players (horizontal split for
   2, quadrants for 3-4), with view culling so a full field still runs at
   frame rate in four-way split.
-- **Boost lives in the engine, not on the track.** A car's aspiration —
-  naturally aspirated, turbocharged, or supercharged, set per car in
-  `cars.json` — decides how it makes extra power. A turbo has a
-  rechargeable charge, a spool ramp, and a button (X / Y / − by default):
-  hold it for real extra engine power while the charge lasts, and it only
-  recharges off the throttle, never while you're also on it. A
-  supercharger has none of that — no button, no charge, no lag, just a
-  flat power multiplier any time you're accelerating, the way a
-  belt-driven blower actually behaves. The AI spend a turbo's charge the
-  way an engineer would: on open road with someone to catch, not at a
-  speed the next corner already caps them to.
-- **Fresh rubber**, the one power-up left on the roadside: +10% lateral
-  grip for 8 seconds, deployed the same way. The AI use it just before a
-  twisty stretch.
+- **No power-ups, no boost button, at all.** A car's power comes from its
+  plain horsepower figure and nothing else — no push-to-pass, no
+  turbo or supercharger multiplier, no roadside panel to collect. Tires
+  only ever wear over a race, with no mid-lap refresh; picking a compound
+  is a bet on the whole distance, not a resource to manage lap to lap.
 - **No arcade cheats.** There is no rubber-banding (a test proves an AI
   left behind gets exactly the same power: 17.05 m/s either way), no
   floor boost pads, and no mini-turbo reward for sliding — the handbrake
@@ -298,8 +293,6 @@ pad under Dolphin) or Wii Remotes.
 | Brake / reverse | **S** | **K** | GC B | Left trigger | 1 |
 | Up a gear | **E** | **O** | GC R | Right bumper | D-pad ↑ / Classic ZR |
 | Down a gear | **Q** | **U** | GC L | Left bumper | D-pad ↓ / Classic ZL |
-| Power-up | **X** | **M** | GC Y | X | − / Classic − |
-| Boost (turbo cars only) | **B** | **N** | GC / Xbox D-pad ↑ | D-pad ↑ | Classic D-pad ↑ |
 | Handbrake | Space | **P** | GC Z | A | Hold B |
 | Back to menu | **R** | **R** | GC Start | Start | + |
 | Quit | (EXIT row) | — | GC Z + Start | A + Start | HOME |
@@ -344,9 +337,9 @@ handbrake rotates the car but costs you speed, so use it to place the car,
 not to go faster. Watch the rev bar next to the gear number: shift at the
 top of the band, and come down a gear before a hairpin so you are not
 bogged on the exit. RALLY keeps 72% of its grip on dirt, TOURER only 35%.
-Save a turbo's charge for a straight where you have someone to catch, and
-fresh rubber for the run into a switchback section. On Loveland and
-Monarch there is nothing holding you on the road.
+Pick a tire compound for the whole race rather than the corner you happen
+to be on — softs are quickest early and give it back late. On Loveland
+and Monarch there is nothing holding you on the road.
 
 The HUD names the car you are chasing by its strategy, and the finish
 screen prints the full classification, so you can see whether DEFENDER or
@@ -361,8 +354,8 @@ The three files in [`config/`](config/) are the supported tuning surface:
 - `cars.json` contains the complete garage roster in real-world units;
   duplicate an object to add a car (up to 16 cars and 6 gears each).
 - `settings.json` covers race length, driving physics, steering, tires,
-  power-ups, AI risk, recovery timing, and per-track scale, elevation,
-  width, and lap count.
+  AI risk, recovery timing, and per-track scale, elevation, width, and
+  lap count.
 - `controls.json` covers keyboard bindings, logical GameCube bindings,
   recommended Xbox labels, and the live translator toggle.
 
@@ -427,10 +420,9 @@ the spec sheets (measured stopping
 distance vs quoted, grip-capped yaw rate, gravity on grades), the
 steering filter (ramp shape, self-centering, speed sensitivity, and that
 left really is left), track geometry and corner segmentation for all
-circuits, that a twelve-car grid fits on the road, item pickup and AI
-power-up use, and that the AI completes laps on every track — including
-recovering from a botched hairpin by backing out, since a real car can't
-rotate in place.
+circuits, that a twelve-car grid fits on the road, and that the AI
+completes laps on every track — including recovering from a botched
+hairpin by backing out, since a real car can't rotate in place.
 
 Steering polarity is tested the way you experience it: the test
 re-derives the chase camera's right-hand axis (`cross(forward, up)`, the
@@ -445,9 +437,8 @@ mistakes fall as a race progresses, that overconfident strategies end up
 believing less than they started and timid ones more, that a defender
 covers the side a human has been passing on (and the mirror-image setup
 produces the mirror-image line), and that an overtake is logged with the
-side it happened on. Power-ups are checked for being deployed, being
-distinct from one another, and staying within realistic bounds, and a
-dedicated test proves the AI get no rubber-band power boost.
+side it happened on. A dedicated test proves the AI get no rubber-band
+power boost.
 
 v1.2.0 adds tests for the gear model (the power curve's shape, that a
 held key shifts exactly one gear, that a gear's limiter really caps

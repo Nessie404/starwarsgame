@@ -30,8 +30,6 @@
 #define DEFAULT_DRIVE 0.85f    /* drivetrain efficiency                */
 #define HP_TO_W    745.7f
 #define V100       27.78f      /* 100 km/h in m/s                      */
-/* Fresh-rubber strength lives in game.h (TIRE_GRIP). Engine boost
- * strength is per car — see KartSpec.aspiration. */
 
 static const KartSpec default_kart_specs[DEFAULT_SPEC_COUNT] = {
     /* name      mass    hp   brake  lat_g  CdA   wheelbase offroad
@@ -120,9 +118,9 @@ void game_settings_defaults(GameSettings *s)
     s->tire_rolling_mult[TIRE_MEDIUM] = 1.00f;
     s->tire_rolling_mult[TIRE_SOFT]   = 1.06f;
     s->tire_rolling_mult[TIRE_HARD]   = 0.90f;
-    s->tire_wear_rate[TIRE_MEDIUM] = 0.0180f;
-    s->tire_wear_rate[TIRE_SOFT]   = 0.0700f;
-    s->tire_wear_rate[TIRE_HARD]   = 0.0040f;
+    s->tire_wear_rate[TIRE_MEDIUM] = 0.0080f;
+    s->tire_wear_rate[TIRE_SOFT]   = 0.0200f;
+    s->tire_wear_rate[TIRE_HARD]   = 0.0018f;
     s->tire_wear_grip_loss[TIRE_MEDIUM] = 0.15f;
     s->tire_wear_grip_loss[TIRE_SOFT]   = 0.28f;
     s->tire_wear_grip_loss[TIRE_HARD]   = 0.07f;
@@ -142,8 +140,6 @@ void game_settings_defaults(GameSettings *s)
     s->tire_off_window_grip[TIRE_SOFT]   = 0.80f;
     s->tire_off_window_grip[TIRE_HARD]   = 0.88f;
     s->tire_ambient_c = 18.0f;
-    s->fresh_tire_grip_mult = TIRE_GRIP;
-    s->fresh_tire_seconds = TIRE_SECONDS;
     s->ai_skill_mult = 0.97f;
     s->ai_brake_mult = 0.72f;
     s->ai_unguarded_line_room = 0.72f;
@@ -239,8 +235,6 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
                      "BAD COLD TIRE GRIP");
     }
     FINITE_RANGE(s->tire_ambient_c, -40.0f, 60.0f, "BAD AIR TEMP");
-    FINITE_RANGE(s->fresh_tire_grip_mult, 1.0f, 2.0f, "BAD FRESH GRIP");
-    FINITE_RANGE(s->fresh_tire_seconds, 0.1f, 60.0f, "BAD FRESH TIME");
     FINITE_RANGE(s->grade_gravity_mult, 0.0f, 3.0f, "BAD GRADE GRAUITY");
     FINITE_RANGE(s->grade_load_effect, 0.0f, 1.0f, "BAD GRADE LOAD");
     FINITE_RANGE(s->tacho_idle_rpm, 0.0f, 20000.0f, "BAD IDLE RPM");
@@ -434,8 +428,7 @@ float tire_drag_mult_with_settings(const GameSettings *settings,
  * novice is slow in a wild way. Engine trim is uniform for the same
  * reason. What the sheets still own: where a driver starts out on lap one,
  * how fast they adapt, how hard they commit to the apex, whether they
- * defend or attack, how long they sit on a power-up, and how they use the
- * gearbox.
+ * defend or attack, and how they use the gearbox.
  *
  * `line_bias` used to be a fixed lateral offset held for the whole lap —
  * which meant a sheet's line was quicker or slower depending on which way
@@ -446,31 +439,23 @@ float tire_drag_mult_with_settings(const GameSettings *settings,
  * drives every corner near the centerline, 1 clips it hard.
  */
 const AIStrategy ai_strategies[AI_STRATEGY_COUNT] = {
-/*   name        conf_start conf_max learn_up learn_down line   defend attack wait  trim
+/*   name        conf_start conf_max learn_up learn_down line   defend attack trim
  *                                                        up    down  shift delay     */
-  { "BALANCED",   0.97f,   1.08f,   0.014f,  0.10f,   0.75f,  0.35f, 0.40f, 1.0f, 1.000f,
+  { "BALANCED",   0.97f,   1.08f,   0.014f,  0.10f,   0.75f,  0.35f, 0.40f, 1.000f,
                                                              0.93f, 0.42f, 0.04f },
-  { "LATE",       1.12f,   1.08f,   0.010f,  0.17f,   0.60f,  0.25f, 0.70f, 0.3f, 1.000f,
+  { "LATE",       1.12f,   1.08f,   0.010f,  0.17f,   0.60f,  0.25f, 0.70f, 1.000f,
                                                              0.99f, 0.34f, 0.02f },
-  { "INSIDE",     0.99f,   1.08f,   0.013f,  0.11f,   1.00f,  0.55f, 0.45f, 1.2f, 1.000f,
+  { "INSIDE",     0.99f,   1.08f,   0.013f,  0.11f,   1.00f,  0.55f, 0.45f, 1.000f,
                                                              0.90f, 0.40f, 0.05f },
-  { "DEFENDER",   0.95f,   1.08f,   0.011f,  0.09f,   0.45f,  0.95f, 0.25f, 2.2f, 1.000f,
+  { "DEFENDER",   0.95f,   1.08f,   0.011f,  0.09f,   0.45f,  0.95f, 0.25f, 1.000f,
                                                              0.87f, 0.38f, 0.09f },
-  { "CHARGER",    1.06f,   1.08f,   0.012f,  0.14f,   0.65f,  0.30f, 0.95f, 0.0f, 1.000f,
+  { "CHARGER",    1.06f,   1.08f,   0.012f,  0.14f,   0.65f,  0.30f, 0.95f, 1.000f,
                                                              0.97f, 0.38f, 0.02f },
-  { "DRAFTER",    1.00f,   1.08f,   0.016f,  0.12f,   0.50f,  0.40f, 0.80f, 3.0f, 1.000f,
+  { "DRAFTER",    1.00f,   1.08f,   0.016f,  0.12f,   0.50f,  0.40f, 0.80f, 1.000f,
                                                              0.92f, 0.45f, 0.06f },
-  { "CRUISER",    0.88f,   1.08f,   0.018f,  0.07f,   0.30f,  0.20f, 0.30f, 1.6f, 1.000f,
+  { "CRUISER",    0.88f,   1.08f,   0.018f,  0.07f,   0.30f,  0.20f, 0.30f, 1.000f,
                                                              0.82f, 0.36f, 0.12f },
 };
-
-const char *power_name(int power)
-{
-    switch (power) {
-    case POWER_TIRES: return "TIRES";
-    default:          return "";
-    }
-}
 
 const char *ai_strategy_name(int strategy)
 {
@@ -834,8 +819,6 @@ void game_init(Game *g, const GameConfig *cfg)
                                : i - g->cfg.n_humans);
         k->rank = i + 1;
         k->gear = 0;
-        k->boost_charge = 1.0f;   /* a turbo car starts the grid full;
-                                   * a no-op for one without */
         k->tire_wear = 0.0f;
         k->tire_temp = g->settings.tire_ambient_c + 6.0f;   /* out of the
                                                              * paddock */
@@ -851,10 +834,6 @@ void game_init(Game *g, const GameConfig *cfg)
         g->pmodel[i].pass_side = 0.0f;
         g->pmodel[i].pace = 1.0f;
     }
-
-    for (r = 0; r < g->track.n_items; r++)
-        for (i = 0; i < 3; i++)
-            g->item_respawn[r][i] = 0.0f;
 
     g->state = STATE_COUNTDOWN;
     g->countdown = g->settings.countdown_seconds;
@@ -1160,40 +1139,6 @@ static void ai_control(const Game *g, Kart *k, Input *in, float dt)
         }
     }
 
-    /*
-     * Fresh rubber gets spent the way a race engineer would: just before
-     * a twisty stretch, where grip is what actually costs time, rather
-     * than on the first corner it happens to be sitting on. Chargers
-     * grab it the moment it is worth anything; drafters sit on it
-     * longer.
-     */
-    if (k->power_held && k->power_timer >= st->power_wait) {
-        float curv_ahead = 0.0f, d2 = 0.0f;
-        int j2, seg2 = k->seg;
-
-        for (j2 = 0; j2 < 12 && d2 < 80.0f; j2++) {
-            if (t->curv[seg2] > curv_ahead)
-                curv_ahead = t->curv[seg2];
-            d2 += t->seg_len[seg2];
-            seg2 = (seg2 + 1) % t->n;
-        }
-        if (curv_ahead > 0.03f)
-            in->item = 1;
-    }
-
-    /*
-     * A turbo is fuel, not a pickup, so a driver with one spends it on a
-     * straight rather than saving it for a corner it would only be
-     * wasted on, and never on a sliver too thin to be worth the trade.
-     * Extra engine power only turns into extra speed while the car is
-     * actually accelerating (kart_step only applies P under in->accel) —
-     * firing it once already at the speed this corner's braking point
-     * allows would just drain the charge for nothing. A supercharger
-     * needs no such judgement: it has no button, see kart_step.
-     */
-    if (s->aspiration == ASPIRATION_TURBO && in->accel &&
-        k->boost_charge > 0.5f && t->curv[k->seg] < 0.02f)
-        in->boost = 1;
 }
 
 /*
@@ -1492,13 +1437,10 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
                                                k->tire_temp, k->tire_wear);
     }
 
-    k->power_fired = 0;
     k->hit_wall = 0;
-    k->got_item = 0;
     k->respawned = 0;
     k->lap_event = 0;
     k->lap_best_event = 0;
-    k->boosting = 0;
 
     if (k->invincible_t > 0.0f) {
         k->invincible_t -= dt;
@@ -1507,14 +1449,13 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
 
     /* Hold the recovered car still while its viewport is black/fading.
      * Remember held buttons so a key pressed during the blackout does not
-     * turn into an accidental edge-triggered shift or item on return. */
+     * turn into an accidental edge-triggered shift on return. */
     if (k->respawn_t > 0.0f) {
         k->respawn_t -= dt;
         if (k->respawn_t < 0.0f) k->respawn_t = 0.0f;
         k->speed = 0.0f;
         k->prev_up_btn = in->gear_up;
         k->prev_down_btn = in->gear_down;
-        k->prev_item_btn = in->item;
         return;
     }
 
@@ -1573,60 +1514,6 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         P = 0.0f;
     else
         P *= gear_power_scale_with_settings(k->rev_frac, &g->settings);
-
-    /* the one remaining track power-up: fresh rubber */
-    if (k->grip_t > 0.0f) {
-        mu_a *= g->settings.fresh_tire_grip_mult;
-        k->grip_t -= dt;
-    }
-
-    /*
-     * Engine boost. Nothing here is a pickup any more — what a car can
-     * do is entirely down to how its engine is fed, KartSpec.aspiration,
-     * set from cars.json.
-     *
-     * Turbo: held down it drains boost_charge over boost_seconds and
-     * multiplies engine power for as long as any charge is left; let go
-     * — or never touch it — and the charge comes back over
-     * boost_recharge_seconds, but only while off the throttle, so
-     * recharging costs the speed accelerating would have bought. It also
-     * spools: the multiplier is not available the instant the button is
-     * pressed, it ramps in over boost_spool_seconds the way exhaust
-     * pressure actually has to build, and falls away three times as fast
-     * once the throttle lifts, the way it actually does.
-     *
-     * Supercharged: mechanically driven off the engine, so there is
-     * nothing to run out of and no lag — the multiplier applies the
-     * instant the driver is accelerating and stops the instant they are
-     * not. No button, no charge, no management.
-     */
-    switch (s->aspiration) {
-    case ASPIRATION_TURBO:
-        if (in->boost && k->boost_charge > 0.0f) {
-            k->boost_charge -= dt / s->boost_seconds;
-            if (k->boost_charge < 0.0f) k->boost_charge = 0.0f;
-            k->boost_spool += dt / s->boost_spool_seconds;
-            if (k->boost_spool > 1.0f) k->boost_spool = 1.0f;
-            k->boosting = 1;
-        } else {
-            k->boost_spool -= dt / (s->boost_spool_seconds * 0.33f);
-            if (k->boost_spool < 0.0f) k->boost_spool = 0.0f;
-            if (!in->accel) {
-                k->boost_charge += dt / s->boost_recharge_seconds;
-                if (k->boost_charge > 1.0f) k->boost_charge = 1.0f;
-            }
-        }
-        P *= 1.0f + (s->boost_power_mult - 1.0f) * k->boost_spool;
-        break;
-    case ASPIRATION_SUPERCHARGED:
-        if (in->accel) {
-            P *= s->boost_power_mult;
-            k->boosting = 1;
-        }
-        break;
-    default:
-        break;
-    }
 
     /*
      * --- longitudinal forces ---
@@ -1804,35 +1691,6 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
             if (cp >= 0)
                 k->last_checkpoint = cp;
         }
-
-        /*
-         * Power-up panels: three across the road on marked rows, each
-         * carrying a spell of fresh rubber — the only thing left that
-         * comes from the road rather than the engine itself. The
-         * respawn cooldown is twice what it was when a panel was a
-         * coin flip between this and push-to-pass: every panel is a
-         * tire panel now, so doubling it keeps the rate fresh rubber
-         * actually becomes available over a race the same as before,
-         * rather than quietly doubling it and flattening the compound
-         * crossover test_tire_strategy_crossover exists to protect.
-         */
-        {
-            int row = track_item_row(t, seg);
-            if (row >= 0 && !k->power_held) {
-                int b;
-                for (b = 0; b < 3; b++) {
-                    float blat = ((float)b - 1.0f) * 0.55f *
-                                 track_road_half(t, seg);
-                    if (fabsf(lat - blat) < 1.4f &&
-                        g->item_respawn[row][b] <= 0.0f) {
-                        k->power_held = POWER_TIRES;
-                        k->got_item = 1;
-                        g->item_respawn[row][b] = 12.0f;
-                        break;
-                    }
-                }
-            }
-        }
     }
 
     /* --- fished out of the void, back at the last checkpoint --- */
@@ -1889,20 +1747,6 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->lap = (int)floorf(k->total_progress / (float)t->n);
         if (k->lap < 0) k->lap = 0;
     }
-
-    /* --- deploy a held power-up --- */
-    if (in->item && !k->prev_item_btn && k->power_held) {
-        /* fresh rubber is exactly that: the wear goes away and the new
-         * set arrives at the temperature it wants to run at */
-        k->grip_t = fmaxf(k->grip_t, g->settings.fresh_tire_seconds);
-        k->tire_wear = 0.0f;
-        k->tire_temp = g->settings.tire_temp_optimal[
-            (k->tire >= 0 && k->tire < TIRE_COMPOUNDS) ? k->tire
-                                                       : TIRE_MEDIUM];
-        k->power_held = POWER_NONE;
-        k->power_fired = 1;
-    }
-    k->prev_item_btn = in->item;
 }
 
 static void resolve_kart_collisions(Game *g)
@@ -1971,15 +1815,10 @@ static void update_ranks(Game *g)
 
 void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
 {
-    int i, r;
+    int i;
 
     if (!(dt > 0.0f)) return;      /* also rejects NaN */
     if (dt > 0.1f) dt = 0.1f;
-
-    for (r = 0; r < g->track.n_items; r++)
-        for (i = 0; i < 3; i++)
-            if (g->item_respawn[r][i] > 0.0f)
-                g->item_respawn[r][i] -= dt;
 
     if (g->state == STATE_COUNTDOWN) {
         g->countdown -= dt;
@@ -2030,7 +1869,6 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
                               game_clampf(dt * 1.8f, 0.0f, 1.0f);
             ai_control(g, k, &in, dt);
             scale = ai_power_scale(g, k);
-            k->power_timer = k->power_held ? k->power_timer + dt : 0.0f;
         }
         {
             int lap_before = k->lap;
