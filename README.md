@@ -1,4 +1,4 @@
-# WiiKart 1.5.0
+# WiiKart 1.6.0
 
 An original racing game built as **Nintendo Wii homebrew**. It compiles to
 a real Wii executable (`wiikart.dol`) that runs in the
@@ -18,13 +18,13 @@ on the [v0.1 release](https://github.com/Nessie404/starwarsgame/releases/tag/v0.
 
 See [CHANGELOG.md](CHANGELOG.md) for the release-by-release inventory and
 [TODO.md](TODO.md) for proposed future work that is explicitly not part of
-v1.5.0.
+v1.6.0.
 
-Version 1.5.0 is a semi-sim mountain racer: pick a car in the garage —
+Version 1.6.0 is a semi-sim mountain racer: pick a car in the garage —
 its gearbox, tires and paint, all defined by real-world performance
 numbers — then race a **field of eleven AI drivers who each race
 differently, shift differently, learn from their mistakes, and adapt to
-you**, over five circuits including four stylized Colorado passes with
+you**, over seven circuits including six stylized Colorado passes with
 real grades, switchbacks, cliffs and gravity. Lap counts are set per
 circuit (2–4 laps by default) so short circuits remain multi-lap. Think
 arcade fun with a driving model that expects you to brake for the
@@ -63,6 +63,9 @@ hairpins.
 - **v1.5.0** — lap times for every driver with a per-viewport lap popup, a
   live leaderboard, names for the eleven rivals, a pre-race lap-count
   option, and a digital tachometer with a rev band that means something.
+- **v1.6.0** — roads whose width varies along the lap, so a hairpin can be
+  pinched while another is opened out for two lines, plus Breakneck Pass
+  (short, steep, stepped) and Guanella Pass (seven hairpins).
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game

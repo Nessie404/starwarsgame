@@ -1,6 +1,6 @@
 # WiiKart future work
 
-These are design targets for releases after v1.5.0. Details may change after
+These are design targets for releases after v1.6.0. Details may change after
 testing, because apparently cars, mountains, and tires all object to being
 reduced to one convenient slider.
 
@@ -38,16 +38,19 @@ Left for later, now that the camera has somewhere to live:
 
 ## Roads, passes, and conditions
 
-- [ ] Add variable road width by segment or control point. Some sharp turns
+- [x] Add variable road width by segment or control point. Some sharp turns
   should remain narrow and punishing; others should be tight in radius but
   wide enough to support multiple lines and meaningful speed through the turn.
+      *(v1.6.0: per-control-point width profiles, used by the physics, the
+      AI and the renderer.)*
 - [ ] Rework the mountain-pass levels so their scenery, landmarks, elevation
   transitions, roadside detail, and silhouettes are more visually distinctive.
-- [ ] Add **Breakneck Pass**: a short circuit with large elevation changes,
+- [x] Add **Breakneck Pass**: a short circuit with large elevation changes,
   narrow pavement, abrupt grade transitions, and no guardrails.
-- [ ] Add **Guanella Pass**: a medium-length circuit with relatively modest
+      *(v1.6.0: 945 m, 44 m of climb, 29% grades, 7.4 m wide.)*
+- [x] Add **Guanella Pass**: a medium-length circuit with relatively modest
   overall elevation change, narrow pavement, no guardrails, and a
-  switchback-heavy layout.
+  switchback-heavy layout. *(v1.6.0: 1986 m, seven hairpins, 7.8 m wide.)*
 - [ ] Add winter variants of the mountain passes.
 - [ ] Add localized snow and ice hazards with visible boundaries and distinct
   grip behavior.

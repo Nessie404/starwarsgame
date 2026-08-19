@@ -344,9 +344,11 @@ static void test_ai_races_all_tracks(void)
                 CHECK(!isnan(k->x) && !isnan(k->speed) && !isnan(k->heading),
                       "AI %d NaN on track %d frame %d", i, id, f);
                 if (k->fall_t <= 0.0f && k->respawn_t <= 0.0f)
-                    CHECK(fabsf(k->lat) < g.track.wall_half + 2.0f,
+                    CHECK(fabsf(k->lat) <
+                              track_wall_half(&g.track, k->seg) + 2.0f,
                           "AI %d outside the road without falling on track "
-                          "%d (lat %.1f)", i, id, k->lat);
+                          "%d (lat %.1f, road allows %.1f)", i, id, k->lat,
+                          track_wall_half(&g.track, k->seg));
                 if (failures) return;
                 if (k->lap > last_lap[i]) {
                     float lt = g.race_t - lap_start[i];
@@ -1788,6 +1790,194 @@ static void test_ai_can_fall(void)
 }
 
 
+/*
+ * The road is not one width all the way round any more. Check that the
+ * profiles are actually there, that they are sane, and — the part that
+ * matters — that the simulation uses the width of the piece of road the
+ * car is on rather than the circuit's average.
+ */
+static void test_variable_road_width(void)
+{
+    int id;
+    for (id = 0; id < TRACK_COUNT; id++) {
+        Track t;
+        int i, narrow_seg = 0, wide_seg = 0;
+        float lo = 1.0e9f, hi = 0.0f;
+
+        track_init(&t, id);
+        for (i = 0; i < t.n; i++) {
+            float w = track_road_half(&t, i);
+            CHECK(w > 1.0f && w < 40.0f,
+                  "%s segment %d is %.2f m of road half-width",
+                  track_name(id), i, w);
+            if (w < lo) { lo = w; narrow_seg = i; }
+            if (w > hi) { hi = w; wide_seg = i; }
+        }
+        printf("%-9s width %.1f m to %.1f m (narrowest at segment %d, "
+               "widest at %d)\n", track_name(id), lo * 2.0f, hi * 2.0f,
+               narrow_seg, wide_seg);
+        CHECK(track_road_half(&t, -1) == t.road_half &&
+              track_road_half(&t, t.n) == t.road_half,
+              "%s: an out-of-range segment did not fall back to the "
+              "nominal width", track_name(id));
+        CHECK(t.road_half >= lo - 0.001f && t.road_half <= hi + 0.001f,
+              "%s: the nominal width %.2f is outside its own range",
+              track_name(id), t.road_half);
+    }
+
+    /* the three passes with profiles have real variation in them */
+    {
+        int shaped[3];
+        int j;
+        shaped[0] = TRACK_BERTHOUD;
+        shaped[1] = TRACK_LOVELAND;
+        shaped[2] = TRACK_MONARCH;
+        for (j = 0; j < 3; j++) {
+            Track t;
+            int i;
+            float lo = 1.0e9f, hi = 0.0f;
+            track_init(&t, shaped[j]);
+            for (i = 0; i < t.n; i++) {
+                float w = track_road_half(&t, i);
+                if (w < lo) lo = w;
+                if (w > hi) hi = w;
+            }
+            CHECK(hi / lo > 1.30f,
+                  "%s barely varies in width (%.2f to %.2f)",
+                  track_name(shaped[j]), lo * 2.0f, hi * 2.0f);
+        }
+    }
+}
+
+/*
+ * A narrow section has to be narrow in the physics too: park a car at an
+ * offset that is on the road at the circuit's average width, and on the
+ * narrowest part of the same circuit it must be off it.
+ */
+static void test_narrow_sections_bite(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_BERTHOUD);
+    Input in[MAX_HUMANS];
+    Kart *k;
+    int i, narrow = 0, wide = 0, f;
+    float lo = 1.0e9f, hi = 0.0f, offset;
+    float speed_narrow, speed_wide;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    k = &g.karts[0];
+
+    for (i = 0; i < g.track.n; i++) {
+        float w = track_road_half(&g.track, i);
+        if (w < lo) { lo = w; narrow = i; }
+        if (w > hi) { hi = w; wide = i; }
+    }
+    /* just off the narrow road, comfortably on the wide one */
+    offset = (lo + hi) * 0.5f;
+
+    teleport_lat(&g, k, wide, offset, 12.0f);
+    in[0].accel = 1;
+    for (f = 0; f < 60; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    speed_wide = k->speed;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    k = &g.karts[0];
+    teleport_lat(&g, k, narrow, offset, 12.0f);
+    for (f = 0; f < 60; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    speed_narrow = k->speed;
+
+    printf("width bites: %.1f m off center is %.1f km/h on the wide part, "
+           "%.1f km/h on the narrow one\n", offset,
+           speed_wide * 3.6f, speed_narrow * 3.6f);
+    CHECK(speed_wide > speed_narrow + 1.0f,
+          "the narrow section drove the same as the wide one "
+          "(%.1f vs %.1f km/h)", speed_wide * 3.6f, speed_narrow * 3.6f);
+}
+
+/*
+ * The two circuits added in v1.6.0, checked against the brief they were
+ * written to rather than against whatever they happen to be.
+ */
+static void test_new_passes(void)
+{
+    Track bn, gu, be, mo;
+    int i;
+    float bn_grade = 0.0f, mo_grade = 0.0f, gu_peak = 0.0f, be_peak = 0.0f;
+    int gu_hairpins = 0;
+
+    track_init(&bn, TRACK_BREAKNECK);
+    track_init(&gu, TRACK_GUANELLA);
+    track_init(&be, TRACK_BERTHOUD);
+    track_init(&mo, TRACK_MONARCH);
+
+    for (i = 0; i < bn.n; i++)
+        if (fabsf(bn.slope[i]) > bn_grade) bn_grade = fabsf(bn.slope[i]);
+    for (i = 0; i < mo.n; i++)
+        if (fabsf(mo.slope[i]) > mo_grade) mo_grade = fabsf(mo.slope[i]);
+    for (i = 0; i < gu.n_corners; i++) {
+        if (gu.corner_peak[i] > gu_peak) gu_peak = gu.corner_peak[i];
+        if (1.0f / gu.corner_peak[i] < 12.0f) gu_hairpins++;
+    }
+    for (i = 0; i < be.n_corners; i++)
+        if (be.corner_peak[i] > be_peak) be_peak = be.corner_peak[i];
+
+    printf("BREAKNECK %.0f m, %.0f m of climb, %.0f%% steepest, %.1f m wide, "
+           "rails %d\n", bn.total_len, bn.max_y - bn.min_y,
+           bn_grade * 100.0f, bn.road_half * 2.0f, bn.has_walls);
+    printf("GUANELLA  %.0f m, %d corners of which %d are hairpins "
+           "(tightest R %.0f m), %.1f m wide, rails %d\n", gu.total_len,
+           gu.n_corners, gu_hairpins, 1.0f / gu_peak, gu.road_half * 2.0f,
+           gu.has_walls);
+
+    /* Breakneck: short, steep, abrupt, narrow, no barriers */
+    CHECK(bn.total_len < be.total_len,
+          "Breakneck (%.0f m) is not shorter than Berthoud (%.0f m)",
+          bn.total_len, be.total_len);
+    CHECK(!bn.has_walls, "Breakneck has guardrails");
+    CHECK(bn.max_y - bn.min_y > 35.0f,
+          "Breakneck only climbs %.0f m", bn.max_y - bn.min_y);
+    CHECK(bn.road_half * 2.0f < 8.5f,
+          "Breakneck is %.1f m wide, which is not narrow",
+          bn.road_half * 2.0f);
+    /* the elevation is meant to arrive in steps, not one smooth arc:
+     * count how often the grade changes sharply along the lap */
+    {
+        int steps = 0;
+        for (i = 0; i < bn.n; i++) {
+            int j = (i + 1) % bn.n;
+            if (fabsf(bn.slope[j] - bn.slope[i]) > 0.010f)
+                steps++;
+        }
+        printf("BREAKNECK grade changes sharply at %d of %d samples\n",
+               steps, bn.n);
+        CHECK(steps > 8, "Breakneck's climb is one smooth arc (%d steps)",
+              steps);
+    }
+
+    /* Guanella: medium length, switchback after switchback, narrow, bare */
+    CHECK(gu.total_len > bn.total_len && gu.total_len < 2400.0f,
+          "Guanella is %.0f m, which is not medium", gu.total_len);
+    CHECK(!gu.has_walls, "Guanella has guardrails");
+    CHECK(gu_hairpins >= 5,
+          "Guanella has only %d hairpins for a switchback pass",
+          gu_hairpins);
+    CHECK(gu_peak > be_peak,
+          "Guanella's tightest corner (R %.0f) is no tighter than "
+          "Berthoud's (R %.0f)", 1.0f / gu_peak, 1.0f / be_peak);
+    CHECK(gu.road_half * 2.0f < 9.0f,
+          "Guanella is %.1f m wide, which is not narrow",
+          gu.road_half * 2.0f);
+    CHECK(gu.max_y - gu.min_y < mo.max_y - mo.min_y,
+          "Guanella climbs %.0f m, more than Monarch's %.0f — it is "
+          "supposed to be the modest one", gu.max_y - gu.min_y,
+          mo.max_y - mo.min_y);
+}
+
 /* ------------------------------------------------------------------ */
 /* Lap timing                                                          */
 /* ------------------------------------------------------------------ */
@@ -2401,6 +2591,9 @@ int main(void)
     test_ai_shift_styles();
     test_ai_can_fall();
     test_player_model_learns();
+    test_new_passes();
+    test_variable_road_width();
+    test_narrow_sections_bite();
     test_lap_times();
     test_lap_times_survive_respawn();
     test_lap_count_override();

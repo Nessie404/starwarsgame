@@ -80,6 +80,8 @@
     "berthoud": { "width_multiplier": 1.0, "scale_multiplier": 1.0, "elevation_multiplier": 1.0, "laps": 0 },
     "loveland": { "width_multiplier": 1.0, "scale_multiplier": 1.0, "elevation_multiplier": 1.0, "laps": 0 },
     "kenosha":  { "width_multiplier": 1.0, "scale_multiplier": 1.0, "elevation_multiplier": 1.0, "laps": 0 },
-    "monarch":  { "width_multiplier": 1.0, "scale_multiplier": 1.0, "elevation_multiplier": 1.0, "laps": 0 }
+    "monarch":  { "width_multiplier": 1.0, "scale_multiplier": 1.0, "elevation_multiplier": 1.0, "laps": 0 },
+    "breakneck":{ "width_multiplier": 1.0, "scale_multiplier": 1.0, "elevation_multiplier": 1.0, "laps": 0 },
+    "guanella": { "width_multiplier": 1.0, "scale_multiplier": 1.0, "elevation_multiplier": 1.0, "laps": 0 }
   }
 }

@@ -729,7 +729,7 @@ static float ai_tactical_line(const Game *g, const Kart *k)
     const Track *t = &g->track;
     const AIStrategy *st = &ai_strategies[k->strategy];
     float line = k->ai_line;
-    float room = t->road_half * 0.70f;
+    float room = track_road_half(t, k->seg) * 0.70f;
 
     /* With nothing but air past the shoulder, everyone drives closer to
      * the middle, though the amount is configurable. The separate
@@ -815,7 +815,8 @@ static void ai_control(const Game *g, Kart *k, Input *in, float dt)
                 k->overcommit_t = g->settings.ai_overcommit_seconds *
                                   (0.85f + 0.30f * ai_random01(k));
                 k->overcommit_line = outside *
-                    (t->wall_half + g->settings.ai_overcommit_overshoot_m *
+                    (track_wall_half(t, k->seg) +
+                     g->settings.ai_overcommit_overshoot_m *
                                       (0.55f + 0.45f * st->attack));
             }
         }
@@ -855,7 +856,7 @@ static void ai_control(const Game *g, Kart *k, Input *in, float dt)
         float tzp = t->pz[seg] + t->dx[seg] * wanted_line;
         float desired = atan2f(tzp - k->z, txp - k->x);
         float diff = game_angle_wrap(desired - k->heading);
-        int pinned = fabsf(k->lat) > t->wall_half - 0.6f;
+        int pinned = fabsf(k->lat) > track_wall_half(t, k->seg) - 0.6f;
 
         /* recovery: pinned against the barrier (or stalled) facing the
          * wrong way — back out while counter-steering, since a real
@@ -985,7 +986,7 @@ static void ai_learn(Game *g, Kart *k)
      * the drivers to crawl.
      */
     if (k->cur_corner >= 0) {
-        if (k->hit_wall || fabsf(k->lat) > t->road_half + 0.4f ||
+        if (k->hit_wall || fabsf(k->lat) > track_road_half(t, k->seg) + 0.4f ||
             k->slip > 0.85f)
             k->corner_fault = 1;
     }
@@ -1084,7 +1085,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
 {
     const Track *t = &g->track;
     const KartSpec *s = &kart_specs[k->spec];
-    int offroad = fabsf(k->lat) > t->road_half + 0.3f;
+    int offroad = fabsf(k->lat) > track_road_half(t, k->seg) + 0.3f;
     float grip = offroad ? s->offroad_grip : 1.0f;
     float mu_a = s->lat_g * GRAVITY * grip *
                  tire_grip_mult_with_settings(&g->settings, k->tire);
@@ -1095,7 +1096,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     float steer = game_clampf(in->steer, -1.0f, 1.0f);
     float v = k->speed;
     float a = 0.0f;
-    int was_inside = fabsf(k->lat) <= t->wall_half;
+    int was_inside = fabsf(k->lat) <= track_wall_half(t, k->seg);
 
     k->power_fired = 0;
     k->hit_wall = 0;
@@ -1267,14 +1268,16 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     /* --- track relation --- */
     {
         int seg;
-        float frac, lat, y, newp, d;
+        float frac, lat, y, newp, d, wall_here;
 
         track_locate(t, k->x, k->z, k->seg, &seg, &frac, &lat, &y);
 
+        /* the road is not the same width all the way round */
+        wall_here = track_wall_half(t, seg);
         if (t->has_walls) {
             /* guardrail: the car is held on the road, and pays in speed */
-            if (fabsf(lat) > t->wall_half) {
-                float clamped = game_clampf(lat, -t->wall_half, t->wall_half);
+            if (fabsf(lat) > wall_here) {
+                float clamped = game_clampf(lat, -wall_here, wall_here);
                 float excess = lat - clamped;
                 k->x += t->dz[seg] * excess;
                 k->z -= t->dx[seg] * excess;
@@ -1283,7 +1286,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
                     k->hit_wall = 1;
                 lat = clamped;
             }
-        } else if (fabsf(lat) > t->wall_half) {
+        } else if (fabsf(lat) > wall_here) {
             /* No barrier here: past the shoulder there is nothing but air.
              * The car drops for a moment, so you see it go, and is then
              * set back down at the last checkpoint it passed. */
@@ -1308,7 +1311,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->lap = (int)floorf(k->total_progress / (float)t->n);
 
         /* remember the last checkpoint reached while safely on the road */
-        if (k->fall_t <= 0.0f && fabsf(lat) <= t->road_half + 1.0f) {
+        if (k->fall_t <= 0.0f && fabsf(lat) <= track_road_half(t, seg) + 1.0f) {
             int cp = track_checkpoint_for(t, seg);
             if (cp >= 0)
                 k->last_checkpoint = cp;
@@ -1322,7 +1325,8 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
             if (row >= 0 && !k->power_held) {
                 int b;
                 for (b = 0; b < 3; b++) {
-                    float blat = ((float)b - 1.0f) * 0.55f * t->road_half;
+                    float blat = ((float)b - 1.0f) * 0.55f *
+                                 track_road_half(t, seg);
                     if (fabsf(lat - blat) < 1.4f &&
                         g->item_respawn[row][b] <= 0.0f) {
                         k->power_held = ((row + b) & 1) ? POWER_TIRES

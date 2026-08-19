@@ -844,7 +844,11 @@ int config_load_settings_text(GameSettings *settings, const char *json,
          !read_track_settings(&s, json, tokens, count, obj, TRACK_KENOSHA,
                               "kenosha", error, error_cap) ||
          !read_track_settings(&s, json, tokens, count, obj, TRACK_MONARCH,
-                              "monarch", error, error_cap))) goto fail;
+                              "monarch", error, error_cap) ||
+         !read_track_settings(&s, json, tokens, count, obj, TRACK_BREAKNECK,
+                              "breakneck", error, error_cap) ||
+         !read_track_settings(&s, json, tokens, count, obj, TRACK_GUANELLA,
+                              "guanella", error, error_cap))) goto fail;
 
     if (!game_settings_validate(&s, error, error_cap)) goto fail;
     *settings = s;

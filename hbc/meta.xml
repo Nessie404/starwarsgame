@@ -2,7 +2,7 @@
 <app version="1">
   <name>WiiKart</name>
   <coder>kaz</coder>
-  <version>1.5.0</version>
+  <version>1.6.0</version>
   <release_date>20260817000000</release_date>
   <short_description>Semi-sim mountain racing</short_description>
   <long_description>Semi-sim racing over five circuits, including four stylized Colorado mountain passes with real grades, switchbacks, cliffs, and gravity. Eleven fallible AI rivals use different strategies, learn from mistakes, and adapt without rubber-banding. Cars, game settings, and keyboard/GameCube/Xbox control guidance are editable in documented JSON files. Includes a live Dolphin input translator, per-track lap counts, garage, manual gearboxes, motorsport power-ups, staged cliff recovery, up to 4-player split screen, and procedural audio. Supports Wii Remote, Nunchuk, Classic Controller, GameCube pads, Xbox pads through Dolphin, and USB keyboard. Runs on Wii hardware and in Dolphin.</long_description>

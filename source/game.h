@@ -39,7 +39,10 @@ enum {
     TRACK_LOVELAND = 2,   /* stylized Loveland Pass (US-6)            */
     TRACK_KENOSHA  = 3,   /* stylized Kenosha Pass (US-285), long/wide */
     TRACK_MONARCH  = 4,   /* stylized Monarch Pass (US-50), the hardest */
-    TRACK_COUNT    = 5
+    TRACK_BREAKNECK = 5,  /* short, steep, abrupt, no barriers          */
+    TRACK_GUANELLA = 6,   /* stylized Guanella Pass, switchback after
+                           * switchback, unguarded                      */
+    TRACK_COUNT    = 7
 };
 
 typedef struct {
@@ -55,8 +58,18 @@ typedef struct {
     float curv[TRACK_MAX_POINTS];   /* |curvature| 1/m, smoothed         */
     float seg_len[TRACK_MAX_POINTS];/* ground-plane segment length       */
     float total_len;
-    float road_half;                /* half-width of the paved road      */
-    float wall_half;                /* half-width to the hard barrier    */
+    float road_half;                /* nominal half-width, paved road    */
+    float wall_half;                /* nominal half-width to the barrier */
+    /*
+     * Width varies along the lap. A hairpin can stay narrow and punishing
+     * while another tight corner is opened out enough to hold two lines,
+     * which is a road-design decision rather than something curvature
+     * should decide on its own. The scalars above are the mean, kept for
+     * menus and anything that only wants one number; anything that knows
+     * which piece of road it is on asks for that piece.
+     */
+    float road_half_seg[TRACK_MAX_POINTS];
+    float wall_half_seg[TRACK_MAX_POINTS];
     int   item_seg[TRACK_MAX_ITEMS];/* power-up panel rows               */
     int   n_items;
     int   alpine;                   /* 1 = mountain theme (rock skirts)  */
@@ -92,6 +105,10 @@ void track_locate(const Track *t, float x, float z, int hint,
                   int *seg, float *frac, float *lat, float *y);
 
 int track_item_row(const Track *t, int seg);   /* -1 or item row index */
+
+/* half-width of the road, and of the barrier line, at one segment */
+float track_road_half(const Track *t, int seg);
+float track_wall_half(const Track *t, int seg);
 
 /* ------------------------------------------------------------------ */
 /* Vehicle specs (real-world performance parameters)                  */

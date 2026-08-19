@@ -4,6 +4,31 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.6.0] - 2026-08-18
+
+### Added
+
+- **Breakneck Pass**: 945 m, 44 m of climb, grades to 29%, 7.4 m of road
+  and no guardrails. The elevation arrives in steps rather than one smooth
+  arc — shelves, kicks and a ledge on the way down.
+- **Guanella Pass**: 1986 m of switchbacks — 15 corners, seven of them
+  hairpins down to a 6 m radius — climbing 64 m on 7.8 m of unguarded
+  road.
+- Road width now varies along a lap. Each circuit can carry a width
+  profile authored per control point and eased between them, so a hairpin
+  can stay narrow and punishing while another tight corner is opened out
+  enough to hold a second line.
+- Berthoud, Loveland, Monarch, Breakneck and Guanella all have width
+  profiles: the three tightest corners on each are pinched, two more are
+  opened out.
+
+### Changed
+
+- The simulation, the AI and the renderer all use the width of the piece
+  of road a car is on rather than the circuit's average: grip, guardrails,
+  the cliff edge, checkpoints, power-up panels, the racing line, curbs,
+  rails, cliff faces and the start line.
+
 ## [1.5.0] - 2026-08-18
 
 ### Added
@@ -134,6 +159,7 @@ artifacts and their longer descriptions remain available on the
   strategies, learning, driver adaptation, Berthoud and Loveland Pass, and
   motorsport-style power-ups.
 
+[1.6.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.6.0
 [1.5.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.5.0
 [1.4.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.4.0
 [1.3.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.3.0

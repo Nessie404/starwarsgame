@@ -25,6 +25,9 @@ typedef struct {
     const float (*cp)[3];      /* control points x, z, y */
     int   n_cp;
     float road_half, wall_half;
+    /* optional per-control-point width multipliers, one per cp; NULL
+     * keeps the circuit an even width all the way round */
+    const float *cp_width;
     int   alpine;
     int   has_walls;          /* 0 = unguarded: the edge is a drop      */
     float scale;              /* uniform scale on the control points    */
@@ -155,27 +158,119 @@ static const float CP_MONARCH[][3] = {
 };
 static const float ITEMS_MONARCH[] = { 0.06f, 0.32f, 0.62f, 0.88f };
 
+/* ---------------- BREAKNECK PASS ---------------- */
+static const float CP_BREAKNECK[][3] = {
+    {   119,     0,    0 }, {   140,    28,   11 }, {   138,    59,   22 }, {   110,    82,   26 },
+    {    69,    89,   26 }, {    31,    85,   36 }, {     0,    82,   50 }, {   -31,    85,   63 },
+    {   -69,    89,   77 }, {  -110,    82,   79 }, {  -138,    59,   79 }, {  -140,    28,   90 },
+    {  -119,     0,  103 }, {   -93,   -18,  115 }, {   -79,   -34,  120 }, {   -76,   -56,  120 },
+    {   -69,   -89,  110 }, {   -43,  -120,   94 }, {     0,  -133,   78 }, {    43,  -120,   66 },
+    {    69,   -89,   66 }, {    76,   -56,   52 }, {    79,   -34,   34 }, {    93,   -18,   17 },
+};
+
+static const float CP_GUANELLA[][3] = {
+    {   -70,  -100,    0 }, {   -23,  -100,    2 }, {    23,  -100,    5 }, {    70,  -100,    7 },
+    {    94,   -90,    8 }, {    87,   -78,    9 }, {    70,   -70,    9 }, {    23,   -70,   12 },
+    {   -23,   -70,   14 }, {   -70,   -70,   16 }, {   -94,   -60,   18 }, {   -87,   -48,   19 },
+    {   -70,   -40,   19 }, {   -23,   -40,   21 }, {    23,   -40,   23 }, {    70,   -40,   26 },
+    {    94,   -30,   27 }, {    87,   -18,   28 }, {    70,   -10,   28 }, {    23,   -10,   31 },
+    {   -23,   -10,   33 }, {   -70,   -10,   35 }, {   -94,     0,   36 }, {   -87,    12,   38 },
+    {   -70,    20,   38 }, {   -23,    20,   40 }, {    23,    20,   42 }, {    70,    20,   45 },
+    {    94,    30,   46 }, {    87,    42,   47 }, {    70,    50,   47 }, {    23,    50,   49 },
+    {   -23,    50,   52 }, {   -70,    50,   54 }, {   -94,    60,   55 }, {   -87,    72,   56 },
+    {   -70,    80,   56 }, {   -23,    80,   59 }, {    23,    80,   61 }, {    70,    80,   63 },
+    {   105,   118,   60 }, {   150,    80,   52 }, {   165,    25,   41 }, {   158,   -35,   30 },
+    {   128,   -95,   19 }, {    70,  -140,   11 }, {   -10,  -158,    5 }, {   -85,  -145,    1 },
+    {  -125,  -125,   -1 },
+};
+static const float ITEMS_BREAKNECK[] = { 0.14f, 0.55f, 0.85f };
+static const float ITEMS_GUANELLA[] = { 0.10f, 0.38f, 0.66f, 0.90f };
+
+/*
+ * Width profiles, one multiplier per control point, eased between them.
+ * The intent is a road that was designed rather than extruded: the three
+ * tightest corners on each pass stay narrow and punishing, while two more
+ * of the tight ones are opened out so they hold a second line and reward
+ * carrying speed. Everywhere else keeps the circuit's nominal width. The
+ * indices were picked from the measured corner radii, noted above each
+ * profile.
+ */
+/* W_BERTHOUD: tightest control points 18(R11) 19(R11) 6(R11) 7(R12) 13(R12) 12(R12) */
+static const float W_BERTHOUD[] = {
+   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 0.78f, 1.32f, 
+   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.32f, 1.00f, 1.00f, 
+   1.00f, 1.00f, 0.78f, 0.78f, 1.00f, 1.00f, 1.00f, 1.00f, 
+   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 
+   1.00f, 1.00f
+};
+
+/* W_LOVELAND: tightest control points 15(R12) 16(R13) 12(R13) 13(R13) 6(R13) 7(R14) */
+static const float W_LOVELAND[] = {
+   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.32f, 1.00f, 
+   1.00f, 1.00f, 1.00f, 1.00f, 0.78f, 1.32f, 1.00f, 0.78f, 
+   0.78f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 
+   1.00f, 1.00f, 1.00f, 1.00f
+};
+
+/* W_MONARCH: tightest control points 45(R9) 44(R9) 37(R10) 36(R10) 41(R13) 40(R13) */
+static const float W_MONARCH[] = {
+   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 
+   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 
+   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 
+   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 
+   1.00f, 1.00f, 1.00f, 1.00f, 1.32f, 0.78f, 1.00f, 1.00f, 
+   1.00f, 1.32f, 1.00f, 1.00f, 0.78f, 0.78f, 1.00f, 1.00f, 
+   1.00f, 1.00f, 1.00f
+};
+
+/* W_BREAKNECK: tightest control points 13(R29) 22(R29) 21(R29) 14(R29) 1(R39) 10(R39) */
+static const float W_BREAKNECK[] = {
+   1.00f, 1.28f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 
+   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 0.80f, 1.28f, 1.00f, 
+   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 0.80f, 0.80f, 1.00f
+   
+};
+
+/* W_GUANELLA: tightest control points 4(R6) 10(R6) 16(R6) 22(R6) 28(R6) 34(R6) */
+static const float W_GUANELLA[] = {
+   1.00f, 1.00f, 1.00f, 1.00f, 0.82f, 1.00f, 1.00f, 1.00f, 
+   1.00f, 1.00f, 0.82f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 
+   0.82f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.34f, 1.00f, 
+   1.00f, 1.00f, 1.00f, 1.00f, 1.34f, 1.00f, 1.00f, 1.00f, 
+   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 
+   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 
+   1.00f
+};
+
 static const TrackDef track_defs[TRACK_COUNT] = {
     { "CLASSIC",
       CP_CLASSIC,  (int)(sizeof(CP_CLASSIC)  / sizeof(CP_CLASSIC[0])),
-      5.6f, 13.6f, 0, 1, 1.00f, 1.00f,
+      5.6f, 13.6f, NULL, 0, 1, 1.00f, 1.00f,
       ITEMS_CLASSIC, 3 },
     { "BERTHOUD",
       CP_BERTHOUD, (int)(sizeof(CP_BERTHOUD) / sizeof(CP_BERTHOUD[0])),
-      4.8f,  9.1f, 1, 1, 1.00f, 0.62f,   /* wider; grades stay ~15%      */
+      4.8f,  9.1f, W_BERTHOUD, 1, 1, 1.00f, 0.62f, /* grades stay ~15%  */
       ITEMS_BERTHOUD, 4 },
     { "LOVELAND",
       CP_LOVELAND, (int)(sizeof(CP_LOVELAND) / sizeof(CP_LOVELAND[0])),
-      6.0f,  7.2f, 1, 0, 1.00f, 0.78f, /* wider, unguarded, ~14% grades   */
+      6.0f,  7.2f, W_LOVELAND, 1, 0, 1.00f, 0.78f, /* unguarded, ~14%   */
       ITEMS_LOVELAND, 4 },
     { "KENOSHA",
       CP_KENOSHA,  (int)(sizeof(CP_KENOSHA)  / sizeof(CP_KENOSHA[0])),
-      6.6f, 11.6f, 1, 1, 0.72f, 1.55f, /* widest and longest, barriered   */
+      6.6f, 11.6f, NULL, 1, 1, 0.72f, 1.55f, /* longest, barriered      */
       ITEMS_KENOSHA, 6 },
     { "MONARCH",
       CP_MONARCH,  (int)(sizeof(CP_MONARCH)  / sizeof(CP_MONARCH[0])),
-      4.3f,  5.3f, 1, 0, 0.94f, 1.16f, /* longer, higher, still unguarded */
+      4.3f,  5.3f, W_MONARCH, 1, 0, 0.94f, 1.16f, /* high, unguarded    */
       ITEMS_MONARCH, 4 },
+    { "BREAHNECH",   /* BREAKNECK; the HUD font has no K                */
+      CP_BREAKNECK, (int)(sizeof(CP_BREAKNECK) / sizeof(CP_BREAKNECK[0])),
+      3.7f,  4.5f, W_BREAKNECK, 1, 0, 1.15f, 0.32f, /* steep, unguarded */
+      ITEMS_BREAKNECK, 3 },
+    { "GUANELLA",
+      CP_GUANELLA,  (int)(sizeof(CP_GUANELLA)  / sizeof(CP_GUANELLA[0])),
+      3.9f,  4.8f, W_GUANELLA, 1, 0, 1.00f, 1.00f, /* switchbacks       */
+      ITEMS_GUANELLA, 4 },
 };
 
 const char *track_name(int track_id)
@@ -213,6 +308,7 @@ void track_init_with_settings(Track *t, int track_id,
     char error[32];
     int i, s, k;
     float heading[TRACK_MAX_POINTS];
+    float width_mult[TRACK_MAX_POINTS];
     float scale, elevation_scale;
 
     if (track_id < 0 || track_id >= TRACK_COUNT) track_id = 0;
@@ -247,7 +343,26 @@ void track_init_with_settings(Track *t, int track_id,
         const float *p3 = d->cp[(i + 2) % d->n_cp];
         for (s = 0; s < SAMPLES_PER_CP && k < t->n; s++, k++) {
             float pt[3];
-            catmull_rom(p0, p1, p2, p3, (float)s / (float)SAMPLES_PER_CP, pt);
+            float u = (float)s / (float)SAMPLES_PER_CP;
+            catmull_rom(p0, p1, p2, p3, u, pt);
+            /* width is authored per control point and eased between them
+             * with the same curve as the road itself, so a narrow section
+             * arrives gradually rather than as a step */
+            if (d->cp_width) {
+                float w0 = d->cp_width[(i - 1 + d->n_cp) % d->n_cp];
+                float w1 = d->cp_width[i];
+                float w2 = d->cp_width[(i + 1) % d->n_cp];
+                float w3 = d->cp_width[(i + 2) % d->n_cp];
+                float a0[3], a1[3], a2[3], a3[3], out[3];
+                a0[0] = w0; a0[1] = a0[2] = 0.0f;
+                a1[0] = w1; a1[1] = a1[2] = 0.0f;
+                a2[0] = w2; a2[1] = a2[2] = 0.0f;
+                a3[0] = w3; a3[1] = a3[2] = 0.0f;
+                catmull_rom(a0, a1, a2, a3, u, out);
+                width_mult[k] = out[0];
+            } else {
+                width_mult[k] = 1.0f;
+            }
             /* a uniform scale lets a circuit be tuned for lap length
              * without redrawing it; radii grow while grades stay stable */
             t->px[k] = pt[0] * scale;
@@ -386,8 +501,25 @@ void track_init_with_settings(Track *t, int track_id,
         }
     }
 
-    t->road_half = d->road_half * settings->track_width_mult[track_id];
-    t->wall_half = d->wall_half * settings->track_width_mult[track_id];
+    {
+        float base_road = d->road_half * settings->track_width_mult[track_id];
+        float base_wall = d->wall_half * settings->track_width_mult[track_id];
+        float sum_road = 0.0f, sum_wall = 0.0f;
+
+        for (i = 0; i < t->n; i++) {
+            /* a width multiplier is a road-design choice, but it still has
+             * to leave a road: never narrower than a car, never absurd */
+            float w = width_mult[i];
+            if (!(w >= 0.35f)) w = 0.35f;     /* also catches NaN */
+            if (w > 3.0f) w = 3.0f;
+            t->road_half_seg[i] = base_road * w;
+            t->wall_half_seg[i] = base_wall * w;
+            sum_road += t->road_half_seg[i];
+            sum_wall += t->wall_half_seg[i];
+        }
+        t->road_half = sum_road / (float)t->n;
+        t->wall_half = sum_wall / (float)t->n;
+    }
     t->alpine = d->alpine;
     t->has_walls = d->has_walls;
 
@@ -415,6 +547,20 @@ void track_init_with_settings(Track *t, int track_id,
                                               : TRACK_MAX_ITEMS;
     for (i = 0; i < d->n_items && i < TRACK_MAX_ITEMS; i++)
         t->item_seg[i] = (int)(d->item_frac[i] * (float)t->n) % t->n;
+}
+
+float track_road_half(const Track *t, int seg)
+{
+    if (seg < 0 || seg >= t->n)
+        return t->road_half;
+    return t->road_half_seg[seg];
+}
+
+float track_wall_half(const Track *t, int seg)
+{
+    if (seg < 0 || seg >= t->n)
+        return t->wall_half;
+    return t->wall_half_seg[seg];
 }
 
 /* index of the last checkpoint at or before `seg` */

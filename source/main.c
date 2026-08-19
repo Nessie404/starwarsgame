@@ -924,7 +924,6 @@ static int seg_in_window(const Track *t, int viewer_seg, int seg,
 
 static void draw_track(const Track *t, int viewer_seg)
 {
-    const float RW = t->road_half;
     int win_ahead, win_behind;
     int i;
 
@@ -947,6 +946,10 @@ static void draw_track(const Track *t, int viewer_seg)
         float l0x = -t->dz[i],  l0z = t->dx[i];
         float l1x = -t->dz[in], l1z = t->dx[in];
         float y0 = t->py[i] + 0.06f, y1 = t->py[in] + 0.06f;
+        /* each strip is drawn between two samples, and the road may be a
+         * different width at each of them */
+        float rw0 = track_road_half(t, i),  rw1 = track_road_half(t, in);
+        float ww0 = track_wall_half(t, i),  ww1 = track_wall_half(t, in);
         u8 r, g, b;
 
         if (!seg_in_window(t, viewer_seg, i, win_ahead, win_behind))
@@ -959,94 +962,94 @@ static void draw_track(const Track *t, int viewer_seg)
         }
 
         /* road surface */
-        quad(t->px[i]  + l0x * RW, y0, t->pz[i]  + l0z * RW,
-             t->px[in] + l1x * RW, y1, t->pz[in] + l1z * RW,
-             t->px[in] - l1x * RW, y1, t->pz[in] - l1z * RW,
-             t->px[i]  - l0x * RW, y0, t->pz[i]  - l0z * RW,
+        quad(t->px[i]  + l0x * rw0, y0, t->pz[i]  + l0z * rw0,
+             t->px[in] + l1x * rw1, y1, t->pz[in] + l1z * rw1,
+             t->px[in] - l1x * rw1, y1, t->pz[in] - l1z * rw1,
+             t->px[i]  - l0x * rw0, y0, t->pz[i]  - l0z * rw0,
              r, g, b, 255);
 
         /* curbs / shoulder stripe */
         if (i & 1) { r = 210; g = 40; b = 40; }
         else       { r = 235; g = 235; b = 235; }
-        quad(t->px[i]  + l0x * (RW + 0.9f), y0, t->pz[i]  + l0z * (RW + 0.9f),
-             t->px[in] + l1x * (RW + 0.9f), y1, t->pz[in] + l1z * (RW + 0.9f),
-             t->px[in] + l1x * RW,          y1, t->pz[in] + l1z * RW,
-             t->px[i]  + l0x * RW,          y0, t->pz[i]  + l0z * RW,
+        quad(t->px[i]  + l0x * (rw0 + 0.9f), y0, t->pz[i]  + l0z * (rw0 + 0.9f),
+             t->px[in] + l1x * (rw1 + 0.9f), y1, t->pz[in] + l1z * (rw1 + 0.9f),
+             t->px[in] + l1x * rw1,          y1, t->pz[in] + l1z * rw1,
+             t->px[i]  + l0x * rw0,          y0, t->pz[i]  + l0z * rw0,
              r, g, b, 255);
-        quad(t->px[i]  - l0x * RW,          y0, t->pz[i]  - l0z * RW,
-             t->px[in] - l1x * RW,          y1, t->pz[in] - l1z * RW,
-             t->px[in] - l1x * (RW + 0.9f), y1, t->pz[in] - l1z * (RW + 0.9f),
-             t->px[i]  - l0x * (RW + 0.9f), y0, t->pz[i]  - l0z * (RW + 0.9f),
+        quad(t->px[i]  - l0x * rw0,          y0, t->pz[i]  - l0z * rw0,
+             t->px[in] - l1x * rw1,          y1, t->pz[in] - l1z * rw1,
+             t->px[in] - l1x * (rw1 + 0.9f), y1, t->pz[in] - l1z * (rw1 + 0.9f),
+             t->px[i]  - l0x * (rw0 + 0.9f), y0, t->pz[i]  - l0z * (rw0 + 0.9f),
              r, g, b, 255);
 
         if (t->alpine) {
             /* mountainside skirts falling away from the shoulder */
-            float e0 = RW + 0.9f, e1 = RW + 12.0f, e2 = RW + 34.0f;
+            const float E0 = 0.9f, E1 = 12.0f, E2 = 34.0f;
             float d1 = 7.0f, d2 = 22.0f;
             int side;
             for (side = -1; side <= 1; side += 2) {
                 float s = (float)side;
                 u8 rr = 122, gg = 108, bb = 92;   /* rock */
-                quad(t->px[i]  + l0x * e0 * s, y0 - 0.02f,
-                     t->pz[i]  + l0z * e0 * s,
-                     t->px[in] + l1x * e0 * s, y1 - 0.02f,
-                     t->pz[in] + l1z * e0 * s,
-                     t->px[in] + l1x * e1 * s, y1 - d1,
-                     t->pz[in] + l1z * e1 * s,
-                     t->px[i]  + l0x * e1 * s, y0 - d1,
-                     t->pz[i]  + l0z * e1 * s,
+                quad(t->px[i]  + l0x * (rw0 + E0) * s, y0 - 0.02f,
+                     t->pz[i]  + l0z * (rw0 + E0) * s,
+                     t->px[in] + l1x * (rw1 + E0) * s, y1 - 0.02f,
+                     t->pz[in] + l1z * (rw1 + E0) * s,
+                     t->px[in] + l1x * (rw1 + E1) * s, y1 - d1,
+                     t->pz[in] + l1z * (rw1 + E1) * s,
+                     t->px[i]  + l0x * (rw0 + E1) * s, y0 - d1,
+                     t->pz[i]  + l0z * (rw0 + E1) * s,
                      rr, gg, bb, 255);
                 rr = 96; gg = 104; bb = 78;       /* scrub below */
-                quad(t->px[i]  + l0x * e1 * s, y0 - d1,
-                     t->pz[i]  + l0z * e1 * s,
-                     t->px[in] + l1x * e1 * s, y1 - d1,
-                     t->pz[in] + l1z * e1 * s,
-                     t->px[in] + l1x * e2 * s, y1 - d2,
-                     t->pz[in] + l1z * e2 * s,
-                     t->px[i]  + l0x * e2 * s, y0 - d2,
-                     t->pz[i]  + l0z * e2 * s,
+                quad(t->px[i]  + l0x * (rw0 + E1) * s, y0 - d1,
+                     t->pz[i]  + l0z * (rw0 + E1) * s,
+                     t->px[in] + l1x * (rw1 + E1) * s, y1 - d1,
+                     t->pz[in] + l1z * (rw1 + E1) * s,
+                     t->px[in] + l1x * (rw1 + E2) * s, y1 - d2,
+                     t->pz[in] + l1z * (rw1 + E2) * s,
+                     t->px[i]  + l0x * (rw0 + E2) * s, y0 - d2,
+                     t->pz[i]  + l0z * (rw0 + E2) * s,
                      rr, gg, bb, 255);
             }
             /* guardrails, where this road has them */
             if (t->has_walls) {
-                float w = t->wall_half - 0.2f;
+                float wall0 = ww0 - 0.2f, wall1 = ww1 - 0.2f;
                 u8 rr = 225, gg = 228, bb = 232;
                 if (i & 1) { rr = 180; gg = 184; bb = 190; }
-                quad(t->px[i]  + l0x * w, y0 + 0.15f, t->pz[i]  + l0z * w,
-                     t->px[in] + l1x * w, y1 + 0.15f, t->pz[in] + l1z * w,
-                     t->px[in] + l1x * w, y1 + 0.75f, t->pz[in] + l1z * w,
-                     t->px[i]  + l0x * w, y0 + 0.75f, t->pz[i]  + l0z * w,
+                quad(t->px[i]  + l0x * wall0, y0 + 0.15f, t->pz[i]  + l0z * wall0,
+                     t->px[in] + l1x * wall1, y1 + 0.15f, t->pz[in] + l1z * wall1,
+                     t->px[in] + l1x * wall1, y1 + 0.75f, t->pz[in] + l1z * wall1,
+                     t->px[i]  + l0x * wall0, y0 + 0.75f, t->pz[i]  + l0z * wall0,
                      rr, gg, bb, 255);
-                quad(t->px[i]  - l0x * w, y0 + 0.15f, t->pz[i]  - l0z * w,
-                     t->px[in] - l1x * w, y1 + 0.15f, t->pz[in] - l1z * w,
-                     t->px[in] - l1x * w, y1 + 0.75f, t->pz[in] - l1z * w,
-                     t->px[i]  - l0x * w, y0 + 0.75f, t->pz[i]  - l0z * w,
+                quad(t->px[i]  - l0x * wall0, y0 + 0.15f, t->pz[i]  - l0z * wall0,
+                     t->px[in] - l1x * wall1, y1 + 0.15f, t->pz[in] - l1z * wall1,
+                     t->px[in] - l1x * wall1, y1 + 0.75f, t->pz[in] - l1z * wall1,
+                     t->px[i]  - l0x * wall0, y0 + 0.75f, t->pz[i]  - l0z * wall0,
                      rr, gg, bb, 255);
             } else {
                 /* No barrier: mark the edge with a stripe and drop the
                  * ground away sharply, so the cliff reads as a cliff */
-                float w = t->wall_half;
+                float wall0 = ww0, wall1 = ww1;
                 int side;
                 for (side = -1; side <= 1; side += 2) {
                     float sg = (float)side;
                     u8 er = (i & 1) ? 235 : 90, eg = (i & 1) ? 180 : 90;
-                    quad(t->px[i]  + l0x * (w - 0.5f) * sg, y0 + 0.02f,
-                         t->pz[i]  + l0z * (w - 0.5f) * sg,
-                         t->px[in] + l1x * (w - 0.5f) * sg, y1 + 0.02f,
-                         t->pz[in] + l1z * (w - 0.5f) * sg,
-                         t->px[in] + l1x * w * sg, y1 + 0.02f,
-                         t->pz[in] + l1z * w * sg,
-                         t->px[i]  + l0x * w * sg, y0 + 0.02f,
-                         t->pz[i]  + l0z * w * sg,
+                    quad(t->px[i]  + l0x * (wall0 - 0.5f) * sg, y0 + 0.02f,
+                         t->pz[i]  + l0z * (wall0 - 0.5f) * sg,
+                         t->px[in] + l1x * (wall1 - 0.5f) * sg, y1 + 0.02f,
+                         t->pz[in] + l1z * (wall1 - 0.5f) * sg,
+                         t->px[in] + l1x * wall1 * sg, y1 + 0.02f,
+                         t->pz[in] + l1z * wall1 * sg,
+                         t->px[i]  + l0x * wall0 * sg, y0 + 0.02f,
+                         t->pz[i]  + l0z * wall0 * sg,
                          er, eg, 70, 255);
-                    quad(t->px[i]  + l0x * w * sg, y0,
-                         t->pz[i]  + l0z * w * sg,
-                         t->px[in] + l1x * w * sg, y1,
-                         t->pz[in] + l1z * w * sg,
-                         t->px[in] + l1x * (w + 1.5f) * sg, y1 - 26.0f,
-                         t->pz[in] + l1z * (w + 1.5f) * sg,
-                         t->px[i]  + l0x * (w + 1.5f) * sg, y0 - 26.0f,
-                         t->pz[i]  + l0z * (w + 1.5f) * sg,
+                    quad(t->px[i]  + l0x * wall0 * sg, y0,
+                         t->pz[i]  + l0z * wall0 * sg,
+                         t->px[in] + l1x * wall1 * sg, y1,
+                         t->pz[in] + l1z * wall1 * sg,
+                         t->px[in] + l1x * (wall1 + 1.5f) * sg, y1 - 26.0f,
+                         t->pz[in] + l1z * (wall1 + 1.5f) * sg,
+                         t->px[i]  + l0x * (wall0 + 1.5f) * sg, y0 - 26.0f,
+                         t->pz[i]  + l0z * (wall0 + 1.5f) * sg,
                          84, 74, 64, 255);
                 }
             }
@@ -1061,8 +1064,9 @@ static void draw_track(const Track *t, int viewer_seg)
         int cx, cz;
         for (cz = 0; cz < 2; cz++) {
             for (cx = 0; cx < 6; cx++) {
-                float w0 = -RW + 2.0f * RW * (float)cx / 6.0f;
-                float w1 = -RW + 2.0f * RW * (float)(cx + 1) / 6.0f;
+                float lw = track_road_half(t, 0);
+                float w0 = -lw + 2.0f * lw * (float)cx / 6.0f;
+                float w1 = -lw + 2.0f * lw * (float)(cx + 1) / 6.0f;
                 float f0 = (float)cz / 2.0f, f1 = (float)(cz + 1) / 2.0f;
                 float ax = t->px[0] + (t->px[in] - t->px[0]) * f0;
                 float az = t->pz[0] + (t->pz[in] - t->pz[0]) * f0;
@@ -1087,6 +1091,7 @@ static void draw_track(const Track *t, int viewer_seg)
         float yaw = atan2f(t->dz[0], t->dx[0]);
         float lx = -t->dz[0], lz = t->dx[0];
         float by = t->py[0];
+        float RW = track_road_half(t, 0);
         draw_box(t->px[0] + lx * (RW + 1.8f), by + 2.75f,
                  t->pz[0] + lz * (RW + 1.8f), yaw, 0.0f,
                  0.4f, 2.75f, 0.4f, 225, 225, 230);
@@ -1106,7 +1111,8 @@ static void draw_track(const Track *t, int viewer_seg)
             if (!seg_in_window(t, viewer_seg, seg, win_ahead, win_behind))
                 continue;
             for (b = 0; b < 3; b++) {
-                float blat = ((float)b - 1.0f) * 0.55f * RW;
+                float blat = ((float)b - 1.0f) * 0.55f *
+                             track_road_half(t, seg);
                 float pulse;
                 if (app_state == APP_RACE &&
                     game.item_respawn[rrow][b] > 0.0f)

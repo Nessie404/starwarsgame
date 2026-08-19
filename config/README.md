@@ -52,12 +52,16 @@ This file exposes the main tuning surfaces:
 - AI pace, braking, safe-road use, and overcommit behavior;
 - cliff fall, blackout, fade, invincibility, and flash timing;
 - the chase camera and the tachometer's rev range (see below);
-- per-track width, plan scale, elevation, and optional fixed lap count.
+- per-track width, plan scale, elevation, and optional fixed lap count
+  (`classic`, `berthoud`, `loveland`, `kenosha`, `monarch`, `breakneck`,
+  `guanella`).
 
 For a track, `laps: 0` means automatic. A positive lap count is an explicit
 override (up to 20), independent of the automatic minimum and maximum.
 Width/scale/elevation values are multipliers, so `1.10` means ten percent
-more than the built-in geometry.
+more than the built-in geometry. A width multiplier scales the whole
+circuit; the *shape* of the width — which corners are pinched and which
+are opened out — is part of the track itself.
 
 ### The `instruments` block
 
