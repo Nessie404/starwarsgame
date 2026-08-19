@@ -774,9 +774,35 @@ int config_load_settings_text(GameSettings *settings, const char *json,
                                  error, error_cap) ||
                  !optional_float(json, tokens, count, tire,
                                  "drag_multiplier", &s.tire_drag_mult[i],
-                                 error, error_cap))) goto fail;
+                                 error, error_cap) ||
+                 !optional_float(json, tokens, count, tire,
+                                 "rolling_multiplier",
+                                 &s.tire_rolling_mult[i], error, error_cap) ||
+                 !optional_float(json, tokens, count, tire,
+                                 "wear_rate_per_second",
+                                 &s.tire_wear_rate[i], error, error_cap) ||
+                 !optional_float(json, tokens, count, tire,
+                                 "grip_lost_when_worn",
+                                 &s.tire_wear_grip_loss[i], error,
+                                 error_cap) ||
+                 !optional_float(json, tokens, count, tire, "optimal_temp_c",
+                                 &s.tire_temp_optimal[i], error, error_cap) ||
+                 !optional_float(json, tokens, count, tire, "temp_window_c",
+                                 &s.tire_temp_window[i], error, error_cap) ||
+                 !optional_float(json, tokens, count, tire, "heat_rate",
+                                 &s.tire_heat_rate[i], error, error_cap) ||
+                 !optional_float(json, tokens, count, tire, "cool_rate",
+                                 &s.tire_cool_rate[i], error, error_cap) ||
+                 !optional_float(json, tokens, count, tire,
+                                 "off_window_grip",
+                                 &s.tire_off_window_grip[i], error,
+                                 error_cap))) goto fail;
         }
     }
+
+    if (obj >= 0 &&
+        !optional_float(json, tokens, count, obj, "ambient_c",
+                        &s.tire_ambient_c, error, error_cap)) goto fail;
 
     obj = object_get(json, tokens, count, 0, "powerups");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {

@@ -20,9 +20,26 @@
     "response_curve": 1.55
   },
   "tires": {
-    "medium": { "grip_multiplier": 1.00, "drag_multiplier": 1.00 },
-    "soft":   { "grip_multiplier": 1.08, "drag_multiplier": 1.04 },
-    "hard":   { "grip_multiplier": 0.94, "drag_multiplier": 0.97 }
+    "_comment": "A compound is a trade, not a rank: grip when warm, against how fast it wears, how well it rolls, and the temperature it wants. Softs win sprints, hards and mediums win long races. ambient_c is the air temperature the rubber cools towards.",
+    "ambient_c": 18.0,
+    "medium": {
+      "grip_multiplier": 1.00, "drag_multiplier": 1.00,
+      "rolling_multiplier": 1.00, "wear_rate_per_second": 0.0180,
+      "grip_lost_when_worn": 0.15, "optimal_temp_c": 84, "temp_window_c": 34,
+      "heat_rate": 20.0, "cool_rate": 0.065, "off_window_grip": 0.86
+    },
+    "soft": {
+      "grip_multiplier": 1.08, "drag_multiplier": 1.04,
+      "rolling_multiplier": 1.06, "wear_rate_per_second": 0.0390,
+      "grip_lost_when_worn": 0.22, "optimal_temp_c": 78, "temp_window_c": 26,
+      "heat_rate": 23.0, "cool_rate": 0.065, "off_window_grip": 0.80
+    },
+    "hard": {
+      "grip_multiplier": 0.96, "drag_multiplier": 0.97,
+      "rolling_multiplier": 0.90, "wear_rate_per_second": 0.0080,
+      "grip_lost_when_worn": 0.09, "optimal_temp_c": 88, "temp_window_c": 42,
+      "heat_rate": 17.0, "cool_rate": 0.065, "off_window_grip": 0.88
+    }
   },
   "powerups": {
     "push_power_multiplier": 1.13,

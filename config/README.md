@@ -62,7 +62,11 @@ This file exposes the main tuning surfaces:
 - race countdown, target distance, and lap limits;
 - drivetrain, rolling resistance, shift time, and engine bog point;
 - steering response and speed sensitivity;
-- tire and power-up multipliers;
+- tire compounds: grip, drag, rolling resistance, wear rate and how much
+  grip that wear costs, the temperature each wants and how wide its window
+  is, how fast it heats and cools, and how much grip is left outside the
+  window — plus the ambient air temperature they cool towards;
+- power-up multipliers;
 - AI pace, braking, safe-road use, and overcommit behavior;
 - cliff fall, blackout, fade, invincibility, and flash timing;
 - how much hills matter, the chase camera, and the tachometer's rev

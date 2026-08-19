@@ -1,6 +1,6 @@
 # WiiKart future work
 
-These are design targets for releases after v1.7.0. Details may change after
+These are design targets for releases after v1.8.0. Details may change after
 testing, because apparently cars, mountains, and tires all object to being
 reduced to one convenient slider.
 
@@ -106,11 +106,14 @@ Still open:
 
 ## Tires and surfaces
 
-- [ ] Replace the simple soft/medium/hard choice with compounds whose tradeoffs
-  matter over an entire race.
-- [ ] Prevent soft tires from being the automatic best choice by modeling a
+- [x] Replace the simple soft/medium/hard choice with compounds whose tradeoffs
+  matter over an entire race. *(v1.8.0: temperature window, wear, rolling
+  resistance and grip fall-off, all in `settings.json`.)*
+- [x] Prevent soft tires from being the automatic best choice by modeling a
   useful combination of temperature, wear, rolling resistance, durability,
-  and surface compatibility.
+  and surface compatibility. *(v1.8.0: softs win sprints, mediums and hards
+  win long races; a regression test fails if that stops being true. Surface
+  compatibility waits for the winter work below.)*
 - [ ] Define dry, snow, and ice performance deliberately. Investigate whether
   harder compounds should gain lower rolling resistance or durability on dry
   pavement while winter-oriented/softer compounds gain cold, snow, and ice

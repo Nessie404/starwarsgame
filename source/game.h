@@ -262,8 +262,24 @@ struct GameSettings {
     float steer_rate_center;
     float steer_speed_fade;
     float steer_curve;
-    float tire_grip_mult[TIRE_COMPOUNDS];
-    float tire_drag_mult[TIRE_COMPOUNDS];
+    float tire_grip_mult[TIRE_COMPOUNDS];      /* peak grip, when warm    */
+    float tire_drag_mult[TIRE_COMPOUNDS];      /* aero/rolling penalty    */
+    /*
+     * Tires as something that happens over a race rather than a label.
+     * A compound has a temperature it wants to be at and a window either
+     * side of it, heats up with work and cools with speed, and wears out
+     * — losing grip as it goes. The soft compound is quickest when it is
+     * in its window and fresh, which is not the whole race.
+     */
+    float tire_rolling_mult[TIRE_COMPOUNDS];   /* rolling resistance      */
+    float tire_wear_rate[TIRE_COMPOUNDS];      /* wear per second of work */
+    float tire_wear_grip_loss[TIRE_COMPOUNDS]; /* grip lost when worn out */
+    float tire_temp_optimal[TIRE_COMPOUNDS];   /* degrees C               */
+    float tire_temp_window[TIRE_COMPOUNDS];    /* half-width, degrees     */
+    float tire_heat_rate[TIRE_COMPOUNDS];      /* degrees per second of work */
+    float tire_cool_rate[TIRE_COMPOUNDS];      /* fraction of the gap per s */
+    float tire_off_window_grip[TIRE_COMPOUNDS];/* grip well outside it    */
+    float tire_ambient_c;
 
     /* power-ups */
     float push_power_mult;
@@ -330,6 +346,14 @@ int  game_settings_validate(GameSettings *s, char *error, int error_cap);
 
 float tire_grip_mult_with_settings(const GameSettings *settings,
                                    int compound);
+
+/*
+ * What a tire is worth right now, given its compound, how hot it is and
+ * how worn: peak grip scaled by both. Exposed so the HUD and the tests
+ * can ask the same question the simulation does.
+ */
+float tire_condition_grip(const GameSettings *settings, int compound,
+                          float temp_c, float wear);
 float tire_drag_mult_with_settings(const GameSettings *settings,
                                    int compound);
 
@@ -466,6 +490,9 @@ typedef struct {
     int   falls;          /* completed cliff falls (AI telemetry/tests) */
     int   drifting;       /* handbrake locked in, +1/-1 = direction     */
     float push_t;         /* push-to-pass seconds remaining             */
+    float tire_wear;      /* 0 = fresh, 1 = worn out                    */
+    float tire_temp;      /* degrees C                                  */
+    float tire_grip_now;  /* what the rubber is actually worth, 0..1+   */
     float grip_t;         /* fresh-rubber seconds remaining             */
     int   power_held;     /* POWER_* currently in reserve               */
     int   prev_item_btn;

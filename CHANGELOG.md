@@ -4,6 +4,39 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.8.0] - 2026-08-19
+
+### Added
+
+- Tires that happen over a race instead of being a label. Each compound
+  has a temperature it wants, a window either side of it, a heating and
+  cooling rate, a wear rate, and how much grip that wear costs. Rubber
+  heats with work, cools with speed, and loses grip when it is cold,
+  overheated or worn.
+- Tire readout on the HUD: compound, temperature (amber and then red as it
+  leaves its window) and a life bar that empties as the tires wear.
+- Every tire parameter is in the `tires` block of `settings.json`.
+
+### Changed
+
+- Compounds are now a decision. Measured over a whole race with the field
+  on one compound: softs win the sprint round Classic (127.3 s against
+  128.7 for mediums), and lose the long race round Kenosha (267.6 s
+  against 260.0), where they wear out completely. Hards win round
+  Guanella. A regression test fails if softs ever become the automatic
+  choice again.
+- The AI feel the rubber too — cold, worn or overheated tires slow their
+  corner speeds — so a compound choice shows up in the race, not just on
+  the player's car.
+- The fresh-rubber power-up now fits a genuinely fresh set: wear goes back
+  to zero and the tires arrive at their optimal temperature.
+
+### Fixed
+
+- A car that fell off the road just after the line, was recovered before
+  it, and drove over it again was credited with the same lap twice — a
+  1.8-second lap in the timing test.
+
 ## [1.7.0] - 2026-08-19
 
 ### Added
@@ -188,6 +221,7 @@ artifacts and their longer descriptions remain available on the
   strategies, learning, driver adaptation, Berthoud and Loveland Pass, and
   motorsport-style power-ups.
 
+[1.8.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.8.0
 [1.7.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.7.0
 [1.6.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.6.0
 [1.5.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.5.0

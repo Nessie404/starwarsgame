@@ -1856,6 +1856,36 @@ static void draw_player_hud(int p)
                      150, 200, 240, 220);
     }
 
+    /*
+     * Tires: how hot and how worn, because both now decide what the car
+     * will do. The bar is the life left in them; it goes amber and then
+     * red as that runs out, and the temperature reads in its own colour
+     * when the rubber is outside the window it wants.
+     */
+    {
+        float life = 1.0f - game_clampf(k->tire_wear, 0.0f, 1.0f);
+        float opt = game.settings.tire_temp_optimal[k->tire %
+                                                    TIRE_COMPOUNDS];
+        float win = game.settings.tire_temp_window[k->tire %
+                                                   TIRE_COMPOUNDS];
+        float off = fabsf(k->tire_temp - opt) / (win > 1.0f ? win : 1.0f);
+        u8 lr = 110, lg = 205, lb = 130;
+        u8 tr = 170, tg = 190, tb = 210;
+        float bx = vx + vw - 106.0f, by = vy + vh - 26.0f;
+
+        if (life < 0.25f)      { lr = 235; lg =  80; lb =  70; }
+        else if (life < 0.5f)  { lr = 240; lg = 190; lb =  70; }
+        if (off > 1.0f)        { tr = 235; tg = 120; tb =  80; }
+        else if (off > 0.55f)  { tr = 240; tg = 205; tb = 110; }
+
+        hud_text(bx, by - 15.0f, 8.0f, 14.0f, tire_name(k->tire),
+                 190, 195, 210, 200);
+        snprintf(buf, sizeof(buf), "%dC", (int)k->tire_temp);
+        hud_text(bx + 44.0f, by - 15.0f, 8.0f, 14.0f, buf, tr, tg, tb, 215);
+        hud_rect(bx, by, 84.0f, 6.0f, 15, 15, 20, 170);
+        hud_rect(bx + 1.0f, by + 1.0f, 82.0f * life, 4.0f, lr, lg, lb, 235);
+    }
+
     draw_leaderboard(p, vx, vy, vw, vh);
     draw_lap_popup(p, vx, vy, vw, vh);
 

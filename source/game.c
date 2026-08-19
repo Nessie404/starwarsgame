@@ -106,10 +106,41 @@ void game_settings_defaults(GameSettings *s)
     s->steer_curve = 1.55f;
     s->tire_grip_mult[TIRE_MEDIUM] = 1.00f;
     s->tire_grip_mult[TIRE_SOFT] = 1.08f;
-    s->tire_grip_mult[TIRE_HARD] = 0.94f;
+    s->tire_grip_mult[TIRE_HARD] = 0.96f;
     s->tire_drag_mult[TIRE_MEDIUM] = 1.00f;
     s->tire_drag_mult[TIRE_SOFT] = 1.04f;
     s->tire_drag_mult[TIRE_HARD] = 0.97f;
+    /*
+     * The three compounds are meant to be a real choice over a race
+     * distance, not a ladder. Softs give the most grip but only while
+     * they are in a narrow window and only for a while; hards are slower
+     * at their best, but they roll better, warm slowly and last.
+     */
+    s->tire_rolling_mult[TIRE_MEDIUM] = 1.00f;
+    s->tire_rolling_mult[TIRE_SOFT]   = 1.06f;
+    s->tire_rolling_mult[TIRE_HARD]   = 0.90f;
+    s->tire_wear_rate[TIRE_MEDIUM] = 0.0180f;
+    s->tire_wear_rate[TIRE_SOFT]   = 0.0390f;
+    s->tire_wear_rate[TIRE_HARD]   = 0.0080f;
+    s->tire_wear_grip_loss[TIRE_MEDIUM] = 0.15f;
+    s->tire_wear_grip_loss[TIRE_SOFT]   = 0.22f;
+    s->tire_wear_grip_loss[TIRE_HARD]   = 0.09f;
+    s->tire_temp_optimal[TIRE_MEDIUM] = 84.0f;
+    s->tire_temp_optimal[TIRE_SOFT]   = 78.0f;
+    s->tire_temp_optimal[TIRE_HARD]   = 88.0f;
+    s->tire_temp_window[TIRE_MEDIUM] = 34.0f;
+    s->tire_temp_window[TIRE_SOFT]   = 26.0f;
+    s->tire_temp_window[TIRE_HARD]   = 42.0f;
+    s->tire_heat_rate[TIRE_MEDIUM] = 20.0f;
+    s->tire_heat_rate[TIRE_SOFT]   = 23.0f;
+    s->tire_heat_rate[TIRE_HARD]   = 17.0f;
+    s->tire_cool_rate[TIRE_MEDIUM] = 0.065f;
+    s->tire_cool_rate[TIRE_SOFT]   = 0.065f;
+    s->tire_cool_rate[TIRE_HARD]   = 0.065f;
+    s->tire_off_window_grip[TIRE_MEDIUM] = 0.86f;
+    s->tire_off_window_grip[TIRE_SOFT]   = 0.80f;
+    s->tire_off_window_grip[TIRE_HARD]   = 0.88f;
+    s->tire_ambient_c = 18.0f;
     s->push_power_mult = PUSH_POWER;
     s->push_seconds = PUSH_SECONDS;
     s->fresh_tire_grip_mult = TIRE_GRIP;
@@ -195,7 +226,18 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
     for (i = 0; i < TIRE_COMPOUNDS; i++) {
         FINITE_RANGE(s->tire_grip_mult[i], 0.30f, 2.0f, "BAD TIRE GRIP");
         FINITE_RANGE(s->tire_drag_mult[i], 0.50f, 2.0f, "BAD TIRE DRAG");
+        FINITE_RANGE(s->tire_rolling_mult[i], 0.50f, 2.0f, "BAD TIRE ROLL");
+        FINITE_RANGE(s->tire_wear_rate[i], 0.0f, 0.5f, "BAD TIRE WEAR");
+        FINITE_RANGE(s->tire_wear_grip_loss[i], 0.0f, 0.80f,
+                     "BAD TIRE FALLOFF");
+        FINITE_RANGE(s->tire_temp_optimal[i], 20.0f, 200.0f, "BAD TIRE TEMP");
+        FINITE_RANGE(s->tire_temp_window[i], 5.0f, 120.0f, "BAD TIRE RANGE");
+        FINITE_RANGE(s->tire_heat_rate[i], 0.0f, 200.0f, "BAD TIRE HEATING");
+        FINITE_RANGE(s->tire_cool_rate[i], 0.0f, 1.0f, "BAD TIRE COOLING");
+        FINITE_RANGE(s->tire_off_window_grip[i], 0.30f, 1.0f,
+                     "BAD COLD TIRE GRIP");
     }
+    FINITE_RANGE(s->tire_ambient_c, -40.0f, 60.0f, "BAD AIR TEMP");
     FINITE_RANGE(s->push_power_mult, 1.0f, 2.0f, "BAD PUSH POWER");
     FINITE_RANGE(s->push_seconds, 0.1f, 60.0f, "BAD PUSH TIME");
     FINITE_RANGE(s->fresh_tire_grip_mult, 1.0f, 2.0f, "BAD FRESH GRIP");
@@ -305,7 +347,7 @@ float tire_grip_mult(int compound)
 {
     switch (compound) {
     case TIRE_SOFT: return 1.08f;
-    case TIRE_HARD: return 0.94f;
+    case TIRE_HARD: return 0.96f;
     default:        return 1.00f;
     }
 }
@@ -318,6 +360,44 @@ float tire_grip_mult_with_settings(const GameSettings *settings,
     if (compound < 0 || compound >= TIRE_COMPOUNDS)
         compound = TIRE_MEDIUM;
     return settings->tire_grip_mult[compound];
+}
+
+/*
+ * Grip is peak grip scaled by two things: how far the rubber is from the
+ * temperature it wants, and how worn it is. The temperature term is a
+ * parabola across the window — cold rubber and overheated rubber are both
+ * short of grip — flattening out at the compound's off-window value so a
+ * cold tire is poor rather than useless.
+ */
+float tire_condition_grip(const GameSettings *settings, int compound,
+                          float temp_c, float wear)
+{
+    float peak, off, opt, window, d, temp_factor, wear_factor;
+
+    if (compound < 0 || compound >= TIRE_COMPOUNDS)
+        compound = TIRE_MEDIUM;
+    if (!settings) {
+        peak = tire_grip_mult(compound);
+        return peak;
+    }
+    peak = settings->tire_grip_mult[compound];
+    off = settings->tire_off_window_grip[compound];
+    opt = settings->tire_temp_optimal[compound];
+    window = settings->tire_temp_window[compound];
+    if (!(window > 1.0f))
+        window = 1.0f;
+
+    d = (temp_c - opt) / window;
+    if (d < -2.0f) d = -2.0f;
+    if (d >  2.0f) d =  2.0f;
+    temp_factor = 1.0f - (1.0f - off) * d * d;
+    if (temp_factor < off) temp_factor = off;
+
+    if (!(wear >= 0.0f)) wear = 0.0f;
+    if (wear > 1.0f) wear = 1.0f;
+    wear_factor = 1.0f - settings->tire_wear_grip_loss[compound] * wear;
+
+    return peak * temp_factor * wear_factor;
 }
 
 float tire_drag_mult(int compound)
@@ -687,6 +767,11 @@ void game_init(Game *g, const GameConfig *cfg)
                                : i - g->cfg.n_humans);
         k->rank = i + 1;
         k->gear = 0;
+        k->tire_wear = 0.0f;
+        k->tire_temp = g->settings.tire_ambient_c + 6.0f;   /* out of the
+                                                             * paddock */
+        k->tire_grip_now = tire_condition_grip(&g->settings, k->tire,
+                                               k->tire_temp, 0.0f);
         k->last_checkpoint = 0;
         k->risk_corner = -1;
         k->rng_state = 0x9e3779b9u ^ (unsigned int)(i + 1) * 0x85ebca6bu ^
@@ -810,7 +895,10 @@ static void ai_control(const Game *g, Kart *k, Input *in, float dt)
     const KartSpec *s = &kart_specs[k->spec];
     const AIStrategy *st = &ai_strategies[k->strategy];
     float v = fabsf(k->speed);
-    float mu = s->lat_g * k->ai_skill;
+    /* a driver feels the rubber: cold, worn or overheated tires mean a
+     * slower corner, which is what makes a compound choice a decision */
+    float mu = s->lat_g * k->ai_skill *
+               (k->tire_grip_now > 0.1f ? k->tire_grip_now : 1.0f);
     float a_brk = g->settings.ai_brake_mult *
                   (V100 * V100) / (2.0f * s->brake_dist_100);
     float look, d, vmax_allow;
@@ -1117,8 +1205,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     const KartSpec *s = &kart_specs[k->spec];
     int offroad = fabsf(k->lat) > track_road_half(t, k->seg) + 0.3f;
     float grip = offroad ? s->offroad_grip : 1.0f;
-    float mu_a = s->lat_g * GRAVITY * grip *
-                 tire_grip_mult_with_settings(&g->settings, k->tire);
+    float mu_a = s->lat_g * GRAVITY * grip * k->tire_grip_now;
     float cd_a = s->cd_a *
                  tire_drag_mult_with_settings(&g->settings, k->tire);
     float P = s->power_hp * HP_TO_W * g->settings.drivetrain_efficiency *
@@ -1127,6 +1214,41 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     float v = k->speed;
     float a = 0.0f;
     int was_inside = fabsf(k->lat) <= track_wall_half(t, k->seg);
+
+    /*
+     * Tires, before anything asks what they are worth. Work is how hard
+     * they are being used — sliding, cornering and speed — which is what
+     * heats them and what wears them out. They cool towards the air
+     * temperature at a rate that rises with speed, so a long straight
+     * brings a soft tire back under its window.
+     */
+    {
+        int c = (k->tire >= 0 && k->tire < TIRE_COMPOUNDS) ? k->tire
+                                                           : TIRE_MEDIUM;
+        float sp = fabsf(v);
+        /* work is what the rubber is being asked to do: rolling at all,
+         * plus how much of that is spent sliding. A parked car does no
+         * work, on or off the road, and neither heats nor wears. */
+        float work = game_clampf(sp / 40.0f, 0.0f, 1.0f) *
+                     (0.30f + 0.70f * k->slip);
+        float cool = g->settings.tire_cool_rate[c] *
+                     (0.55f + game_clampf(sp / 30.0f, 0.0f, 1.6f));
+
+        if (offroad)
+            work *= 1.5f;                     /* dirt is hard on rubber */
+
+        k->tire_temp += (g->settings.tire_heat_rate[c] * work -
+                         cool * (k->tire_temp - g->settings.tire_ambient_c))
+                        * dt;
+        if (k->tire_temp < -40.0f) k->tire_temp = -40.0f;
+        if (k->tire_temp > 220.0f) k->tire_temp = 220.0f;
+
+        k->tire_wear += g->settings.tire_wear_rate[c] * work * dt;
+        if (k->tire_wear > 1.0f) k->tire_wear = 1.0f;
+
+        k->tire_grip_now = tire_condition_grip(&g->settings, c,
+                                               k->tire_temp, k->tire_wear);
+    }
 
     k->power_fired = 0;
     k->hit_wall = 0;
@@ -1246,8 +1368,11 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     }
     /* drag + rolling resistance oppose motion */
     if (fabsf(v) > 0.2f) {
+        int rc = (k->tire >= 0 && k->tire < TIRE_COMPOUNDS) ? k->tire
+                                                            : TIRE_MEDIUM;
         float a_res = (0.5f * RHO_AIR * cd_a * v * v) / s->mass_kg +
-                      g->settings.rolling_resistance * GRAVITY;
+                      g->settings.rolling_resistance *
+                      g->settings.tire_rolling_mult[rc] * GRAVITY;
         a += (v > 0.0f) ? -a_res : a_res;
     }
     if (in->brake) {
@@ -1442,8 +1567,16 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         if (k->power_held == POWER_PUSH)
             k->push_t = fmaxf(k->push_t, g->settings.push_seconds);
         else
+        {
+            /* fresh rubber is exactly that: the wear goes away and the
+             * new set arrives at the temperature it wants to run at */
             k->grip_t = fmaxf(k->grip_t,
                               g->settings.fresh_tire_seconds);
+            k->tire_wear = 0.0f;
+            k->tire_temp = g->settings.tire_temp_optimal[
+                (k->tire >= 0 && k->tire < TIRE_COMPOUNDS) ? k->tire
+                                                           : TIRE_MEDIUM];
+        }
         k->power_held = POWER_NONE;
         k->power_fired = 1;
     }
@@ -1595,7 +1728,14 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
              * starts lap one rather than completing anything: the car has
              * not been round yet. Counting it timed the rollout as a lap.
              */
-            if (k->lap == lap_before + 1 && k->lap >= 1 && !k->finished) {
+            /*
+             * ...and only a lap the car has not already been credited
+             * with. Falling off just after the line puts it back before
+             * the line, and driving over it again must not buy a second
+             * copy of the same lap — which is how a 1.8 s "lap" appeared.
+             */
+            if (k->lap == lap_before + 1 && k->lap > k->laps_done &&
+                !k->finished) {
                 float t_lap = g->race_t - k->lap_start_t;
                 if (t_lap > 1.0f) {
                     k->last_lap_time = t_lap;

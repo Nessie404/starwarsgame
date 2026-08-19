@@ -1105,6 +1105,9 @@ static void test_gear_limits_speed(void)
 /* Tire compounds have to actually trade grip against slipperiness. */
 static void test_tire_compounds(void)
 {
+    GameSettings st;
+    int c;
+
     printf("tires: soft grip x%.2f drag x%.2f, hard grip x%.2f drag x%.2f\n",
            tire_grip_mult(TIRE_SOFT), tire_drag_mult(TIRE_SOFT),
            tire_grip_mult(TIRE_HARD), tire_drag_mult(TIRE_HARD));
@@ -1114,7 +1117,150 @@ static void test_tire_compounds(void)
           "hards do not grip less");
     CHECK(tire_drag_mult(TIRE_HARD) < tire_drag_mult(TIRE_SOFT),
           "hards are not the slipperier tire");
+
+    /* the compound trade-offs, as parameters rather than as lap times */
+    game_settings_defaults(&st);
+    CHECK(st.tire_wear_rate[TIRE_SOFT] > st.tire_wear_rate[TIRE_MEDIUM] &&
+          st.tire_wear_rate[TIRE_MEDIUM] > st.tire_wear_rate[TIRE_HARD],
+          "softs do not wear out faster than hards");
+    CHECK(st.tire_rolling_mult[TIRE_HARD] < st.tire_rolling_mult[TIRE_MEDIUM],
+          "hards do not roll better");
+    CHECK(st.tire_temp_optimal[TIRE_SOFT] < st.tire_temp_optimal[TIRE_HARD],
+          "softs do not want to run cooler than hards");
+
+    /* cold, warm and overheated rubber, and worn rubber */
+    for (c = 0; c < TIRE_COMPOUNDS; c++) {
+        float cold = tire_condition_grip(&st, c, 10.0f, 0.0f);
+        float warm = tire_condition_grip(&st, c, st.tire_temp_optimal[c],
+                                         0.0f);
+        float hot = tire_condition_grip(&st, c,
+                                        st.tire_temp_optimal[c] +
+                                        st.tire_temp_window[c] * 2.0f, 0.0f);
+        float worn = tire_condition_grip(&st, c, st.tire_temp_optimal[c],
+                                         1.0f);
+        printf("  %-6s cold %.2f  warm %.2f  overheated %.2f  worn out %.2f\n",
+               tire_name(c), cold, warm, hot, worn);
+        CHECK(warm > cold && warm > hot,
+              "%s does not have a temperature window", tire_name(c));
+        CHECK(worn < warm, "%s does not lose grip as it wears",
+              tire_name(c));
+        CHECK(cold > 0.5f && hot > 0.5f,
+              "%s falls off a cliff outside its window", tire_name(c));
+    }
+    CHECK(tire_condition_grip(&st, TIRE_SOFT, st.tire_temp_optimal[TIRE_SOFT],
+                              1.0f) <
+          tire_condition_grip(&st, TIRE_MEDIUM,
+                              st.tire_temp_optimal[TIRE_MEDIUM], 1.0f),
+          "a worn-out soft is not worse than a worn-out medium");
 }
+
+/*
+ * The point of compounds is that none of them is the answer. Run the same
+ * race on each and check that the sprint and the long haul want different
+ * rubber — this is the test that stops softs quietly becoming the only
+ * sensible choice again.
+ */
+static void test_tire_strategy_crossover(void)
+{
+    struct { int track; float t[TIRE_COMPOUNDS]; } run[2];
+    int r, c;
+
+    run[0].track = TRACK_CLASSIC;    /* a sprint    */
+    run[1].track = TRACK_KENOSHA;    /* a long haul */
+
+    for (r = 0; r < 2; r++) {
+        for (c = 0; c < TIRE_COMPOUNDS; c++) {
+            Game g;
+            GameConfig cfg = default_cfg(run[r].track);
+            Input in[MAX_HUMANS];
+            int f, i;
+
+            cfg.tire[0] = c;
+            game_init(&g, &cfg);
+            idle_inputs(in);
+            for (i = 1; i < NUM_KARTS; i++)
+                g.karts[i].tire = c;          /* one compound, whole field */
+            for (f = 0; f < 60 * 420 && !g.karts[1].finished; f++)
+                game_update(&g, in, 1.0f / 60.0f);
+            run[r].t[c] = g.karts[1].finished ? g.karts[1].finish_time
+                                              : 9999.0f;
+        }
+        printf("%-9s soft %.1fs  medium %.1fs  hard %.1fs\n",
+               track_name(run[r].track), run[r].t[TIRE_SOFT],
+               run[r].t[TIRE_MEDIUM], run[r].t[TIRE_HARD]);
+    }
+
+    CHECK(run[0].t[TIRE_SOFT] < run[0].t[TIRE_MEDIUM],
+          "softs are not quicker over a sprint (%.1f vs %.1f)",
+          run[0].t[TIRE_SOFT], run[0].t[TIRE_MEDIUM]);
+    CHECK(run[1].t[TIRE_SOFT] > run[1].t[TIRE_MEDIUM],
+          "softs still win the long race (%.1f vs %.1f) — they are the "
+          "automatic choice again", run[1].t[TIRE_SOFT],
+          run[1].t[TIRE_MEDIUM]);
+    CHECK(run[1].t[TIRE_HARD] < run[1].t[TIRE_SOFT],
+          "hards do not outlast softs over a long race (%.1f vs %.1f)",
+          run[1].t[TIRE_HARD], run[1].t[TIRE_SOFT]);
+}
+
+/* Wear and heat come from work, so a parked car does neither. */
+static void test_tires_need_work(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    Kart *k;
+    int f;
+    float temp0, wear0;
+
+    cfg.tire[0] = TIRE_SOFT;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    k = &g.karts[0];
+    k->speed = 0.0f;
+    temp0 = k->tire_temp;
+    wear0 = k->tire_wear;
+    for (f = 0; f < 60 * 60; f++) {
+        k->speed = 0.0f;                 /* held still, on the road */
+        game_update(&g, in, 1.0f / 60.0f);
+    }
+    printf("parked for a minute: tires %.0fC (was %.0f), wear %.3f\n",
+           k->tire_temp, temp0, k->tire_wear);
+    CHECK(k->tire_wear < wear0 + 0.01f,
+          "a parked car wore its tires out by %.3f", k->tire_wear - wear0);
+    CHECK(k->tire_temp < temp0 + 5.0f,
+          "a parked car heated its tires to %.0fC", k->tire_temp);
+}
+
+/* Fresh rubber means fresh: the power-up clears the wear it has done. */
+static void test_fresh_rubber_resets_wear(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_BERTHOUD);
+    Input in[MAX_HUMANS];
+    Kart *k;
+    int f;
+    float worn;
+
+    cfg.tire[0] = TIRE_SOFT;
+    game_init(&g, &cfg);
+    idle_inputs(in);
+    k = &g.karts[0];
+    for (f = 0; f < 60 * 90; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    worn = k->tire_wear;
+
+    k->power_held = POWER_TIRES;
+    in[0].item = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    printf("fresh rubber: wear %.2f -> %.2f, temp %.0fC\n", worn,
+           k->tire_wear, k->tire_temp);
+    CHECK(worn > 0.01f, "the car never wore its tires (%.3f)", worn);
+    CHECK(k->tire_wear < 0.001f, "fresh rubber left %.2f of wear",
+          k->tire_wear);
+}
+
+
 
 /* The passes: which are barriered, and the shape of the new ones. */
 static void test_track_roster(void)
@@ -2755,6 +2901,9 @@ int main(void)
     test_shifting();
     test_gear_limits_speed();
     test_tire_compounds();
+    test_tire_strategy_crossover();
+    test_tires_need_work();
+    test_fresh_rubber_resets_wear();
     test_track_roster();
     test_lap_counts();
     test_cliff_respawn();
