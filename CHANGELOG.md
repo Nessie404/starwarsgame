@@ -4,6 +4,34 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.5.0] - 2026-08-18
+
+### Added
+
+- Lap timing for every driver, human and AI: the lap running now, the last
+  one, and a personal best, kept by the simulation and shown on the HUD.
+  A lap only counts when it is driven across the line, so the rollout from
+  the grid and a checkpoint recovery are not timed as laps.
+- A lap-complete popup inside that player's own viewport, showing the time
+  and calling out a personal best, with its own chime.
+- A live leaderboard down the right edge of each viewport: position,
+  driver, and the gap to the leader in seconds. Split screens show the
+  sharp end plus that player's own row.
+- Names for the eleven AI drivers, fixed to their grid slots, replacing
+  the strategy label as the way a rival is identified on the HUD, in the
+  leaderboard, and in the results.
+- A `LAPS` row in the pre-race menu: `AUTO` (the circuit's own count, shown
+  alongside) or 1 to 9, validated the same way the JSON override is.
+- A digital tachometer beside the rev bar, with an `instruments` block in
+  `settings.json` for its idle and redline values.
+
+### Changed
+
+- The rev band now reads as four states rather than a gradient: grey while
+  the engine is bogging below its torque band, green through the useful
+  range, amber in the shift window, red at the limiter, with a mark on the
+  bar where the shift window begins.
+
 ## [1.4.0] - 2026-08-18
 
 ### Added
@@ -106,6 +134,7 @@ artifacts and their longer descriptions remain available on the
   strategies, learning, driver adaptation, Berthoud and Loveland Pass, and
   motorsport-style power-ups.
 
+[1.5.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.5.0
 [1.4.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.4.0
 [1.3.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.3.0
 [1.2.1]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.2.1

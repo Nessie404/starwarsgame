@@ -50,6 +50,7 @@ static int race_exit_confirm;       /* leave-race guard; pauses simulation */
 static int menu_screen;              /* SCREEN_SETUP / SCREEN_GARAGE     */
 static int sel_players = 1;
 static int sel_track = 0;
+static int sel_laps = 0;             /* 0 = the circuit's own lap count */
 static int sel_spec[MAX_HUMANS] = { 1, 1, 1, 1 };
 static int sel_paint[MAX_HUMANS] = { 0, 1, 2, 3 };
 static int sel_gearbox[MAX_HUMANS] = { GEARBOX_AUTO, GEARBOX_AUTO,
@@ -1568,7 +1569,7 @@ static const char *kart_label(const Kart *k)
         snprintf(buf, sizeof(buf), "P%d", k->human + 1);
         return buf;
     }
-    return ai_strategy_name(k->strategy);
+    return ai_driver_name(k->driver_no);
 }
 
 static const Kart *kart_at_rank(int rank)
@@ -1580,6 +1581,163 @@ static const Kart *kart_at_rank(int rank)
     return NULL;
 }
 
+/* m:ss.hh, or "--" before there is a time to show */
+/* how many laps the selected circuit would run on its own, for the
+ * AUTO readout on the LAPS row */
+static int menu_track_laps(void)
+{
+    if (menu_track_loaded != sel_track) {
+        track_init_with_settings(&menu_track, sel_track, &app_settings);
+        menu_track_loaded = sel_track;
+    }
+    return menu_track.laps;
+}
+
+static void format_lap_time(char *out, int cap, float seconds)
+{
+    int m, sec, hun;
+    if (!(seconds > 0.0f)) {
+        snprintf(out, cap, "--.--");
+        return;
+    }
+    m = (int)(seconds / 60.0f);
+    sec = (int)seconds - m * 60;
+    hun = (int)((seconds - (float)((int)seconds)) * 100.0f);
+    if (m > 0)
+        snprintf(out, cap, "%d.%02d.%02d", m, sec, hun);
+    else
+        snprintf(out, cap, "%d.%02d", sec, hun);
+}
+
+/*
+ * Crossing the line puts a short note in that player's own viewport —
+ * their lap time, and whether it was their best — rather than a banner
+ * across a split screen belonging to somebody else.
+ */
+#define LAP_POPUP_SECONDS 2.6f
+static float lap_popup_t[MAX_HUMANS];
+static char  lap_popup_time[MAX_HUMANS][16];
+static int   lap_popup_lap[MAX_HUMANS];
+static int   lap_popup_best[MAX_HUMANS];
+
+static void lap_popups_update(float dt)
+{
+    int p;
+    for (p = 0; p < MAX_HUMANS; p++) {
+        if (lap_popup_t[p] > 0.0f)
+            lap_popup_t[p] -= dt;
+        if (p < game.cfg.n_humans && game.karts[p].lap_event) {
+            const Kart *k = &game.karts[p];
+            format_lap_time(lap_popup_time[p], sizeof(lap_popup_time[p]),
+                            k->last_lap_time);
+            lap_popup_lap[p] = k->laps_done;
+            lap_popup_best[p] = k->lap_best_event;
+            lap_popup_t[p] = LAP_POPUP_SECONDS;
+            audio_beep(k->lap_best_event ? 990.0f : 660.0f, 110,
+                       k->lap_best_event ? 170 : 150);
+        }
+    }
+}
+
+static void draw_lap_popup(int p, float vx, float vy, float vw, float vh)
+{
+    float a, y;
+    char line[28];
+    u8 tint_r, tint_g, tint_b;
+
+    if (lap_popup_t[p] <= 0.0f)
+        return;
+
+    /* fades out over its last half second */
+    a = lap_popup_t[p] > 0.5f ? 1.0f : lap_popup_t[p] * 2.0f;
+    y = vy + vh * 0.30f;
+    tint_r = lap_popup_best[p] ? 255 : 235;
+    tint_g = lap_popup_best[p] ? 225 : 235;
+    tint_b = lap_popup_best[p] ?  80 : 245;
+
+    snprintf(line, sizeof(line), "LAP %d", lap_popup_lap[p]);
+    hud_text(vx + vw * 0.5f - hud_text_width(11.0f, line) * 0.5f, y,
+             11.0f, 19.0f, line, 200, 205, 220, (u8)(210.0f * a));
+    hud_text(vx + vw * 0.5f -
+             hud_text_width(16.0f, lap_popup_time[p]) * 0.5f, y + 22.0f,
+             16.0f, 28.0f, lap_popup_time[p], tint_r, tint_g, tint_b,
+             (u8)(245.0f * a));
+    if (lap_popup_best[p])
+        hud_text(vx + vw * 0.5f - hud_text_width(10.0f, "BEST LAP") * 0.5f,
+                 y + 54.0f, 10.0f, 17.0f, "BEST LAP", 255, 225, 80,
+                 (u8)(235.0f * a));
+}
+
+/*
+ * The order of the race, live. It sits in a narrow column down the right
+ * edge so it never covers the road: rank, driver, and the gap to the car
+ * in front expressed as time, which is what a driver actually wants.
+ * Split screens only get the sharp end plus wherever this player is.
+ */
+static void draw_leaderboard(int p, float vx, float vy, float vw, float vh)
+{
+    (void)vh;
+    const Kart *me = &game.karts[p];
+    float m_per_seg = game.track.total_len / (float)game.track.n;
+    float x = vx + vw - 116.0f;
+    float y = vy + 34.0f;
+    float size = (game.cfg.n_humans > 1) ? 8.0f : 9.0f;
+    float step = size + 5.0f;
+    int rows = (game.cfg.n_humans > 1) ? 4 : NUM_KARTS;
+    int rank, shown = 0;
+    const Kart *leader = kart_at_rank(1);
+    char buf[24];
+
+    if (game.state == STATE_FINISHED)
+        return;                       /* the results table takes over */
+
+    for (rank = 1; rank <= NUM_KARTS; rank++) {
+        const Kart *k = kart_at_rank(rank);
+        const u8 *c;
+        int is_me;
+        float gap;
+
+        if (!k)
+            continue;
+        is_me = (k == me);
+        /* on a split screen, the top few and this player's own row */
+        if (shown >= rows - 1 && !is_me)
+            continue;
+        if (shown >= rows && is_me)
+            break;
+
+        c = kart_color(k);
+        snprintf(buf, sizeof(buf), "%d", rank);
+        hud_text(x, y, size, size * 1.7f, buf,
+                 is_me ? 255 : 190, is_me ? 220 : 195,
+                 is_me ? 60 : 205, is_me ? 245 : 200);
+        hud_text(x + 18.0f, y, size, size * 1.7f, kart_label(k),
+                 c[0], c[1], c[2], is_me ? 250 : 215);
+
+        if (k->finished) {
+            snprintf(buf, sizeof(buf), "IN");
+        } else if (rank == 1 || !leader) {
+            snprintf(buf, sizeof(buf), "-");
+        } else {
+            /* distance to the leader, turned into a time at the pace the
+             * leader is actually doing */
+            float ref = leader->speed > 8.0f ? leader->speed : 8.0f;
+            gap = (leader->total_progress - k->total_progress) * m_per_seg
+                  / ref;
+            if (gap < 0.0f) gap = 0.0f;
+            if (gap > 99.0f)
+                snprintf(buf, sizeof(buf), "-1L");
+            else
+                snprintf(buf, sizeof(buf), "%d.%d", (int)gap,
+                         (int)((gap - (float)(int)gap) * 10.0f));
+        }
+        hud_text(x + 74.0f, y, size, size * 1.7f, buf, 180, 185, 200, 190);
+
+        y += step;
+        shown++;
+    }
+}
+
 static void draw_player_hud(int p)
 {
     const Kart *k = &game.karts[p];
@@ -1588,15 +1746,36 @@ static void draw_player_hud(int p)
 
     viewport_rect(p, game.cfg.n_humans, &vx, &vy, &vw, &vh);
 
-    /* lap */
+    /* lap, and the stopwatch: this lap so far, the last one, the best */
     {
         int laps = game.track.laps;
         int lap_disp = k->lap + 1;
+        float running = game.race_t - k->lap_start_t;
+        char t[16];
         if (lap_disp < 1) lap_disp = 1;
         if (lap_disp > laps) lap_disp = laps;
         snprintf(buf, sizeof(buf), "L%d/%d", lap_disp, laps);
         hud_text(vx + 14.0f, vy + 12.0f, 11.0f, 19.0f, buf,
                  255, 255, 255, 220);
+
+        if (game.state == STATE_COUNTDOWN)
+            running = 0.0f;
+        format_lap_time(t, sizeof(t), running);
+        hud_text(vx + 14.0f, vy + 32.0f, 12.0f, 21.0f, t,
+                 235, 235, 245, 225);
+
+        if (game.cfg.n_humans <= 2) {      /* room for the detail */
+            format_lap_time(t, sizeof(t), k->last_lap_time);
+            hud_text(vx + 14.0f, vy + 54.0f, 8.0f, 14.0f, "LAST",
+                     160, 165, 180, 190);
+            hud_text(vx + 52.0f, vy + 54.0f, 8.0f, 14.0f, t,
+                     215, 218, 228, 205);
+            format_lap_time(t, sizeof(t), k->best_lap_time);
+            hud_text(vx + 14.0f, vy + 70.0f, 8.0f, 14.0f, "BEST",
+                     190, 175, 90, 195);
+            hud_text(vx + 52.0f, vy + 70.0f, 8.0f, 14.0f, t,
+                     245, 225, 120, 215);
+        }
     }
     /* position */
     snprintf(buf, sizeof(buf), "P%d", k->rank);
@@ -1628,16 +1807,41 @@ static void draw_player_hud(int p)
     {
         const KartSpec *sp = &kart_specs[k->spec];
         float rev = game_clampf(k->rev_frac, 0.0f, 1.0f);
+        float bog = game.settings.bog_fraction;
         u8 rr = 90, rg = 210, rb = 120;
-        if (k->rev_frac > 0.92f) { rr = 255; rg = 90; rb = 70; }
-        else if (k->rev_frac > 0.80f) { rr = 245; rg = 200; rb = 70; }
+        int rpm;
+
+        /*
+         * The band is read at a glance, so its colours are the four
+         * things that matter rather than a gradient: grey while the
+         * engine is bogging below its torque band, green through the
+         * useful range, amber in the shift window, red at the limiter.
+         */
+        if (k->rev_frac > 0.94f)      { rr = 255; rg =  80; rb =  65; }
+        else if (k->rev_frac > 0.86f) { rr = 245; rg = 200; rb =  70; }
+        else if (k->rev_frac < bog)   { rr = 140; rg = 150; rb = 165; }
 
         snprintf(buf, sizeof(buf), "%d", k->gear + 1);
         hud_text(vx + 118.0f, vy + vh - 44.0f, 15.0f, 28.0f, buf,
                  235, 235, 245, 245);
+
+        /* the digital tachometer: revs as a number, mapped from where the
+         * car is in the gear onto the car's own idle-to-limiter range */
+        rpm = (int)(game.settings.tacho_idle_rpm +
+                    game_clampf(k->rev_frac, 0.0f, 1.05f) *
+                    (game.settings.tacho_redline_rpm -
+                     game.settings.tacho_idle_rpm));
+        rpm = (rpm / 10) * 10;
+        snprintf(buf, sizeof(buf), "%d", rpm);
+        hud_text(vx + 112.0f, vy + vh - 27.0f, 9.0f, 15.0f, buf,
+                 rr, rg, rb, 230);
+
         hud_rect(vx + 112.0f, vy + vh - 12.0f, 62.0f, 7.0f, 15, 15, 20, 170);
         hud_rect(vx + 113.0f, vy + vh - 11.0f, 60.0f * rev, 5.0f,
                  rr, rg, rb, 240);
+        /* where the shift window starts, so the bar has a reference */
+        hud_rect(vx + 113.0f + 60.0f * 0.86f, vy + vh - 12.0f, 1.0f, 7.0f,
+                 235, 210, 120, 200);
         if (k->shift_t > 0.0f)      /* drive is cut during the change */
             hud_text(vx + 140.0f, vy + vh - 44.0f, 11.0f, 19.0f, "-",
                      255, 200, 80, 240);
@@ -1645,6 +1849,9 @@ static void draw_player_hud(int p)
             hud_text(vx + 140.0f, vy + vh - 44.0f, 9.0f, 15.0f, "T",
                      150, 200, 240, 220);
     }
+
+    draw_leaderboard(p, vx, vy, vw, vh);
+    draw_lap_popup(p, vx, vy, vw, vh);
 
     /* just been fished out of the void */
     if (k->fall_t > 0.0f)
@@ -2017,7 +2224,7 @@ static void menu_update_track_preview(void)
  * button. Nothing is a one-way door.
  */
 enum {
-    RK_PLAYERS = 0, RK_TRACK, RK_GARAGE, RK_START, RK_EXIT,   /* setup   */
+    RK_PLAYERS = 0, RK_TRACK, RK_LAPS, RK_GARAGE, RK_START, RK_EXIT, /* setup */
     RK_CAR, RK_PAINT, RK_GEARBOX, RK_TIRES, RK_DONE           /* garage  */
 };
 
@@ -2051,6 +2258,8 @@ static void build_rows(void)
         menu_rows[n_menu_rows++].player = 0;
         menu_rows[n_menu_rows].kind = RK_TRACK;
         menu_rows[n_menu_rows++].player = 0;
+        menu_rows[n_menu_rows].kind = RK_LAPS;
+        menu_rows[n_menu_rows++].player = 0;
         for (p = 0; p < sel_players; p++) {
             menu_rows[n_menu_rows].kind = RK_GARAGE;
             menu_rows[n_menu_rows++].player = p;
@@ -2082,6 +2291,7 @@ static void row_label(const MenuRow *r, char *out, int cap)
     switch (r->kind) {
     case RK_PLAYERS: snprintf(out, cap, "PLAYERS");            break;
     case RK_TRACK:   snprintf(out, cap, "TRACH");              break;
+    case RK_LAPS:    snprintf(out, cap, "LAPS");               break;
     case RK_GARAGE:  snprintf(out, cap, "P%d GARAGE", r->player + 1); break;
     case RK_START:   snprintf(out, cap, "GO");                 break;
     case RK_EXIT:    snprintf(out, cap, "EXIT");               break;
@@ -2099,6 +2309,12 @@ static void row_value(const MenuRow *r, char *out, int cap)
     switch (r->kind) {
     case RK_PLAYERS: snprintf(out, cap, "%d", sel_players);                 break;
     case RK_TRACK:   snprintf(out, cap, "%s", track_name(sel_track));       break;
+    case RK_LAPS:
+        if (sel_laps <= 0)
+            snprintf(out, cap, "AUTO %d", menu_track_laps());
+        else
+            snprintf(out, cap, "%d", sel_laps);
+        break;
     case RK_GARAGE:  snprintf(out, cap, "%s",
                               kart_specs[sel_spec[p] % kart_spec_count].name); break;
     case RK_CAR:     snprintf(out, cap, "%s",
@@ -2114,6 +2330,7 @@ static void row_value(const MenuRow *r, char *out, int cap)
 static int row_has_value(const MenuRow *r)
 {
     return (r->kind == RK_PLAYERS || r->kind == RK_TRACK ||
+            r->kind == RK_LAPS ||
             r->kind == RK_CAR || r->kind == RK_PAINT ||
             r->kind == RK_GEARBOX || r->kind == RK_TIRES);
 }
@@ -2129,6 +2346,12 @@ static void row_change(const MenuRow *r, int d)
         break;
     case RK_TRACK:
         sel_track = ((sel_track + d) % TRACK_COUNT + TRACK_COUNT) % TRACK_COUNT;
+        break;
+    case RK_LAPS:
+        /* 0 is AUTO — the circuit's own count — then 1 to 9 by hand */
+        sel_laps += d;
+        if (sel_laps < 0) sel_laps = 9;
+        if (sel_laps > 9) sel_laps = 0;
         break;
     case RK_GARAGE:
     case RK_CAR:
@@ -2187,6 +2410,7 @@ static void start_race(void)
     cfg.track_id = sel_track;
     cfg.n_humans = sel_players;
     cfg.settings = &app_settings;
+    cfg.laps_override = sel_laps;
     for (p = 0; p < MAX_HUMANS; p++) {
         cfg.spec[p] = sel_spec[p] % kart_spec_count;
         cfg.paint[p] = sel_paint[p] % PAINT_COUNT;
@@ -2204,6 +2428,7 @@ static void start_race(void)
     for (p = 0; p < MAX_HUMANS; p++) {
         Kart *k = &game.karts[p < cfg.n_humans ? p : 0];
         camera_reset(&cam[p], &app_settings, k, &game.track);
+        lap_popup_t[p] = 0.0f;
         rumble_t[p] = 0.0f;
         steer_axis_reset(&steer_axis[p]);
     }
@@ -2594,6 +2819,8 @@ static void race_frame(float dt)
             PAD_ControlMotor(p, PAD_MOTOR_STOP);
         }
     }
+
+    lap_popups_update(dt);
 
     /* blank the unused quadrant in 3P before HUD overlays it */
     draw_race_views(dt);

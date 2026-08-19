@@ -51,13 +51,21 @@ This file exposes the main tuning surfaces:
 - tire and power-up multipliers;
 - AI pace, braking, safe-road use, and overcommit behavior;
 - cliff fall, blackout, fade, invincibility, and flash timing;
-- the chase camera (see below);
+- the chase camera and the tachometer's rev range (see below);
 - per-track width, plan scale, elevation, and optional fixed lap count.
 
 For a track, `laps: 0` means automatic. A positive lap count is an explicit
 override (up to 20), independent of the automatic minimum and maximum.
 Width/scale/elevation values are multipliers, so `1.10` means ten percent
 more than the built-in geometry.
+
+### The `instruments` block
+
+The simulation has no crankshaft — engine output comes from where the car
+is in its current gear — so the tachometer maps that position onto a rev
+range you can read. `tacho_idle_rpm` (default 1200) is the bottom of the
+gear, `tacho_redline_rpm` (default 7800) is the limiter. The redline must
+be above idle.
 
 ### The `camera` block
 

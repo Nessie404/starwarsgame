@@ -275,6 +275,11 @@ struct GameSettings {
     float cam_pitch_min_deg;         /* negative = allowed to look up    */
     float cam_pitch_max_deg;
 
+    /* instruments: the sim has no crankshaft, so the tachometer maps
+     * where the car is in its gear onto a readable rev range */
+    float tacho_idle_rpm;
+    float tacho_redline_rpm;
+
     /* cliff recovery */
     float fall_seconds;
     float respawn_black_seconds;
@@ -430,6 +435,7 @@ typedef struct {
 
     /* role / livery */
     int   human;          /* -1 = AI, else human player index          */
+    int   driver_no;      /* AI grid slot, for ai_driver_name()         */
     int   paint_idx;      /* index into the platform layer's palette   */
     float ai_line;        /* base racing-line offset, meters           */
     float ai_skill;
@@ -448,6 +454,14 @@ typedef struct {
     float overcommit_line;                   /* risky outside line, m    */
     int   risk_corner;                       /* last corner risk-tested  */
     unsigned int rng_state;                  /* deterministic local PRNG */
+
+    /* timing: every driver's own stopwatch, humans and AI alike */
+    float lap_start_t;    /* race clock when the current lap began      */
+    float last_lap_time;  /* the lap just completed, 0 if none yet      */
+    float best_lap_time;  /* fastest so far, 0 if none yet              */
+    int   laps_done;      /* completed laps, counted at the line        */
+    int   lap_event;      /* one-frame: crossed the line                */
+    int   lap_best_event; /* one-frame: ...and it was a personal best   */
 
     /* results */
     int   rank;
@@ -477,6 +491,7 @@ typedef struct {
     int gearbox[MAX_HUMANS];      /* GEARBOX_AUTO / GEARBOX_MANUAL     */
     int tire[MAX_HUMANS];         /* TIRE_* compound                    */
     const GameSettings *settings; /* NULL = compiled defaults           */
+    int laps_override;            /* 0 = use the circuit's own count    */
 } GameConfig;
 
 typedef struct {
@@ -505,6 +520,14 @@ int track_checkpoint_for(const Track *t, int seg);
 
 /* AI helpers exposed for the HUD and the tests */
 const char *ai_strategy_name(int strategy);
+
+/*
+ * Every AI car is a driver with a name, not "AI 7". The name is fixed per
+ * grid slot so the same rival is the same rival between races, and it is
+ * drawn with the HUD's own font, so it stays inside the alphabet that
+ * font can render.
+ */
+const char *ai_driver_name(int grid_slot);
 float       ai_corner_conf(const Kart *k, const Track *t, int seg);
 
 /* derived stats for menus: 0-100 km/h time (s) and top speed (km/h) */

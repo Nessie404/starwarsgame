@@ -1,4 +1,4 @@
-# WiiKart 1.4.0
+# WiiKart 1.5.0
 
 An original racing game built as **Nintendo Wii homebrew**. It compiles to
 a real Wii executable (`wiikart.dol`) that runs in the
@@ -18,9 +18,9 @@ on the [v0.1 release](https://github.com/Nessie404/starwarsgame/releases/tag/v0.
 
 See [CHANGELOG.md](CHANGELOG.md) for the release-by-release inventory and
 [TODO.md](TODO.md) for proposed future work that is explicitly not part of
-v1.4.0.
+v1.5.0.
 
-Version 1.4.0 is a semi-sim mountain racer: pick a car in the garage —
+Version 1.5.0 is a semi-sim mountain racer: pick a car in the garage —
 its gearbox, tires and paint, all defined by real-world performance
 numbers — then race a **field of eleven AI drivers who each race
 differently, shift differently, learn from their mistakes, and adapt to
@@ -60,6 +60,9 @@ hairpins.
   you reverse, follows the road over crests and down descents, and is
   configurable end to end; plus 480p progressive output and true 16:9
   rendering instead of a stretched 4:3 picture.
+- **v1.5.0** — lap times for every driver with a per-viewport lap popup, a
+  live leaderboard, names for the eleven rivals, a pre-race lap-count
+  option, and a digital tachometer with a rev band that means something.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game

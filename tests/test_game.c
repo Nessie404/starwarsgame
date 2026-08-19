@@ -1789,6 +1789,203 @@ static void test_ai_can_fall(void)
 
 
 /* ------------------------------------------------------------------ */
+/* Lap timing                                                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Every driver keeps their own stopwatch. Run a full race and check the
+ * times against the one number we already trust — the finishing time.
+ */
+static void test_lap_times(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    int f, i, lap_events = 0, best_events = 0;
+    float first_lap_time = 0.0f;
+
+    game_init(&g, &cfg);
+    idle_inputs(in);
+    in[0].accel = 1;
+
+    for (f = 0; f < 60 * 400; f++) {
+        game_update(&g, in, 1.0f / 60.0f);
+        for (i = 0; i < NUM_KARTS; i++) {
+            if (g.karts[i].lap_event) {
+                lap_events++;
+                if (i == 1 && first_lap_time == 0.0f && f > 60)
+                    first_lap_time = g.karts[i].last_lap_time;
+            }
+            if (g.karts[i].lap_best_event)
+                best_events++;
+        }
+        if (g.finish_count >= NUM_KARTS)
+            break;
+    }
+
+    /* the human kart is holding the throttle flat with no steering, so
+     * it is not expected to finish; the AI field is */
+    CHECK(g.finish_count >= NUM_KARTS - 1,
+          "only %d of %d karts finished in 400 s", g.finish_count,
+          NUM_KARTS);
+    CHECK(lap_events > 0, "no lap was ever recorded");
+    printf("lap timing: %d laps recorded, %d of them personal bests, "
+           "first AI lap %.2f s\n", lap_events, best_events, first_lap_time);
+
+    for (i = 0; i < NUM_KARTS; i++) {
+        const Kart *k = &g.karts[i];
+        if (!k->finished)
+            continue;
+        CHECK(k->laps_done >= g.track.laps - 1,
+              "kart %d finished with only %d timed laps of %d", i,
+              k->laps_done, g.track.laps);
+        CHECK(k->best_lap_time > 0.0f, "kart %d has no best lap", i);
+        CHECK(k->best_lap_time <= k->last_lap_time + 0.001f ||
+              k->last_lap_time <= 0.0f,
+              "kart %d: best lap %.2f is slower than its last %.2f", i,
+              k->best_lap_time, k->last_lap_time);
+        /* the laps have to add up to the race: every timed lap fits
+         * inside the finishing time, and the best one is a real lap */
+        CHECK(k->best_lap_time * (float)k->laps_done <= k->finish_time + 0.5f,
+              "kart %d: %d laps at best %.2f exceed its %.2f s race", i,
+              k->laps_done, k->best_lap_time, k->finish_time);
+        CHECK(k->best_lap_time > 5.0f,
+              "kart %d recorded an impossible %.2f s lap", i,
+              k->best_lap_time);
+    }
+}
+
+/*
+ * Going over a cliff and being put back at a checkpoint is not a lap, and
+ * must not hand out a suspiciously quick one either.
+ */
+static void test_lap_times_survive_respawn(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_MONARCH);
+    Input in[MAX_HUMANS];
+    Kart *k;
+    int f, laps_before, respawned = 0;
+    float best_before;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    in[0].accel = 1;
+    k = &g.karts[0];
+
+    for (f = 0; f < 60 * 60; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    laps_before = k->laps_done;
+    best_before = k->best_lap_time;
+
+    /* off the edge, a couple of segments short of the line */
+    teleport_lat(&g, k, g.track.n - 3, g.track.wall_half + 4.0f, 26.0f);
+    k->lap = (int)floorf(k->total_progress / (float)g.track.n);
+    for (f = 0; f < 60 * 6; f++) {
+        game_update(&g, in, 1.0f / 60.0f);
+        if (k->respawned)
+            respawned = 1;
+        /* lap_start_t is reset as the event fires, so the thing to
+         * check is the time it actually recorded */
+        CHECK(!k->lap_event || k->last_lap_time > 5.0f,
+              "a lap of %.2f s was recorded around a respawn",
+              k->last_lap_time);
+    }
+
+    printf("lap timing across a respawn: %d laps before, %d after, "
+           "best %.2f -> %.2f\n", laps_before, k->laps_done, best_before,
+           k->best_lap_time);
+    CHECK(respawned, "the car never fell and respawned");
+    CHECK(k->laps_done <= laps_before + 1,
+          "a respawn added %d laps", k->laps_done - laps_before);
+    CHECK(k->best_lap_time <= 0.0f || k->best_lap_time > 5.0f,
+          "a respawn recorded a %.2f s best lap", k->best_lap_time);
+}
+
+/*
+ * The rivals have names, and those names have to survive being drawn by a
+ * HUD font with a limited alphabet and a narrow column.
+ */
+static void test_driver_names(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    int i, j;
+
+    game_init(&g, &cfg);
+    for (i = g.cfg.n_humans; i < NUM_KARTS; i++) {
+        const char *name = ai_driver_name(g.karts[i].driver_no);
+        int len = (int)strlen(name);
+        CHECK(len > 1 && len <= 8, "driver name \"%s\" is %d characters",
+              name, len);
+        for (j = 0; j < len; j++)
+            CHECK(name[j] >= 'A' && name[j] <= 'Z',
+                  "driver name \"%s\" has a character the HUD cannot draw",
+                  name);
+        for (j = g.cfg.n_humans; j < i; j++)
+            CHECK(strcmp(ai_driver_name(g.karts[j].driver_no), name) != 0,
+                  "two cars are both called %s", name);
+    }
+    printf("drivers: %s, %s, %s ... %s\n",
+           ai_driver_name(0), ai_driver_name(1), ai_driver_name(2),
+           ai_driver_name(NUM_KARTS - 2));
+}
+
+/* The tachometer's rev range is configurable, and has to make sense. */
+static void test_tacho_settings(void)
+{
+    GameSettings s;
+    char error[128];
+
+    game_settings_defaults(&s);
+    CHECK(s.tacho_redline_rpm > s.tacho_idle_rpm,
+          "the built-in redline is not above idle");
+    CHECK(config_load_settings_text(&s,
+              "{\"instruments\":{\"tacho_redline_rpm\":9500}}", error,
+              (int)sizeof(error)),
+          "a redline change was rejected: %s", error);
+    CHECK(fabsf(s.tacho_redline_rpm - 9500.0f) < 0.5f,
+          "the redline change did not take (%.0f)", s.tacho_redline_rpm);
+
+    game_settings_defaults(&s);
+    CHECK(!config_load_settings_text(&s,
+              "{\"instruments\":{\"tacho_redline_rpm\":400,"
+              "\"tacho_idle_rpm\":3000}}", error, (int)sizeof(error)),
+          "a redline below idle was accepted");
+    CHECK(fabsf(s.tacho_redline_rpm - 7800.0f) < 0.5f,
+          "a rejected instruments block was applied anyway");
+}
+
+/* The pre-race lap count overrides the circuit's own, within limits. */
+static void test_lap_count_override(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_BERTHOUD);
+    int automatic;
+
+    game_init(&g, &cfg);
+    automatic = g.track.laps;
+
+    cfg.laps_override = 5;
+    game_init(&g, &cfg);
+    CHECK(g.track.laps == 5, "lap override ignored (%d laps)", g.track.laps);
+
+    cfg.laps_override = 900;
+    game_init(&g, &cfg);
+    CHECK(g.track.laps <= 20, "an absurd lap override stuck (%d)",
+          g.track.laps);
+
+    cfg.laps_override = 0;
+    game_init(&g, &cfg);
+    CHECK(g.track.laps == automatic,
+          "clearing the override did not restore the circuit's %d laps",
+          automatic);
+    printf("lap override: BERTHOUD is %d laps automatically, 5 when asked\n",
+           automatic);
+}
+
+/* ------------------------------------------------------------------ */
 /* Chase camera                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -2204,6 +2401,11 @@ int main(void)
     test_ai_shift_styles();
     test_ai_can_fall();
     test_player_model_learns();
+    test_lap_times();
+    test_lap_times_survive_respawn();
+    test_lap_count_override();
+    test_driver_names();
+    test_tacho_settings();
     test_camera_reverse_swing();
     test_camera_no_snap_or_hunt();
     test_camera_follows_road_pitch();

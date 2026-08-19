@@ -757,6 +757,17 @@ int config_load_settings_text(GameSettings *settings, const char *json,
                          &s.ai_overcommit_overshoot_m,
                          error, error_cap))) goto fail;
 
+    obj = object_get(json, tokens, count, 0, "instruments");
+    if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
+        set_error(error, error_cap, "INSTRUMENTS NEED OBJECT");
+        goto fail;
+    }
+    if (obj >= 0 &&
+        (!optional_float(json, tokens, count, obj, "tacho_idle_rpm",
+                         &s.tacho_idle_rpm, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "tacho_redline_rpm",
+                         &s.tacho_redline_rpm, error, error_cap))) goto fail;
+
     obj = object_get(json, tokens, count, 0, "camera");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
         set_error(error, error_cap, "CAMERA NEEDS OBJECT");

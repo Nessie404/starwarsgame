@@ -40,6 +40,11 @@
     "overcommit_seconds": 1.15,
     "overcommit_overshoot_m": 1.10
   },
+  "instruments": {
+    "_comment": "The simulation has no crankshaft; the tachometer maps how far into the current gear the car is onto this rev range.",
+    "tacho_idle_rpm": 1200,
+    "tacho_redline_rpm": 7800
+  },
   "camera": {
     "_comment": "Distances in meters, rates per second. Each smoothing value is the fraction of the remaining error still left one second later: smaller is quicker, 0 snaps.",
     "distance_m": 9.0,

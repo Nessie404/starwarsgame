@@ -1,6 +1,6 @@
 # WiiKart future work
 
-These are design targets for releases after v1.4.0. Details may change after
+These are design targets for releases after v1.5.0. Details may change after
 testing, because apparently cars, mountains, and tires all object to being
 reduced to one convenient slider.
 
@@ -63,9 +63,11 @@ Left for later, now that the camera has somewhere to live:
 - [ ] Add per-car and optionally per-gear automatic shift ranges to `cars.json`,
   including configurable upshift/downshift points rather than only limiter
   speeds.
-- [ ] Add a numerical/digital tachometer alongside the existing rev band.
-- [ ] Make the tachometer band change colors as the engine moves through the
-  useful range, shift window, and limiter.
+- [x] Add a numerical/digital tachometer alongside the existing rev band.
+      *(v1.5.0, with idle and redline in `settings.json`.)*
+- [x] Make the tachometer band change colors as the engine moves through the
+  useful range, shift window, and limiter. *(v1.5.0: grey bogging, green
+  useful, amber shift window, red limiter, plus a shift-window mark.)*
 
 ## Drivers, AI, and persistent competition
 
@@ -73,22 +75,29 @@ Left for later, now that the camera has somewhere to live:
   aggressive drivers, poor drivers who overcommit, overly passive drivers,
   and dependable safe drivers rather than eleven variations of "quite good."
 - [ ] Give every AI driver a unique name, character, visual identity, strengths,
-  weaknesses, and stable behavior profile.
-- [ ] Add a continuously updating on-screen leaderboard based on current race
+  weaknesses, and stable behavior profile. *(v1.5.0 did the names, fixed to
+  grid slots; character, identity and per-driver strengths are still open and
+  belong with the skill/personality split above.)*
+- [x] Add a continuously updating on-screen leaderboard based on current race
   order and keep it visible without covering the useful driving view.
+      *(v1.5.0: right-edge column with position, driver and gap in seconds.)*
 - [ ] Add persistent driver standings, records, and player progress across
   sessions.
 - [ ] Record exceptional player laps and use their racing-line/braking data to
   improve selected NPC behavior on later runs. Include reset/export controls
   so a heroic accident does not become mandatory curriculum forever.
 
-## Laps and timing
+## Laps and timing — done in v1.5.0
 
-- [ ] Show a brief per-player lap-complete popup inside that player's viewport.
-- [ ] Track and display individual current, previous, and best lap times for
+- [x] Show a brief per-player lap-complete popup inside that player's viewport.
+- [x] Track and display individual current, previous, and best lap times for
   every human and AI driver.
-- [ ] Expand lap-count customization beyond the existing per-track JSON
+- [x] Expand lap-count customization beyond the existing per-track JSON
   override, including an accessible pre-race option and sensible validation.
+
+Still open:
+
+- [ ] Keep lap times between races and show a session best per circuit.
 
 ## Tires and surfaces
 

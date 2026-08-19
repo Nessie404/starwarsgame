@@ -122,6 +122,8 @@ void game_settings_defaults(GameSettings *s)
     s->cam_pitch_smoothing = 0.05f;
     s->cam_pitch_min_deg = -20.0f;
     s->cam_pitch_max_deg = 20.0f;
+    s->tacho_idle_rpm = 1200.0f;
+    s->tacho_redline_rpm = 7800.0f;
     s->fall_seconds = 1.10f;
     s->respawn_black_seconds = 1.0f;
     s->respawn_fade_seconds = 0.8f;
@@ -179,6 +181,10 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
     FINITE_RANGE(s->push_seconds, 0.1f, 60.0f, "BAD PUSH TIME");
     FINITE_RANGE(s->fresh_tire_grip_mult, 1.0f, 2.0f, "BAD FRESH GRIP");
     FINITE_RANGE(s->fresh_tire_seconds, 0.1f, 60.0f, "BAD FRESH TIME");
+    FINITE_RANGE(s->tacho_idle_rpm, 0.0f, 20000.0f, "BAD IDLE RPM");
+    FINITE_RANGE(s->tacho_redline_rpm, 500.0f, 30000.0f, "BAD REDLINE");
+    if (s->tacho_redline_rpm <= s->tacho_idle_rpm)
+        return settings_error(error, error_cap, "REDLINE BELOW IDLE");
     FINITE_RANGE(s->cam_distance_m, 2.0f, 40.0f, "BAD CAM DISTANCE");
     FINITE_RANGE(s->cam_height_m, 0.5f, 20.0f, "BAD CAM HEIGHT");
     FINITE_RANGE(s->cam_min_height_m, 0.2f, 10.0f, "BAD CAM CLEARANCE");
@@ -348,6 +354,24 @@ const char *ai_strategy_name(int strategy)
     if (strategy < 0 || strategy >= AI_STRATEGY_COUNT)
         return "BALANCED";
     return ai_strategies[strategy].name;
+}
+
+/*
+ * The eleven rivals. Short enough for a leaderboard column, and each one
+ * keeps its grid slot from race to race so "SANDOVAL again" means
+ * something. Strategy still comes from the sheet rota, so a name is an
+ * identity rather than a second copy of the behaviour.
+ */
+const char *ai_driver_name(int grid_slot)
+{
+    static const char *names[] = {
+        "HOLT",   "RENARD", "BASTIEN", "OSEI",   "TANAHA", "DELGADO",
+        "CROSS",  "IBARRA",  "NORDLI",  "SOLANO", "PETRAN"
+    };
+    int n = (int)(sizeof(names) / sizeof(names[0]));
+    if (grid_slot < 0)
+        grid_slot = -grid_slot;
+    return names[grid_slot % n];
 }
 
 /* what this driver currently believes about the corner at `seg` */
@@ -571,6 +595,13 @@ void game_init(Game *g, const GameConfig *cfg)
         kart_specs_reset_defaults();
 
     track_init_with_settings(&g->track, cfg->track_id, &g->settings);
+    /* a lap count chosen in the menu beats both the circuit's own count
+     * and the automatic one, within the same sane limits */
+    if (cfg->laps_override > 0) {
+        g->track.laps = cfg->laps_override;
+        if (g->track.laps > 20)
+            g->track.laps = 20;
+    }
 
     for (i = 0; i < NUM_KARTS; i++) {
         Kart *k = &g->karts[i];
@@ -597,6 +628,7 @@ void game_init(Game *g, const GameConfig *cfg)
             int c;
 
             k->human = -1;
+            k->driver_no = ai_no;
             k->spec = ai_no % kart_spec_count;
             k->paint_idx = (i * 3 + 2) % PAINT_COUNT;
             k->strategy = ai_no % AI_STRATEGY_COUNT;
@@ -1069,6 +1101,8 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     k->hit_wall = 0;
     k->got_item = 0;
     k->respawned = 0;
+    k->lap_event = 0;
+    k->lap_best_event = 0;
 
     if (k->invincible_t > 0.0f) {
         k->invincible_t -= dt;
@@ -1497,7 +1531,39 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
             scale = ai_power_scale(g, k);
             k->power_timer = k->power_held ? k->power_timer + dt : 0.0f;
         }
-        kart_step(g, k, &in, dt, scale);
+        {
+            int lap_before = k->lap;
+
+            kart_step(g, k, &in, dt, scale);
+
+            /*
+             * A lap is only a lap when the car drives across the line:
+             * exactly one more than it had, and long enough ago to be
+             * real. Anything else — a respawn, a car rolling backwards
+             * over the line — leaves the stopwatch alone.
+             */
+            /*
+             * The grid is behind the line, so the very first crossing
+             * starts lap one rather than completing anything: the car has
+             * not been round yet. Counting it timed the rollout as a lap.
+             */
+            if (k->lap == lap_before + 1 && k->lap >= 1 && !k->finished) {
+                float t_lap = g->race_t - k->lap_start_t;
+                if (t_lap > 1.0f) {
+                    k->last_lap_time = t_lap;
+                    if (k->best_lap_time <= 0.0f ||
+                        t_lap < k->best_lap_time) {
+                        k->best_lap_time = t_lap;
+                        k->lap_best_event = 1;
+                    }
+                    k->laps_done++;
+                    k->lap_event = 1;
+                }
+                k->lap_start_t = g->race_t;
+            } else if (k->lap != lap_before) {
+                k->lap_start_t = g->race_t;   /* the lap was not driven */
+            }
+        }
 
         if (k->human < 0)
             ai_learn(g, k);
