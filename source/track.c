@@ -263,7 +263,7 @@ static const TrackDef track_defs[TRACK_COUNT] = {
       CP_MONARCH,  (int)(sizeof(CP_MONARCH)  / sizeof(CP_MONARCH[0])),
       4.3f,  5.3f, W_MONARCH, 1, 0, 0.94f, 1.16f, /* high, unguarded    */
       ITEMS_MONARCH, 4 },
-    { "BREAHNECH",   /* BREAKNECK; the HUD font has no K                */
+    { "BREAKNECK",
       CP_BREAKNECK, (int)(sizeof(CP_BREAKNECK) / sizeof(CP_BREAKNECK[0])),
       3.7f,  4.5f, W_BREAKNECK, 1, 0, 1.15f, 0.32f, /* steep, unguarded */
       ITEMS_BREAKNECK, 3 },

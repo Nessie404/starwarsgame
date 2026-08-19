@@ -2310,6 +2310,97 @@ static void test_car_shift_points(void)
           "a rejected car file was applied anyway");
 }
 
+/*
+ * The whole point of cars.json is that editing a number in the file
+ * changes the car in the garage. Walk that path end to end — read the
+ * shipped file, change one value, write it somewhere else, load it as the
+ * game does, and check the roster — because "I am not sure the JSON
+ * works" deserves a test rather than an opinion.
+ */
+static void test_editing_cars_json_changes_the_car(void)
+{
+    char error[128];
+    char *text;
+    long len;
+    FILE *f;
+    const char *tmp = "wiikart-test-cars.json";
+    char *edited;
+    const char *needle = "\"power_hp\": 150";
+    char *at;
+    int i, sport = -1;
+
+    /* the file as shipped */
+    kart_specs_reset_defaults();
+    CHECK(config_load_cars_file("config/cars.json", error,
+                                (int)sizeof(error)),
+          "the shipped cars.json did not load: %s", error);
+    for (i = 0; i < kart_spec_count; i++)
+        if (strcmp(kart_specs[i].name, "SPORT") == 0) sport = i;
+    CHECK(sport >= 0, "the shipped roster has no SPORT");
+    if (sport < 0) return;
+    CHECK(fabsf(kart_specs[sport].power_hp - 150.0f) < 0.5f,
+          "SPORT starts at %.0f hp, not the 150 the file says",
+          kart_specs[sport].power_hp);
+
+    f = fopen("config/cars.json", "rb");
+    CHECK(f != NULL, "could not reopen the shipped cars.json");
+    if (!f) return;
+    fseek(f, 0, SEEK_END);
+    len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    text = (char *)malloc((size_t)len + 1);
+    edited = (char *)malloc((size_t)len + 32);
+    if (!text || !edited) { fclose(f); free(text); free(edited); return; }
+    len = (long)fread(text, 1, (size_t)len, f);
+    text[len] = '\0';
+    fclose(f);
+
+    /* the edit a player would make: give SPORT more power */
+    at = strstr(text, needle);
+    CHECK(at != NULL, "cars.json no longer contains %s", needle);
+    if (!at) { free(text); free(edited); return; }
+    {
+        long head = (long)(at - text);
+        memcpy(edited, text, (size_t)head);
+        edited[head] = '\0';
+        strcat(edited, "\"power_hp\": 210");
+        strcat(edited, at + strlen(needle));
+    }
+
+    f = fopen(tmp, "wb");
+    CHECK(f != NULL, "could not write a test copy of cars.json");
+    if (f) {
+        fwrite(edited, 1, strlen(edited), f);
+        fclose(f);
+
+        kart_specs_reset_defaults();
+        CHECK(config_load_cars_file(tmp, error, (int)sizeof(error)),
+              "the edited cars.json was rejected: %s", error);
+        sport = -1;
+        for (i = 0; i < kart_spec_count; i++)
+            if (strcmp(kart_specs[i].name, "SPORT") == 0) sport = i;
+        CHECK(sport >= 0 &&
+              fabsf(kart_specs[sport].power_hp - 210.0f) < 0.5f,
+              "editing the file did not change the car (%.0f hp)",
+              sport >= 0 ? kart_specs[sport].power_hp : -1.0f);
+        printf("cars.json edit: SPORT 150 hp -> %.0f hp in the garage\n",
+               sport >= 0 ? kart_specs[sport].power_hp : -1.0f);
+        remove(tmp);
+    }
+
+    /* a file that is not there must fail cleanly and change nothing */
+    kart_specs_reset_defaults();
+    CHECK(!config_load_cars_file("config/does-not-exist.json", error,
+                                 (int)sizeof(error)),
+          "loading a missing file reported success");
+    CHECK(kart_spec_count == DEFAULT_SPEC_COUNT,
+          "a missing file disturbed the roster");
+
+    free(text);
+    free(edited);
+    kart_specs_reset_defaults();
+}
+
 /* ------------------------------------------------------------------ */
 /* Lap timing                                                          */
 /* ------------------------------------------------------------------ */
@@ -2926,6 +3017,7 @@ int main(void)
     test_ai_shift_styles();
     test_ai_can_fall();
     test_player_model_learns();
+    test_editing_cars_json_changes_the_car();
     test_grade_costs_speed();
     test_grade_costs_grip();
     test_car_shift_points();

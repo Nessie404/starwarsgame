@@ -5,6 +5,24 @@ invalid, WiiKart keeps the compiled defaults for that file and shows a
 short status on the setup screen. A broken car entry therefore cannot
 leave the garage half-loaded.
 
+## Is it working?
+
+Open **JSON CONFIG** on the main menu. It shows where the game read from,
+whether each of the three files loaded, and the car roster it ended up
+with — for example `4 CARS  RACER 48 HP`. Edit `power_hp` for that car,
+restart, and if the screen shows the new number, your file is being used.
+If it says `BUILT IN CONFIG` or `NO SD CARD FOUND`, the game never saw a
+file, and the lines on that screen say where it looked.
+
+**In Dolphin this needs an emulated SD card.** Opening `wiikart.dol` on
+its own gives the game no filesystem at all, so the JSON beside it cannot
+be read and the compiled-in defaults are used. Turn on
+**Config → Wii → Insert SD Card** (Dolphin's SD image lives in its `Load`
+folder; recent versions can also sync a folder into it), put the `apps`
+folder from the release on that card, and launch
+`sd:/apps/wiikart/boot.dol`. On a real Wii through the Homebrew Channel it
+works with no setup — the files sit next to the app on your own SD card.
+
 ## Where the files go
 
 On a real Wii or Dolphin virtual SD card, keep this directory beside the

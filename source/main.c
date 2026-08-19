@@ -42,6 +42,16 @@ static GameSettings app_settings;
 static ControlConfig control_config;
 static char config_banner[48];
 static char config_detail[48];
+/*
+ * What actually happened when the JSON was looked for, kept in full so the
+ * CONFIG screen can show it. "I am not sure the JSON works" is a fair
+ * thing to wonder when the only answer on screen is a three-character
+ * banner, so the game now says where it looked, what it found, and what
+ * the numbers came out as.
+ */
+static char config_where[72];              /* the folder it read from   */
+static char config_file_status[3][40];     /* settings / cars / controls */
+static char config_proof[48];              /* a value you can check      */
 
 /* app flow */
 enum { APP_MENU = 0, APP_RACE = 1 };
@@ -107,82 +117,120 @@ static int make_config_path(char *out, int cap, const char *root,
     return n > 0 && n < cap;
 }
 
+/*
+ * Look for one config file. Every plausible place a person might have put
+ * it is tried, in both the layout the release ships (a config folder
+ * beside boot.dol) and the flatter one people tend to improvise (the file
+ * dropped straight in). Returns 1 and fills `out` with the first hit.
+ */
+static int find_config_file(const char *name, char *out, int cap,
+                            char *root_out, int root_cap, int argc,
+                            char **argv)
+{
+    char roots[8][160];
+    int n = 0, i, layout;
+
+    if (argc > 0 && argv && argv[0] && strchr(argv[0], '/')) {
+        char *slash;
+        snprintf(roots[n], sizeof(roots[0]), "%s", argv[0]);
+        slash = strrchr(roots[n], '/');
+        if (slash) { *slash = '\0'; n++; }
+    }
+    snprintf(roots[n++], sizeof(roots[0]), "sd:/apps/wiikart");
+    snprintf(roots[n++], sizeof(roots[0]), "usb:/apps/wiikart");
+    snprintf(roots[n++], sizeof(roots[0]), "sd:/wiikart");
+    snprintf(roots[n++], sizeof(roots[0]), "usb:/wiikart");
+    snprintf(roots[n++], sizeof(roots[0]), "sd:");
+    snprintf(roots[n++], sizeof(roots[0]), ".");
+
+    for (i = 0; i < n; i++) {
+        for (layout = 0; layout < 2; layout++) {
+            int written = layout == 0
+                ? snprintf(out, (size_t)cap, "%s/config/%s", roots[i], name)
+                : snprintf(out, (size_t)cap, "%s/%s", roots[i], name);
+            if (written <= 0 || written >= cap)
+                continue;
+            if (readable_file(out)) {
+                if (root_out && root_cap > 0)
+                    snprintf(root_out, (size_t)root_cap, "%s%s", roots[i],
+                             layout == 0 ? "/CONFIG" : "");
+                return 1;
+            }
+        }
+    }
+    out[0] = '\0';
+    return 0;
+}
+
 static void load_editable_config(int argc, char **argv)
 {
-    char roots[4][256];
     char path[320];
     char error[48];
-    const char *root = NULL;
-    int n_roots = 0, i, loaded = 0, failed = 0;
+    int loaded = 0, failed = 0, found = 0, i;
 
     game_settings_defaults(&app_settings);
     control_config_defaults(&control_config);
     kart_specs_reset_defaults();
     config_banner[0] = config_detail[0] = '\0';
+    config_where[0] = config_proof[0] = '\0';
+    for (i = 0; i < 3; i++)
+        snprintf(config_file_status[i], sizeof(config_file_status[0]),
+                 "NOT FOUND");
 
-    /* libfat is optional at runtime. Directly opening the DOL in Dolphin
-     * still works with compiled defaults; a virtual SD card or real Wii
-     * makes the adjacent JSON files editable without rebuilding. */
-    (void)fatInitDefault();
+    /* libfat is optional at runtime. Opening the DOL straight in Dolphin
+     * with no SD card still works, on compiled-in defaults; a virtual SD
+     * card or a real Wii makes the JSON files editable. */
+    if (!fatInitDefault())
+        snprintf(config_where, sizeof(config_where), "NO SD CARD FOUND");
 
-    if (argc > 0 && argv && argv[0] && strchr(argv[0], '/')) {
-        char *slash;
-        snprintf(roots[n_roots], sizeof(roots[n_roots]), "%s", argv[0]);
-        slash = strrchr(roots[n_roots], '/');
-        if (slash) {
-            *slash = '\0';
-            n_roots++;
-        }
-    }
-    snprintf(roots[n_roots++], sizeof(roots[0]), "sd:/apps/wiikart");
-    snprintf(roots[n_roots++], sizeof(roots[0]), "usb:/apps/wiikart");
-    snprintf(roots[n_roots++], sizeof(roots[0]), ".");
-
-    for (i = 0; i < n_roots; i++) {
-        if ((make_config_path(path, (int)sizeof(path), roots[i],
-                              "settings.json") && readable_file(path)) ||
-            (make_config_path(path, (int)sizeof(path), roots[i],
-                              "cars.json") && readable_file(path)) ||
-            (make_config_path(path, (int)sizeof(path), roots[i],
-                              "controls.json") && readable_file(path))) {
-            root = roots[i];
-            break;
-        }
-    }
-
-    if (!root) {
-        snprintf(config_banner, sizeof(config_banner), "BUILT IN CONFIG");
-        return;
-    }
-
-#define LOAD_ONE(filename, call)                                           \
+    /* the first file that turns up names the folder shown on screen */
+#define WHERE_SLOT (found ? NULL : config_where)
+#define LOAD_ONE(slot, filename, call)                                     \
     do {                                                                   \
-        if (make_config_path(path, (int)sizeof(path), root, filename) &&   \
-            readable_file(path)) {                                         \
-            if (call) loaded++;                                            \
-            else {                                                         \
+        if (find_config_file(filename, path, (int)sizeof(path),            \
+                             WHERE_SLOT, (int)sizeof(config_where),        \
+                             argc, argv)) {                                \
+            found++;                                                       \
+            if (call) {                                                    \
+                loaded++;                                                  \
+                snprintf(config_file_status[slot],                         \
+                         sizeof(config_file_status[0]), "LOADED");         \
+            } else {                                                       \
                 failed++;                                                  \
+                snprintf(config_file_status[slot],                         \
+                         sizeof(config_file_status[0]), "%s", error);      \
                 if (!config_detail[0])                                     \
-                    snprintf(config_detail, sizeof(config_detail), "%s", \
+                    snprintf(config_detail, sizeof(config_detail), "%s",   \
                              error);                                       \
             }                                                              \
         }                                                                  \
     } while (0)
 
-    LOAD_ONE("settings.json",
+    LOAD_ONE(0, "settings.json",
              config_load_settings_file(&app_settings, path, error,
                                        (int)sizeof(error)));
-    LOAD_ONE("cars.json",
+    LOAD_ONE(1, "cars.json",
              config_load_cars_file(path, error, (int)sizeof(error)));
-    LOAD_ONE("controls.json",
+    LOAD_ONE(2, "controls.json",
              config_load_controls_file(&control_config, path, error,
                                        (int)sizeof(error)));
 #undef LOAD_ONE
+#undef WHERE_SLOT
 
-    if (failed)
+    /* something you can check against the file you edited */
+    snprintf(config_proof, sizeof(config_proof), "%d CARS  %s %d HP",
+             kart_spec_count, kart_specs[0].name,
+             (int)kart_specs[0].power_hp);
+
+    if (!found) {
+        snprintf(config_banner, sizeof(config_banner), "BUILT IN CONFIG");
+        if (!config_where[0])
+            snprintf(config_where, sizeof(config_where), "NO JSON FOUND");
+    } else if (failed) {
         snprintf(config_banner, sizeof(config_banner), "CONFIG ERROR");
-    else
+    } else {
         snprintf(config_banner, sizeof(config_banner), "CONFIG %d/3", loaded);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1538,6 +1586,36 @@ static void draw_minimap(const Track *t, int with_karts,
     }
     GX_End();
 
+    /*
+     * The finish line, drawn across the road at segment 0: a black and
+     * white gate with a flag beside it, so the minimap says where the lap
+     * ends rather than leaving you to guess which bend is the last one.
+     */
+    {
+        float lx = -t->dz[0], lz = t->dx[0];
+        float half = track_road_half(t, 0) * 1.9f;   /* readable at this
+                                                      * scale rather than
+                                                      * true to width */
+        float ax = ox + (t->px[0] + lx * half - t->min_x) * scale;
+        float ay = oy + (t->max_z - (t->pz[0] + lz * half)) * scale;
+        float bx = ox + (t->px[0] - lx * half - t->min_x) * scale;
+        float by = oy + (t->max_z - (t->pz[0] - lz * half)) * scale;
+        int c;
+
+        for (c = 0; c < 4; c++) {
+            float f0 = (float)c / 4.0f, f1 = (float)(c + 1) / 4.0f;
+            u8 v = (c & 1) ? 25 : 245;
+            float x0 = ax + (bx - ax) * f0, y0 = ay + (by - ay) * f0;
+            float x1 = ax + (bx - ax) * f1, y1 = ay + (by - ay) * f1;
+            float w = fabsf(x1 - x0) + 2.5f, h = fabsf(y1 - y0) + 2.5f;
+            hud_rect((x0 < x1 ? x0 : x1) - 1.0f, (y0 < y1 ? y0 : y1) - 1.0f,
+                     w, h, v, v, v, 255);
+        }
+        /* a little flag on the pole at one end */
+        hud_rect(ax - 1.0f, ay - 9.0f, 2.0f, 9.0f, 235, 235, 240, 235);
+        hud_rect(ax + 1.0f, ay - 9.0f, 6.0f, 4.0f, 235, 60, 60, 235);
+    }
+
     if (!with_karts)
         return;
     for (i = NUM_KARTS - 1; i >= 0; i--) {
@@ -1671,6 +1749,54 @@ static void draw_lap_popup(int p, float vx, float vy, float vw, float vh)
     if (lap_popup_best[p])
         hud_text(vx + vw * 0.5f - hud_text_width(10.0f, "BEST LAP") * 0.5f,
                  y + 54.0f, 10.0f, 17.0f, "BEST LAP", 255, 225, 80,
+                 (u8)(235.0f * a));
+}
+
+/*
+ * Where the line is, from the car's point of view. The distance to it is
+ * always worth knowing on the last lap, and worth knowing at all once you
+ * are close, so the marker fades in over the final stretch: a checkered
+ * flag, the distance, and FINAL LAP when this is the one that counts.
+ */
+static void draw_finish_marker(int p, float vx, float vy, float vw,
+                               float vh)
+{
+    const Kart *k = &game.karts[p];
+    const Track *t = &game.track;
+    float m_per_seg = t->total_len / (float)t->n;
+    float to_line = ((float)t->n - k->prog_raw) * m_per_seg;
+    int final_lap = (k->lap + 1 >= t->laps);
+    float show_from = final_lap ? 400.0f : 220.0f;
+    float x, y, a;
+    char buf[24];
+    int c;
+
+    if (game.state != STATE_RACING || k->finished)
+        return;
+    if (to_line < 0.0f)
+        to_line += t->total_len;              /* just crossed it */
+    if (to_line > show_from)
+        return;
+
+    a = 1.0f - (to_line / show_from) * 0.45f;   /* firms up as it nears */
+    x = vx + vw * 0.5f - 46.0f;
+    y = vy + vh * 0.18f;
+
+    /* a small checkered flag, drawn as squares */
+    for (c = 0; c < 8; c++) {
+        int col = c & 3, row = (c >> 2) & 1;
+        u8 v = ((col + row) & 1) ? 30 : 240;
+        hud_rect(x + (float)col * 5.0f, y + (float)row * 5.0f, 5.0f, 5.0f,
+                 v, v, v, (u8)(235.0f * a));
+    }
+
+    snprintf(buf, sizeof(buf), "%d M", (int)to_line);
+    hud_text(x + 26.0f, y - 1.0f, 10.0f, 17.0f, buf,
+             final_lap ? 255 : 225, final_lap ? 225 : 230,
+             final_lap ? 90 : 240, (u8)(240.0f * a));
+    if (final_lap)
+        hud_text(vx + vw * 0.5f - hud_text_width(9.0f, "FINAL LAP") * 0.5f,
+                 y + 16.0f, 9.0f, 15.0f, "FINAL LAP", 255, 210, 70,
                  (u8)(235.0f * a));
 }
 
@@ -1887,6 +2013,7 @@ static void draw_player_hud(int p)
     }
 
     draw_leaderboard(p, vx, vy, vw, vh);
+    draw_finish_marker(p, vx, vy, vw, vh);
     draw_lap_popup(p, vx, vy, vw, vh);
 
     /* just been fished out of the void */
@@ -2260,7 +2387,8 @@ static void menu_update_track_preview(void)
  * button. Nothing is a one-way door.
  */
 enum {
-    RK_PLAYERS = 0, RK_TRACK, RK_LAPS, RK_GARAGE, RK_START, RK_EXIT, /* setup */
+    RK_PLAYERS = 0, RK_TRACK, RK_LAPS, RK_GARAGE, RK_CONFIG, RK_START,
+    RK_EXIT,                                                  /* setup   */
     RK_CAR, RK_PAINT, RK_GEARBOX, RK_TIRES, RK_DONE           /* garage  */
 };
 
@@ -2276,7 +2404,7 @@ static int garage_player;
 static char menu_msg[44];
 static float menu_msg_t;
 
-enum { SCREEN_SETUP = 0, SCREEN_GARAGE = 1 };
+enum { SCREEN_SETUP = 0, SCREEN_GARAGE = 1, SCREEN_CONFIG = 2 };
 
 static void menu_notice(const char *text)
 {
@@ -2300,9 +2428,14 @@ static void build_rows(void)
             menu_rows[n_menu_rows].kind = RK_GARAGE;
             menu_rows[n_menu_rows++].player = p;
         }
+        menu_rows[n_menu_rows].kind = RK_CONFIG;
+        menu_rows[n_menu_rows++].player = 0;
         menu_rows[n_menu_rows].kind = RK_START;
         menu_rows[n_menu_rows++].player = 0;
         menu_rows[n_menu_rows].kind = RK_EXIT;
+        menu_rows[n_menu_rows++].player = 0;
+    } else if (menu_screen == SCREEN_CONFIG) {
+        menu_rows[n_menu_rows].kind = RK_DONE;
         menu_rows[n_menu_rows++].player = 0;
     } else {
         menu_rows[n_menu_rows].kind = RK_CAR;
@@ -2328,6 +2461,7 @@ static void row_label(const MenuRow *r, char *out, int cap)
     case RK_PLAYERS: snprintf(out, cap, "PLAYERS");            break;
     case RK_TRACK:   snprintf(out, cap, "TRACH");              break;
     case RK_LAPS:    snprintf(out, cap, "LAPS");               break;
+    case RK_CONFIG:  snprintf(out, cap, "JSON CONFIG");        break;
     case RK_GARAGE:  snprintf(out, cap, "P%d GARAGE", r->player + 1); break;
     case RK_START:   snprintf(out, cap, "GO");                 break;
     case RK_EXIT:    snprintf(out, cap, "EXIT");               break;
@@ -2351,6 +2485,9 @@ static void row_value(const MenuRow *r, char *out, int cap)
         else
             snprintf(out, cap, "%d", sel_laps);
         break;
+    case RK_CONFIG:  snprintf(out, cap, "%s", config_banner[0]
+                                             ? config_banner
+                                             : "BUILT IN");            break;
     case RK_GARAGE:  snprintf(out, cap, "%s",
                               kart_specs[sel_spec[p] % kart_spec_count].name); break;
     case RK_CAR:     snprintf(out, cap, "%s",
@@ -2501,6 +2638,11 @@ static void activate_row(const MenuRow *r)
         menu_row = 0;
         audio_beep(880.0f, 60, 140);
         break;
+    case RK_CONFIG:
+        menu_screen = SCREEN_CONFIG;
+        menu_row = 0;
+        audio_beep(760.0f, 60, 140);
+        break;
     case RK_START:
         try_start_race();
         break;
@@ -2552,6 +2694,64 @@ static void draw_row_list(float x, float y0, float rowh, float value_x)
             }
         }
     }
+}
+
+/*
+ * The JSON screen: where the game looked, what it found, whether each
+ * file parsed, and a number you can check against the file you edited.
+ * If cars.json says SPORT has 210 hp and this screen says 210 HP, it
+ * worked; if it says 150, the game never read your file, and the lines
+ * above say why.
+ */
+static void draw_config_screen(void)
+{
+    float W = (float)rmode->fbWidth;
+    float H = (float)rmode->efbHeight;
+    static const char *names[3] = { "SETTINGS.JSON", "CARS.JSON",
+                                    "CONTROLS.JSON" };
+    float y;
+    int i;
+
+    hud_ortho_fullscreen();
+    hud_rect(0.0f, 0.0f, W, H, 18, 24, 40, 255);
+    hud_text(W * 0.5f - hud_text_width(20.0f, "JSON CONFIG") * 0.5f, 22.0f,
+             20.0f, 34.0f, "JSON CONFIG", 230, 210, 90, 255);
+
+    y = 84.0f;
+    hud_text(48.0f, y, 9.0f, 15.0f, "READ FROM", 150, 158, 175, 220);
+    hud_text(170.0f, y, 9.0f, 15.0f,
+             config_where[0] ? config_where : "NOWHERE", 225, 228, 238, 235);
+    y += 26.0f;
+
+    for (i = 0; i < 3; i++) {
+        int ok = (strcmp(config_file_status[i], "LOADED") == 0);
+        int missing = (strcmp(config_file_status[i], "NOT FOUND") == 0);
+        hud_text(48.0f, y, 9.0f, 15.0f, names[i], 190, 195, 210, 225);
+        hud_text(230.0f, y, 9.0f, 15.0f, config_file_status[i],
+                 ok ? 120 : (missing ? 170 : 255),
+                 ok ? 215 : (missing ? 175 : 150),
+                 ok ? 140 : (missing ? 190 : 90), 235);
+        y += 20.0f;
+    }
+
+    y += 10.0f;
+    hud_text(48.0f, y, 9.0f, 15.0f, "IN THE GARAGE NOW", 150, 158, 175, 220);
+    y += 18.0f;
+    hud_text(48.0f, y, 11.0f, 18.0f, config_proof, 235, 235, 245, 240);
+    y += 32.0f;
+
+    /* how to make it work, for the case where it did not */
+    hud_text(48.0f, y, 8.0f, 13.0f, "PUT THE CONFIG FOLDER NEXT TO BOOT.DOL",
+             150, 158, 175, 210);
+    y += 16.0f;
+    hud_text(48.0f, y, 8.0f, 13.0f, "SD:/APPS/WIIKART/CONFIG/CARS.JSON",
+             150, 158, 175, 210);
+    y += 16.0f;
+    hud_text(48.0f, y, 8.0f, 13.0f,
+             "IN DOLPHIN TURN ON CONFIG - WII - INSERT SD CARD",
+             150, 158, 175, 210);
+
+    draw_row_list(48.0f, H - 74.0f, 26.0f, 190.0f);
 }
 
 static void draw_setup_screen(void)
@@ -2735,7 +2935,7 @@ static void menu_frame(float dt)
     if (menu_activate())
         activate_row(&menu_rows[menu_row]);
     else if (menu_back()) {
-        if (menu_screen == SCREEN_GARAGE) {
+        if (menu_screen != SCREEN_SETUP) {
             menu_screen = SCREEN_SETUP;
             menu_row = 0;
             audio_beep(560.0f, 50, 120);
@@ -2752,6 +2952,8 @@ static void menu_frame(float dt)
     if (menu_screen == SCREEN_GARAGE) {
         draw_garage_scene(sel_paint[garage_player]);
         draw_garage_overlay(garage_player);
+    } else if (menu_screen == SCREEN_CONFIG) {
+        draw_config_screen();
     } else {
         draw_setup_screen();
     }

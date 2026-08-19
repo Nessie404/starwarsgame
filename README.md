@@ -1,4 +1,4 @@
-# WiiKart 1.8.0
+# WiiKart 1.9.0
 
 An original racing game built as **Nintendo Wii homebrew**. It compiles to
 a real Wii executable (`wiikart.dol`) that runs in the
@@ -18,9 +18,9 @@ on the [v0.1 release](https://github.com/Nessie404/starwarsgame/releases/tag/v0.
 
 See [CHANGELOG.md](CHANGELOG.md) for the release-by-release inventory and
 [TODO.md](TODO.md) for proposed future work that is explicitly not part of
-v1.8.0.
+v1.9.0.
 
-Version 1.8.0 is a semi-sim mountain racer: pick a car in the garage —
+Version 1.9.0 is a semi-sim mountain racer: pick a car in the garage —
 its gearbox, tires and paint, all defined by real-world performance
 numbers — then race a **field of eleven AI drivers who each race
 differently, shift differently, learn from their mistakes, and adapt to
@@ -72,6 +72,9 @@ hairpins.
 - **v1.8.0** — tires with temperature and wear, so softs win sprints and
   lose long races, with a readout on the HUD and every parameter in
   `settings.json`.
+- **v1.9.0** — a finish line you can see, on the minimap and in the race
+  view, and a JSON CONFIG screen that tells you whether your edited files
+  were actually read.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -202,6 +205,24 @@ hairpins.
   **W** is the throttle, **S** the brake (arrow keys mirror all four).
 - **Wii Remote (emulated or real):** sideways grip, tilt to steer —
   Nunchuk and Classic Controller also work.
+
+### Editing the JSON in Dolphin
+
+`config/cars.json`, `config/settings.json` and `config/controls.json` are
+read at startup — but **Dolphin only gives the game a filesystem when an
+SD card is inserted**. Opening `wiikart.dol` by itself means the JSON next
+to it cannot be read at all, and the built-in defaults are used silently.
+
+1. Dolphin → **Config → Wii → Insert SD Card**.
+2. Put the release's `apps` folder onto that card, so the game finds
+   `sd:/apps/wiikart/config/cars.json`.
+3. Launch `boot.dol` from there.
+
+Then open **JSON CONFIG** on the main menu: it shows where the files were
+read from, whether each one loaded or why it did not, and the roster that
+resulted (`4 CARS  RACER 48 HP`) — change a number in the file, restart,
+and watch that line change. On a real Wii through the Homebrew Channel
+there is nothing to set up; the files sit beside the app.
 
 ### Getting a sharper picture
 

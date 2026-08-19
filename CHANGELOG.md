@@ -4,6 +4,33 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.9.0] - 2026-08-19
+
+### Added
+
+- Finish-line marker on the minimap: a black and white gate drawn across
+  the road at the line, with a flag beside it.
+- Finish-line marker in the race view: a checkered flag and the distance
+  to the line, fading in over the last 220 m of a lap and the last 400 m
+  of the final one, where it also reads FINAL LAP.
+- A **JSON CONFIG** screen on the main menu showing where the config files
+  were read from, whether each of the three loaded (or the parse error
+  that stopped it), and the resulting roster — a number you can check
+  against the file you edited.
+
+### Changed
+
+- Config files are now searched for one at a time across several
+  locations, in both the shipped layout (`config/` beside `boot.dol`) and
+  the flat one people improvise (the file dropped straight in), so a
+  reasonable guess at where to put them works.
+- When no SD card is present the game says so on that screen instead of
+  quietly using built-in defaults. In Dolphin an emulated SD card is what
+  makes the JSON readable at all; the README and `config/README.md` now
+  say that plainly.
+- Breakneck Pass is spelled properly: the HUD font gained the missing
+  letters in 1.3.0, so the name no longer has to be written BREAHNECH.
+
 ## [1.8.0] - 2026-08-19
 
 ### Added
@@ -221,6 +248,7 @@ artifacts and their longer descriptions remain available on the
   strategies, learning, driver adaptation, Berthoud and Loveland Pass, and
   motorsport-style power-ups.
 
+[1.9.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.9.0
 [1.8.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.8.0
 [1.7.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.7.0
 [1.6.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.6.0
