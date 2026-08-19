@@ -340,6 +340,12 @@ struct GameSettings {
     float respawn_fade_seconds;
     float invincible_seconds;
     float invincible_flash_hz;
+
+    /* the wrong-way marshal: how long a human can drive back down the
+     * circuit before the helicopter arrives, and how much engine it
+     * leaves them once it has */
+    float wrong_way_seconds;
+    float wrong_way_power;
 };
 
 void game_settings_defaults(GameSettings *s);

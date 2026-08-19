@@ -2502,6 +2502,96 @@ static void test_whole_field_survives_the_flag(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* The wrong-way marshal                                               */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Turn the human around on CLASSIC and hold the throttle down. The
+ * marshal should not be instant (a three-point turn at a hairpin should
+ * not trip it), but it should show up well before it would let a driver
+ * complete a lap backward, and once it has, the car should be nowhere
+ * near as fast as one that was never caught.
+ */
+static void test_wrong_way_marshal_cuts_power(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    Kart *k;
+    float speed_hist[60 * 6];
+    const int n = 60 * 6;
+    int f, flag_frame = -1;
+    float accel_before, accel_after;
+    const float pi = 3.14159265358979f;
+
+    game_init(&g, &cfg);
+    idle_inputs(in);
+    in[0].accel = 1;
+
+    k = &g.karts[0];
+    teleport(&g, k, 5, 0.0f);
+    k->heading = game_angle_wrap(k->heading + pi);
+    g.state = STATE_RACING;                 /* skip countdown */
+
+    CHECK(!k->wrong_way, "flagged before it had even moved");
+
+    for (f = 0; f < n; f++) {
+        game_update(&g, in, 1.0f / 60.0f);
+        speed_hist[f] = fabsf(k->speed);
+        if (flag_frame < 0 && k->wrong_way)
+            flag_frame = f;
+    }
+
+    /* not instant — a three-point turn at a hairpin should not trip it —
+     * but well before it would let a driver complete a lap backward, and
+     * with a full second either side still inside this run to compare */
+    CHECK(flag_frame >= 60 && flag_frame <= n - 60 - 1,
+          "marshal arrived at frame %d, out of the range this test can "
+          "measure (wanted 60..%d)", flag_frame, n - 60 - 1);
+
+    accel_before = speed_hist[flag_frame] - speed_hist[flag_frame - 60];
+    accel_after  = speed_hist[flag_frame + 60] - speed_hist[flag_frame];
+    printf("wrong-way marshal on CLASSIC: flagged at %.2fs (%.1f km/h), "
+           "gained %.1f km/h in the second before, %.1f km/h in the second "
+           "after\n", flag_frame / 60.0f, speed_hist[flag_frame] * 3.6f,
+           accel_before * 3.6f, accel_after * 3.6f);
+
+    CHECK(accel_after < accel_before * 0.6f,
+          "gained %.1f km/h the second before being caught and %.1f km/h "
+          "the second after — not much of a power cut",
+          accel_before * 3.6f, accel_after * 3.6f);
+}
+
+/*
+ * The AI's own reverse-out recovery must never trip this: point an AI car
+ * backward exactly the same way and confirm it is never flagged, however
+ * long the net progress stays negative.
+ */
+static void test_wrong_way_marshal_leaves_the_ai_alone(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    int f;
+    const float pi = 3.14159265358979f;
+    Kart *ai;
+
+    game_init(&g, &cfg);
+    idle_inputs(in);
+    ai = &g.karts[1];
+    CHECK(ai->human < 0, "test bug: grid slot 1 is not an AI car");
+    teleport(&g, ai, 5, 0.0f);
+    ai->heading = game_angle_wrap(ai->heading + pi);
+    ai->speed = -15.0f;   /* net moving backward, whatever the AI itself wants */
+    g.state = STATE_RACING;                 /* skip countdown */
+
+    for (f = 0; f < 60 * 6; f++) {
+        game_update(&g, in, 1.0f / 60.0f);
+        CHECK(!ai->wrong_way, "an AI car got flagged wrong-way at frame %d", f);
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* Driver identity                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -3268,6 +3358,8 @@ int main(void)
     test_player_model_learns();
     test_cooldown_driver_brings_the_car_home();
     test_whole_field_survives_the_flag();
+    test_wrong_way_marshal_cuts_power();
+    test_wrong_way_marshal_leaves_the_ai_alone();
     test_driver_field_has_characters();
     test_temperament_shows_on_track();
     test_skill_sets_pace();

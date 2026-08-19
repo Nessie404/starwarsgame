@@ -38,6 +38,16 @@ downloadable from the v0.1 release:
 If the tag restriction is lifted, re-running the workflow publishes a
 proper `v0.1.1` release and the fallback stops firing.
 
+## Issue #1 is resolved as of v1.11.1 — no v1.6.1 through v1.10.1
+
+The fix (below) is confirmed: v1.11.1 boots on the reporter's Dolphin where
+v1.5.0 onward did not. Per the repo owner's direction, the historical
+per-line patches this issue originally asked for (v1.6.1 from v1.6.0, v1.7.1
+from v1.7.0, and so on through v1.10.1) are **not being published** — anyone
+on an affected line should upgrade to v1.11.1 or later instead of waiting
+on a patch to their exact version. The mechanism above still exists for the
+next time an old line genuinely needs one.
+
 ## What Dolphin's "Failed to init core" actually means
 
 Dolphin reaches that message for a `.dol` inside `DolReader` and

@@ -1,7 +1,7 @@
 {
   "_comment": "The Xbox column is a recommended physical mapping in Dolphin. The game receives the GameCube inputs in the gamecube section.",
   "_wii_note": "Mario Kart Wii has no manual transmission. WiiKart SHIFT mode uses Wii Remote D-pad Up/Down, or Classic Controller ZR/ZL.",
-  "show_input_overlay": true,
+  "show_input_overlay": false,
   "keyboard": {
     "player1": {
       "steer_left": ["A", "LEFT"],

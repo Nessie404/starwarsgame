@@ -113,6 +113,13 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   JSON CONFIG screen that shows whether your edited files were read.
 - **v1.10**: driver identity — skill, consistency, aggression and tire
   care per driver, separate from the strategy sheets.
+- **v1.11**: fixed a build defect (`tools/pad_dol.py`) that could make a
+  release refuse to open in an emulator or on hardware; an AI cool-down
+  driver takes over when you finish instead of leaving you in control of a
+  car with nothing left to do.
+- **v1.12**: a marshal helicopter cuts your engine if you drive the wrong
+  way; the on-screen controls panel is off by default in favour of the
+  leaderboard.
 
 ---
 

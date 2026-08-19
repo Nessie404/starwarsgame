@@ -43,17 +43,18 @@ Left for later, now that the camera has somewhere to live:
   mountain. Done in v1.11.0: `cooldown_control` in `source/game.c` aims for
   the shoulder, slows for the corner ahead, winds its target speed down
   over eleven seconds and parks.
-- [ ] Send a marshal helicopter down when the player is going the wrong way.
-  Detect it from the car's velocity along the track centreline rather than
-  from heading alone, cut engine power while it lasts, and draw the
-  helicopter with a TURN AROUND message. Humans only — the AI's reverse
-  recovery must not be penalised. `Kart.wrong_way` and `Kart.wrong_way_t`
-  already exist for this; the settings need a threshold and a power cut,
-  through all six places in `docs/HANDOFF.md` section 4.
-- [ ] Tone the on-screen control hints down and give the space to the small
-  leaderboard instead. `show_input_overlay` should default to 0 in
-  `control_config_defaults` and `config/controls.json`, and the setup
-  screen's two hint lines should condense to one.
+- [x] Send a marshal helicopter down when the player is going the wrong way.
+  Done: detected from net progress along the track centreline (the same
+  signed arc `kart_step` already computes for lap counting), not from
+  heading, so a spin that is still net moving forward is left alone.
+  Humans only, gated on `k->human >= 0 && !k->finished`; the AI's own
+  reverse-out recovery is untouched. `wrong_way.seconds` (2.5s to trigger)
+  and `wrong_way.power` (0.35 of engine left) are in `settings.json`. The
+  helicopter and TURN AROUND message draw in the player's own viewport.
+- [x] Tone the on-screen control hints down and give the space to the small
+  leaderboard instead. Done: `show_input_overlay` now defaults to 0 in
+  both `control_config_defaults` and `config/controls.json`, and the setup
+  screen's two hint lines are one.
 
 ## Roads, passes, and conditions
 

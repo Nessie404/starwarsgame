@@ -1801,6 +1801,49 @@ static void draw_finish_marker(int p, float vx, float vy, float vw,
 }
 
 /*
+ * The wrong-way marshal: a helicopter over the car's own viewport, saying
+ * what it would actually shout. The real penalty is the engine cut in
+ * kart_step (see game.c) — this is just telling the driver why the car
+ * has gone soft.
+ */
+static void draw_wrong_way_marker(int p, float vx, float vy, float vw,
+                                  float vh)
+{
+    const Kart *k = &game.karts[p];
+    float cx, cy, spin, flash;
+    int i;
+
+    if (game.state != STATE_RACING || !k->wrong_way)
+        return;
+
+    cx = vx + vw * 0.5f;
+    cy = vy + vh * 0.22f;
+    spin = game.race_t * 14.0f;              /* main rotor, radians/s   */
+    flash = 0.55f + 0.45f * sinf(game.race_t * 6.0f);
+
+    /* fuselage, tail boom, skids — flat shapes, same style as everything
+     * else on this HUD */
+    hud_rect(cx - 16.0f, cy - 7.0f, 32.0f, 14.0f, 235, 60, 45, 235);
+    hud_rect(cx + 14.0f, cy - 2.5f, 20.0f, 5.0f, 235, 60, 45, 235);
+    hud_rect(cx - 14.0f, cy + 8.0f, 28.0f, 2.5f, 40, 20, 20, 220);
+
+    /* main rotor, spinning; tail rotor, spinning faster and fading in
+     * and out the way a fast-spinning blade actually reads at this
+     * resolution */
+    for (i = 0; i < 2; i++) {
+        float a = spin + (float)i * 3.14159265f;
+        hud_diag(cx - cosf(a) * 26.0f, cy - 12.0f - sinf(a) * 6.0f,
+                 cx + cosf(a) * 26.0f, cy - 12.0f + sinf(a) * 6.0f,
+                 2.0f, 235, 235, 235, 200);
+    }
+    hud_diag(cx + 33.0f, cy - 6.0f, cx + 33.0f, cy + 3.0f, 1.5f,
+             225, 225, 225, (u8)(200.0f * (0.5f + 0.5f * cosf(spin * 3.0f))));
+
+    hud_text(cx - hud_text_width(11.0f, "TURN AROUND") * 0.5f, cy + 18.0f,
+             11.0f, 19.0f, "TURN AROUND", 255, 90, 70, (u8)(245.0f * flash));
+}
+
+/*
  * The order of the race, live. It sits in a narrow column down the right
  * edge so it never covers the road: rank, driver, and the gap to the car
  * in front expressed as time, which is what a driver actually wants.
@@ -1914,12 +1957,17 @@ static void draw_player_hud(int p)
     hud_text(vx + vw - 60.0f, vy + 12.0f, 13.0f, 22.0f, buf,
              255, 220, 60, 240);
 
-    /* speed, km/h — turns amber while push-to-pass is deployed */
+    /* speed, km/h — red while the marshal has cut the power, amber while
+     * push-to-pass is deployed */
     snprintf(buf, sizeof(buf), "%d", (int)(fabsf(k->speed) * 3.6f));
-    hud_text(vx + 14.0f, vy + vh - 40.0f, 13.0f, 24.0f, buf,
-             k->push_t > 0.0f ? 255 : 235,
-             k->push_t > 0.0f ? 170 : 235,
-             k->push_t > 0.0f ? 40 : 235, 235);
+    if (k->wrong_way)
+        hud_text(vx + 14.0f, vy + vh - 40.0f, 13.0f, 24.0f, buf,
+                 245, 75, 65, 235);
+    else
+        hud_text(vx + 14.0f, vy + vh - 40.0f, 13.0f, 24.0f, buf,
+                 k->push_t > 0.0f ? 255 : 235,
+                 k->push_t > 0.0f ? 170 : 235,
+                 k->push_t > 0.0f ? 40 : 235, 235);
 
     /* who you are chasing — and how they drive */
     if (game.cfg.n_humans == 1 && k->rank > 1 &&
@@ -2014,6 +2062,7 @@ static void draw_player_hud(int p)
 
     draw_leaderboard(p, vx, vy, vw, vh);
     draw_finish_marker(p, vx, vy, vw, vh);
+    draw_wrong_way_marker(p, vx, vy, vw, vh);
     draw_lap_popup(p, vx, vy, vw, vh);
 
     /* just been fished out of the void */
@@ -2762,7 +2811,7 @@ static void draw_setup_screen(void)
 {
     float W = (float)rmode->fbWidth;
     float H = (float)rmode->efbHeight;
-    char buf[48], nav[64], action[64];
+    char buf[48], hint[96];
     char up[12], down[12], left[12], right[12], confirm[12], back[12];
     int avail;
 
@@ -2821,14 +2870,12 @@ static void draw_setup_screen(void)
              control_key_name(control_config.keyboard[0][CONTROL_MENU_CONFIRM][0]));
     snprintf(back, sizeof(back), "%s",
              control_key_name(control_config.keyboard[0][CONTROL_MENU_BACK][0]));
-    snprintf(nav, sizeof(nav), "%s %s LINE   %s %s CHANGE",
-             up, down, left, right);
-    snprintf(action, sizeof(action), "%s SELECT   %s OUT", confirm, back);
-    hud_text(W * 0.5f - hud_text_width(9.0f, nav) * 0.5f,
-             H - 40.0f, 9.0f, 15.0f, nav,
-             160, 165, 180, 220);
-    hud_text(W * 0.5f - hud_text_width(9.0f, action) * 0.5f,
-             H - 22.0f, 9.0f, 15.0f, action,
+    /* one line, not two — the setup screen used to spend a whole row each
+     * on "how to move" and "how to confirm" */
+    snprintf(hint, sizeof(hint), "%s%s LINE  %s%s CHANGE  %s SELECT  %s OUT",
+             up, down, left, right, confirm, back);
+    hud_text(W * 0.5f - hud_text_width(9.0f, hint) * 0.5f,
+             H - 26.0f, 9.0f, 15.0f, hint,
              160, 165, 180, 220);
 }
 

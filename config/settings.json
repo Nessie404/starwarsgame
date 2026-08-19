@@ -96,6 +96,11 @@
     "invincible_seconds": 5.0,
     "flash_hz": 5.0
   },
+  "wrong_way": {
+    "_comment": "Only the human players; the AI's own reverse recovery is never penalized.",
+    "seconds": 2.5,
+    "power": 0.35
+  },
   "tracks": {
     "_comment": "laps 0 means automatic. Width, scale, and elevation values multiply the built-in track.",
     "classic":  { "width_multiplier": 1.0, "scale_multiplier": 1.0, "elevation_multiplier": 1.0, "laps": 0 },

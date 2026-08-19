@@ -4,6 +4,28 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.12.0] - 2026-08-19
+
+### Added
+
+- **A marshal helicopter for driving the wrong way.** Judged on net
+  progress along the track centreline — the same signed-arc measurement
+  `kart_step` already keeps for lap counting — not on heading, so a car
+  that spins but is still net moving forward is left alone. 2.5 seconds
+  of real backward progress and the helicopter drops in over your own
+  viewport with a TURN AROUND message, the speed readout turns red, and
+  the engine is cut to 35% until you turn around and drive it back off.
+  Humans only: the AI's own reverse-out recovery is never touched by it.
+  Both numbers are in the new `wrong_way` block of `settings.json`.
+
+### Changed
+
+- **The on-screen controls are quieter.** The raw-input debug panel
+  (`show_input_overlay`) now defaults off — the small always-on
+  leaderboard is what a race screen shows day to day — and turning it on
+  to check a new mapping still works exactly as before. The setup
+  screen's two-line control legend is one line.
+
 ## [1.11.1] - 2026-08-19
 
 ### Fixed

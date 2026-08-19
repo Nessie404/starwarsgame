@@ -179,6 +179,8 @@ void game_settings_defaults(GameSettings *s)
     s->respawn_fade_seconds = 0.8f;
     s->invincible_seconds = 5.0f;
     s->invincible_flash_hz = 5.0f;
+    s->wrong_way_seconds = 2.5f;
+    s->wrong_way_power = 0.35f;
 }
 
 static int settings_error(char *error, int cap, const char *message)
@@ -288,6 +290,8 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
     FINITE_RANGE(s->respawn_fade_seconds, 0.05f, 8.0f, "BAD FADE TIME");
     FINITE_RANGE(s->invincible_seconds, 0.0f, 30.0f, "BAD INVINCIBLE TIME");
     FINITE_RANGE(s->invincible_flash_hz, 0.5f, 30.0f, "BAD FLASH RATE");
+    FINITE_RANGE(s->wrong_way_seconds, 0.5f, 15.0f, "BAD WRONG WAY TIME");
+    FINITE_RANGE(s->wrong_way_power, 0.0f, 1.0f, "BAD WRONG WAY POWER");
 #undef FINITE_RANGE
     if (error && error_cap > 0) error[0] = '\0';
     return 1;
@@ -1397,6 +1401,11 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     float P = s->power_hp * HP_TO_W * g->settings.drivetrain_efficiency *
               grip * power_scale;
     float steer = game_clampf(in->steer, -1.0f, 1.0f);
+
+    /* the marshal helicopter has arrived: hold most of the engine back
+     * until the driver turns around */
+    if (k->wrong_way)
+        P *= g->settings.wrong_way_power;
     float v = k->speed;
     float a = 0.0f;
     int was_inside = fabsf(k->lat) <= track_wall_half(t, k->seg);
@@ -1669,6 +1678,28 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         if (d < -(float)t->n * 0.5f) d += (float)t->n;
         k->total_progress += d;
         k->prog_raw = newp;
+
+        /*
+         * The wrong-way marshal. Judged on net progress along the
+         * centerline rather than heading, so a car that spins but is
+         * still net moving forward is left alone. Humans only — the AI's
+         * own reverse-out recovery must never be penalised, and a
+         * finished car is being driven by the cool-down routine, which
+         * never selects reverse on its own.
+         */
+        if (k->human >= 0 && !k->finished) {
+            k->wrong_way_t += (d < -0.02f) ? dt : -dt;
+            if (k->wrong_way_t < 0.0f) k->wrong_way_t = 0.0f;
+            if (k->wrong_way_t > g->settings.wrong_way_seconds * 2.0f)
+                k->wrong_way_t = g->settings.wrong_way_seconds * 2.0f;
+            if (k->wrong_way_t >= g->settings.wrong_way_seconds)
+                k->wrong_way = 1;
+            else if (k->wrong_way_t <= 0.0f)
+                k->wrong_way = 0;
+        } else {
+            k->wrong_way_t = 0.0f;
+            k->wrong_way = 0;
+        }
         k->seg = seg;
         k->lat = lat;
         if (k->fall_t <= 0.0f)
@@ -1740,6 +1771,8 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->overcommit_t = 0.0f;
         k->seg = cseg;
         k->lat = 0.0f;
+        k->wrong_way_t = 0.0f;   /* faced the right way by the teleport */
+        k->wrong_way = 0;
 
         /* No free progress. Rebuilding total_progress as lap*n + cseg
          * looks right but is not: the lap counter can tick over while the

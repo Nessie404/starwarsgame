@@ -87,6 +87,8 @@ This file exposes the main tuning surfaces:
 - power-up multipliers;
 - AI pace, braking, safe-road use, and overcommit behavior;
 - cliff fall, blackout, fade, invincibility, and flash timing;
+- how long a human can drive the wrong way before the marshal helicopter
+  arrives, and how much engine it leaves them (see below);
 - how much hills matter, the chase camera, and the tachometer's rev
   range (see below);
 - per-track width, plan scale, elevation, and optional fixed lap count
@@ -116,6 +118,17 @@ is in its current gear — so the tachometer maps that position onto a rev
 range you can read. `tacho_idle_rpm` (default 1200) is the bottom of the
 gear, `tacho_redline_rpm` (default 7800) is the limiter. The redline must
 be above idle.
+
+### The `wrong_way` block
+
+Measured against net progress along the track's centerline, not heading —
+so a car that spins around but is not actually travelling backward is
+left alone. `seconds` (default 2.5) is how long that has to hold before
+the marshal helicopter drops in; `power` (default 0.35) is the fraction
+of engine left while it is overhead. Recovers at the same rate it built
+up: turn around and drive forward for as long as you were going backward
+and the helicopter leaves. Only ever applies to the human players — the
+AI's own reverse-out recovery is never touched by it.
 
 ### The `camera` block
 
@@ -167,10 +180,12 @@ can turn one button into a small genealogy:
    cannot discover which host-side Xbox button Dolphin used.
 
 The in-race input panel shows all three beside the resolved game action and
-lights the action when it is active. If you prefer a different physical
-layout, change the Dolphin mapping and then change the matching
-`xbox_recommended` label so the panel remains truthful. Set
-`show_input_overlay` to `false` once everything agrees.
+lights the action when it is active. It is off by default — the small
+always-on leaderboard is what a race screen shows day to day — so turn
+`show_input_overlay` on only while checking a new mapping: if you prefer a
+different physical layout, change the Dolphin mapping and then change the
+matching `xbox_recommended` label so the panel remains truthful, then set
+`show_input_overlay` back to `false` once everything agrees.
 
 During a race, `race_menu` pauses and opens a leave-race confirmation
 instead of abandoning the event immediately. `menu_confirm` accepts it;

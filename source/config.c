@@ -928,6 +928,17 @@ int config_load_settings_text(GameSettings *settings, const char *json,
          !optional_float(json, tokens, count, obj, "flash_hz",
                          &s.invincible_flash_hz, error, error_cap))) goto fail;
 
+    obj = object_get(json, tokens, count, 0, "wrong_way");
+    if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
+        set_error(error, error_cap, "WRONG_WAY NEEDS OBJECT");
+        goto fail;
+    }
+    if (obj >= 0 &&
+        (!optional_float(json, tokens, count, obj, "seconds",
+                         &s.wrong_way_seconds, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "power",
+                         &s.wrong_way_power, error, error_cap))) goto fail;
+
     obj = object_get(json, tokens, count, 0, "tracks");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
         set_error(error, error_cap, "TRACKS NEED OBJECT");
@@ -1060,7 +1071,7 @@ static void bind_key(ControlConfig *c, int p, int action,
 void control_config_defaults(ControlConfig *c)
 {
     memset(c, 0, sizeof(*c));
-    c->show_input_overlay = 1;
+    c->show_input_overlay = 0;
 
     bind_key(c, 0, CONTROL_STEER_LEFT, 0, 'A');
     bind_key(c, 0, CONTROL_STEER_LEFT, 1, GAME_KEY_LEFT);
