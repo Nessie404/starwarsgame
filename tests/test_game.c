@@ -1978,6 +1978,192 @@ static void test_new_passes(void)
           mo.max_y - mo.min_y);
 }
 
+/*
+ * Hills. The gravity component along a road is g*sin(theta) and the load
+ * on the tires is m*g*cos(theta): a climb should cost real speed, a
+ * descent should give it back, and neither should be a rounding error.
+ */
+static void test_grade_costs_speed(void)
+{
+    struct { float slope; float reached; } run[3];
+    int i;
+
+    for (i = 0; i < 3; i++) {
+        Game g;
+        GameConfig cfg = default_cfg(TRACK_CLASSIC);
+        Input in[MAX_HUMANS];
+        Kart *k;
+        int f, j, straight = 0;
+        float flattest = 1.0e9f;
+
+        game_init(&g, &cfg);
+        g.state = STATE_RACING;
+        idle_inputs(in);
+        in[0].accel = 1;
+        k = &g.karts[0];
+
+        /* CLASSIC is flat, so the grade is imposed directly: -20%, 0, +20% */
+        run[i].slope = (float)(i - 1) * 0.20f;
+        for (j = 0; j < g.track.n; j++)
+            g.track.slope[j] = run[i].slope;
+
+        /* start on the straightest piece of road so the run is about the
+         * hill rather than about steering off the outside of a corner */
+        for (j = 0; j < g.track.n; j++)
+            if (g.track.curv[j] < flattest) { flattest = g.track.curv[j];
+                                              straight = j; }
+        teleport(&g, k, straight, 12.0f);
+        for (f = 0; f < 60 * 3; f++)
+            game_update(&g, in, 1.0f / 60.0f);
+        run[i].reached = k->speed;
+    }
+
+    printf("grade: %.1f km/h down a 20%% drop, %.1f km/h on the flat, "
+           "%.1f km/h up a 20%% climb (three seconds from 43 km/h)\n",
+           run[0].reached * 3.6f, run[1].reached * 3.6f,
+           run[2].reached * 3.6f);
+    CHECK(run[0].reached > run[1].reached + 1.0f,
+          "a 20%% descent gave nothing back (%.1f vs %.1f m/s)",
+          run[0].reached, run[1].reached);
+    CHECK(run[1].reached > run[2].reached + 2.0f,
+          "a 20%% climb cost almost nothing (%.1f vs %.1f m/s)",
+          run[1].reached, run[2].reached);
+    /* g*sin(atan(0.2)) is 1.92 m/s^2, so three seconds of climbing rather
+     * than descending has to be worth several m/s either way */
+    CHECK(run[0].reached - run[2].reached > 6.0f,
+          "descending and climbing differed by only %.1f m/s",
+          run[0].reached - run[2].reached);
+}
+
+/* Steep ground also takes weight off the tires, so grip goes with it. */
+static void test_grade_costs_grip(void)
+{
+    float flat_stop, steep_stop;
+    int i;
+
+    for (i = 0; i < 2; i++) {
+        Game g;
+        GameConfig cfg = default_cfg(TRACK_CLASSIC);
+        Input in[MAX_HUMANS];
+        Kart *k;
+        int f, j;
+        float travelled;
+
+        game_init(&g, &cfg);
+        g.state = STATE_RACING;
+        idle_inputs(in);
+        k = &g.karts[0];
+        for (j = 0; j < g.track.n; j++)
+            g.track.slope[j] = (i == 0) ? 0.0f : 0.28f;
+        {
+            int b = 0; float flattest = 1.0e9f;
+            for (j = 0; j < g.track.n; j++)
+                if (g.track.curv[j] < flattest) { flattest = g.track.curv[j];
+                                                  b = j; }
+            teleport(&g, k, b, 26.0f);
+        }
+        travelled = k->total_progress;
+
+        in[0].brake = 1;
+        for (f = 0; f < 60 * 8 && k->speed > 1.0f; f++)
+            game_update(&g, in, 1.0f / 60.0f);
+        travelled = (k->total_progress - travelled) *
+                    (g.track.total_len / (float)g.track.n);
+        if (i == 0) flat_stop = travelled; else steep_stop = travelled;
+    }
+    printf("braking from 26 m/s: %.1f m on the flat, %.1f m on a 28%% "
+           "climb\n", flat_stop, steep_stop);
+    /* uphill the slope helps stop the car, but the tires have less to
+     * work with; the point is only that the load term is doing something */
+    CHECK(steep_stop < flat_stop,
+          "an uphill stop (%.1f m) was not shorter than a flat one (%.1f m)",
+          steep_stop, flat_stop);
+}
+
+/* A car can bring its own automatic shift points, per car or per gear. */
+static void test_car_shift_points(void)
+{
+    char error[128];
+    const char *early =
+        "{\"cars\":[{\"name\":\"SHORTY\",\"mass_kg\":900,"
+        "\"power_hp\":150,\"brake_distance_100_kph_m\":38,"
+        "\"lateral_grip_g\":0.95,\"drag_area_m2\":0.66,"
+        "\"wheelbase_m\":2.4,\"offroad_grip\":0.45,"
+        "\"gear_top_speeds_kph\":[47,79,119,162],"
+        "\"automatic_upshift_fraction\":0.62,"
+        "\"automatic_downshift_fraction\":0.30}]}";
+    const char *per_gear =
+        "{\"cars\":[{\"name\":\"STAGED\",\"mass_kg\":900,"
+        "\"power_hp\":150,\"brake_distance_100_kph_m\":38,"
+        "\"lateral_grip_g\":0.95,\"drag_area_m2\":0.66,"
+        "\"wheelbase_m\":2.4,\"offroad_grip\":0.45,"
+        "\"gear_top_speeds_kph\":[47,79,119,162],"
+        "\"automatic_upshift_per_gear\":[0.70,0.85,0.95,0.99]}]}";
+    const char *hunting =
+        "{\"cars\":[{\"name\":\"HUNTER\",\"mass_kg\":900,"
+        "\"power_hp\":150,\"brake_distance_100_kph_m\":38,"
+        "\"lateral_grip_g\":0.95,\"drag_area_m2\":0.66,"
+        "\"wheelbase_m\":2.4,\"offroad_grip\":0.45,"
+        "\"gear_top_speeds_kph\":[47,79,119,162],"
+        "\"automatic_upshift_fraction\":0.50,"
+        "\"automatic_downshift_fraction\":0.45}]}";
+    int shifts_default, shifts_early;
+    int variant;
+
+    /* the shipped cars keep the standard points */
+    kart_specs_reset_defaults();
+    CHECK(fabsf(kart_specs[1].auto_up[0] - AUTO_UP_FRAC) < 0.001f,
+          "a built-in car lost its default upshift point");
+
+    /* a car that shifts at 62% of each gear must use more gears sooner */
+    for (variant = 0; variant < 2; variant++) {
+        Game g;
+        GameConfig cfg;
+        Input in[MAX_HUMANS];
+        int f, changes = 0, last;
+
+        kart_specs_reset_defaults();
+        if (variant == 1)
+            CHECK(config_load_cars_text(early, error, (int)sizeof(error)),
+                  "an early-shifting car was rejected: %s", error);
+        cfg = default_cfg(TRACK_CLASSIC);
+        cfg.spec[0] = variant == 1 ? 0 : 1;
+        game_init(&g, &cfg);
+        g.state = STATE_RACING;
+        idle_inputs(in);
+        in[0].accel = 1;
+        last = g.karts[0].gear;
+        for (f = 0; f < 60 * 20; f++) {
+            game_update(&g, in, 1.0f / 60.0f);
+            if (g.karts[0].gear != last) { changes++; last = g.karts[0].gear; }
+        }
+        if (variant == 0) shifts_default = changes; else shifts_early = changes;
+    }
+    printf("shift points: %d changes in 20 s with the standard box, "
+           "%d with one set to 62%%\n", shifts_default, shifts_early);
+    CHECK(shifts_early >= shifts_default,
+          "an early-shifting car changed gear less often (%d vs %d)",
+          shifts_early, shifts_default);
+
+    /* per-gear points load and land where they were put */
+    kart_specs_reset_defaults();
+    CHECK(config_load_cars_text(per_gear, error, (int)sizeof(error)),
+          "per-gear shift points were rejected: %s", error);
+    CHECK(fabsf(kart_specs[0].auto_up[0] - 0.70f) < 0.001f &&
+          fabsf(kart_specs[0].auto_up[3] - 0.99f) < 0.001f,
+          "per-gear shift points did not land (%.2f, %.2f)",
+          kart_specs[0].auto_up[0], kart_specs[0].auto_up[3]);
+    CHECK(fabsf(kart_specs[0].auto_down[0] - AUTO_DOWN_FRAC) < 0.001f,
+          "setting upshifts clobbered the downshifts");
+
+    /* points close enough to hunt are refused, and nothing is applied */
+    kart_specs_reset_defaults();
+    CHECK(!config_load_cars_text(hunting, error, (int)sizeof(error)),
+          "a gearbox that would hunt was accepted");
+    CHECK(kart_spec_count == DEFAULT_SPEC_COUNT,
+          "a rejected car file was applied anyway");
+}
+
 /* ------------------------------------------------------------------ */
 /* Lap timing                                                          */
 /* ------------------------------------------------------------------ */
@@ -2591,6 +2777,9 @@ int main(void)
     test_ai_shift_styles();
     test_ai_can_fall();
     test_player_model_learns();
+    test_grade_costs_speed();
+    test_grade_costs_grip();
+    test_car_shift_points();
     test_new_passes();
     test_variable_road_width();
     test_narrow_sections_bite();

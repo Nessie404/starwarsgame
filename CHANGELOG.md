@@ -4,6 +4,35 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.7.0] - 2026-08-19
+
+### Added
+
+- Per-car automatic shift points in `cars.json`:
+  `automatic_upshift_fraction` and `automatic_downshift_fraction` for the
+  whole gearbox, or `automatic_upshift_per_gear` /
+  `automatic_downshift_per_gear` to set them gear by gear. Points close
+  enough to make the box hunt are refused, and a refused file changes
+  nothing.
+- A `hills` block in `settings.json` scaling how much a grade costs in
+  speed and in grip.
+
+### Changed
+
+- Gravity along a road now uses `g*sin(theta)` rather than
+  `g*tan(theta)` — a 4% difference on Breakneck's steepest — and the load
+  on the tires falls off with `cos(theta)`, so a steep climb costs grip as
+  well as speed. Measured from 43 km/h with the throttle flat for three
+  seconds: 104 km/h down a 20% descent, 89 on the flat, 74 up a 20% climb.
+
+### Fixed
+
+- Built-in cars had no automatic shift points of their own once the field
+  was added, which read as "change up immediately": a car would take top
+  gear at walking pace and bog there. Every car now gets the standard
+  points unless it says otherwise, applied when a race starts as well as
+  when the roster is loaded.
+
 ## [1.6.0] - 2026-08-18
 
 ### Added
@@ -159,6 +188,7 @@ artifacts and their longer descriptions remain available on the
   strategies, learning, driver adaptation, Berthoud and Loveland Pass, and
   motorsport-style power-ups.
 
+[1.7.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.7.0
 [1.6.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.6.0
 [1.5.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.5.0
 [1.4.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.4.0

@@ -41,6 +41,20 @@ accepted ranges are deliberately broad: 100–5000 kg, 5–2500 hp, 0.2–3.0 g
 lateral grip, 0.5–6.0 m wheelbase, and 7.2–504 km/h for each increasing
 gear-limiter speed.
 
+Optional per-car keys, on top of the required ones:
+
+| Key | Default | What it does |
+|---|---|---|
+| `automatic_upshift_fraction` | 0.95 | Where the automatic box changes up, as a fraction of the gear's own limiter speed |
+| `automatic_downshift_fraction` | 0.38 | Where it changes down |
+| `automatic_upshift_per_gear` | — | The same, one value per gear (the list length must match the gearbox) |
+| `automatic_downshift_per_gear` | — | As above |
+
+A car can short-shift out of first and hold second to the limiter by
+giving a per-gear list. The upshift and downshift points must stay at
+least 0.20 apart, otherwise the box would change up into its own
+downshift point and hunt; a file that asks for that is refused whole.
+
 ## `settings.json`
 
 This file exposes the main tuning surfaces:
@@ -51,7 +65,8 @@ This file exposes the main tuning surfaces:
 - tire and power-up multipliers;
 - AI pace, braking, safe-road use, and overcommit behavior;
 - cliff fall, blackout, fade, invincibility, and flash timing;
-- the chase camera and the tachometer's rev range (see below);
+- how much hills matter, the chase camera, and the tachometer's rev
+  range (see below);
 - per-track width, plan scale, elevation, and optional fixed lap count
   (`classic`, `berthoud`, `loveland`, `kenosha`, `monarch`, `breakneck`,
   `guanella`).
@@ -62,6 +77,15 @@ Width/scale/elevation values are multipliers, so `1.10` means ten percent
 more than the built-in geometry. A width multiplier scales the whole
 circuit; the *shape* of the width — which corners are pinched and which
 are opened out — is part of the track itself.
+
+### The `hills` block
+
+Gravity along a road at angle theta is `g*sin(theta)`, and the load
+pressing the tires down is `m*g*cos(theta)` — so a climb costs speed and
+also, slightly, grip. `gravity_multiplier` (default 1.0) scales the first:
+raise it to make every pass feel more mountainous than it is.
+`load_effect` (0 to 1, default 1.0) scales the second: drop it to zero if
+you would rather steep ground did not cost grip at all.
 
 ### The `instruments` block
 

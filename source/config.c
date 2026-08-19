@@ -501,6 +501,63 @@ static int valid_car(const KartSpec *s, char *error, int error_cap)
             (g > 0 && s->gear_top[g] <= s->gear_top[g - 1]))
             return set_error(error, error_cap, "BAD GEAR SPEEDS");
     }
+    for (g = 0; g < s->n_gears; g++) {
+        if (s->auto_up[g] < 0.30f || s->auto_up[g] > 1.20f)
+            return set_error(error, error_cap, "BAD UPSHIFT POINT");
+        if (s->auto_down[g] < 0.05f || s->auto_down[g] > 0.90f)
+            return set_error(error, error_cap, "BAD DOWNSHIFT POINT");
+        /* an upshift that lands on the same car's downshift point is how
+         * a gearbox ends up hunting, so the two have to stay apart */
+        if (s->auto_up[g] - s->auto_down[g] < 0.20f)
+            return set_error(error, error_cap, "SHIFT POINTS TOO CLOSE");
+    }
+    return 1;
+}
+
+/*
+ * Automatic shift points: "automatic_upshift_fraction" sets every gear,
+ * "automatic_upshift_per_gear" sets them one at a time, and a car that
+ * mentions neither keeps the defaults. Fractions are of the gear's own
+ * limiter speed, so 0.95 means "change at 95% of this gear".
+ */
+static int read_shift_points(const char *json, const JsonToken *tokens,
+                             int count, int obj, KartSpec *s,
+                             char *error, int error_cap)
+{
+    static const char *one[2] = { "automatic_upshift_fraction",
+                                  "automatic_downshift_fraction" };
+    static const char *per[2] = { "automatic_upshift_per_gear",
+                                  "automatic_downshift_per_gear" };
+    int which;
+
+    kart_spec_default_shifts(s);
+    for (which = 0; which < 2; which++) {
+        float *dst = which == 0 ? s->auto_up : s->auto_down;
+        int at = object_get(json, tokens, count, obj, one[which]);
+        int g;
+
+        if (at >= 0) {
+            float v;
+            if (!token_float(json, &tokens[at], &v))
+                return set_error(error, error_cap, "BAD SHIFT POINT");
+            for (g = 0; g < MAX_GEARS; g++)
+                dst[g] = v;
+        }
+        at = object_get(json, tokens, count, obj, per[which]);
+        if (at >= 0) {
+            int ng = array_length(tokens, count, at);
+            if (ng != s->n_gears)
+                return set_error(error, error_cap,
+                                 "SHIFT LIST MUST MATCH GEARS");
+            for (g = 0; g < ng; g++) {
+                float v;
+                int item = array_item(tokens, count, at, g);
+                if (item < 0 || !token_float(json, &tokens[item], &v))
+                    return set_error(error, error_cap, "BAD SHIFT POINT");
+                dst[g] = v;
+            }
+        }
+    }
     return 1;
 }
 
@@ -573,6 +630,11 @@ int config_load_cars_text(const char *json, char *error, int error_cap)
                 return set_error(error, error_cap, "BAD GEAR SPEED");
             }
             s->gear_top[g] = kph / 3.6f;
+        }
+        if (!read_shift_points(json, tokens, count, obj, s, error,
+                               error_cap)) {
+            free(tokens);
+            return 0;
         }
         if (!valid_car(s, error, error_cap)) {
             free(tokens);
@@ -756,6 +818,17 @@ int config_load_settings_text(GameSettings *settings, const char *json,
          !optional_float(json, tokens, count, obj, "overcommit_overshoot_m",
                          &s.ai_overcommit_overshoot_m,
                          error, error_cap))) goto fail;
+
+    obj = object_get(json, tokens, count, 0, "hills");
+    if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
+        set_error(error, error_cap, "HILLS NEED OBJECT");
+        goto fail;
+    }
+    if (obj >= 0 &&
+        (!optional_float(json, tokens, count, obj, "gravity_multiplier",
+                         &s.grade_gravity_mult, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "load_effect",
+                         &s.grade_load_effect, error, error_cap))) goto fail;
 
     obj = object_get(json, tokens, count, 0, "instruments");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {

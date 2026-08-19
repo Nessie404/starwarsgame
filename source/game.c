@@ -58,10 +58,27 @@ KartSpec kart_specs[MAX_KART_SPECS] = {
 
 int kart_spec_count = DEFAULT_SPEC_COUNT;
 
+/*
+ * A car that says nothing about its automatic box gets the standard shift
+ * points in every gear. Called for the built-ins and for any car loaded
+ * from cars.json before its own numbers are read over the top.
+ */
+void kart_spec_default_shifts(KartSpec *s)
+{
+    int g;
+    for (g = 0; g < MAX_GEARS; g++) {
+        if (!(s->auto_up[g] > 0.0f))   s->auto_up[g] = AUTO_UP_FRAC;
+        if (!(s->auto_down[g] > 0.0f)) s->auto_down[g] = AUTO_DOWN_FRAC;
+    }
+}
+
 void kart_specs_reset_defaults(void)
 {
+    int i;
     memset(kart_specs, 0, sizeof(kart_specs));
     memcpy(kart_specs, default_kart_specs, sizeof(default_kart_specs));
+    for (i = 0; i < MAX_KART_SPECS; i++)
+        kart_spec_default_shifts(&kart_specs[i]);
     kart_spec_count = DEFAULT_SPEC_COUNT;
 }
 
@@ -122,6 +139,8 @@ void game_settings_defaults(GameSettings *s)
     s->cam_pitch_smoothing = 0.05f;
     s->cam_pitch_min_deg = -20.0f;
     s->cam_pitch_max_deg = 20.0f;
+    s->grade_gravity_mult = 1.0f;
+    s->grade_load_effect = 1.0f;
     s->tacho_idle_rpm = 1200.0f;
     s->tacho_redline_rpm = 7800.0f;
     s->fall_seconds = 1.10f;
@@ -181,6 +200,8 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
     FINITE_RANGE(s->push_seconds, 0.1f, 60.0f, "BAD PUSH TIME");
     FINITE_RANGE(s->fresh_tire_grip_mult, 1.0f, 2.0f, "BAD FRESH GRIP");
     FINITE_RANGE(s->fresh_tire_seconds, 0.1f, 60.0f, "BAD FRESH TIME");
+    FINITE_RANGE(s->grade_gravity_mult, 0.0f, 3.0f, "BAD GRADE GRAUITY");
+    FINITE_RANGE(s->grade_load_effect, 0.0f, 1.0f, "BAD GRADE LOAD");
     FINITE_RANGE(s->tacho_idle_rpm, 0.0f, 20000.0f, "BAD IDLE RPM");
     FINITE_RANGE(s->tacho_redline_rpm, 500.0f, 30000.0f, "BAD REDLINE");
     if (s->tacho_redline_rpm <= s->tacho_idle_rpm)
@@ -593,6 +614,15 @@ void game_init(Game *g, const GameConfig *cfg)
 
     if (kart_spec_count < 1 || kart_spec_count > MAX_KART_SPECS)
         kart_specs_reset_defaults();
+
+    /*
+     * Any car that never went through the JSON loader — the compiled-in
+     * roster, or one an older config left half-filled — still needs shift
+     * points. Zero would mean "upshift immediately", which puts the car in
+     * top gear at walking pace and leaves it bogged there.
+     */
+    for (i = 0; i < MAX_KART_SPECS; i++)
+        kart_spec_default_shifts(&kart_specs[i]);
 
     track_init_with_settings(&g->track, cfg->track_id, &g->settings);
     /* a lap count chosen in the menu beats both the circuit's own count
@@ -1152,9 +1182,10 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
             float low_frac = (k->gear > 0)
                                  ? fabsf(v) / s->gear_top[k->gear - 1]
                                  : 9.0f;
-            want_up   = (k->rev_frac > 0.95f &&
+            want_up   = (k->rev_frac > s->auto_up[k->gear] &&
                          next_frac > g->settings.bog_fraction + 0.08f);
-            want_down = (k->rev_frac < 0.38f && low_frac < 0.92f);
+            want_down = (k->rev_frac < s->auto_down[k->gear] &&
+                         low_frac < 0.92f);
         }
 
         if (want_up && k->gear < s->n_gears - 1) {
@@ -1188,11 +1219,24 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->grip_t -= dt;
     }
 
-    /* --- longitudinal forces --- */
+    /*
+     * --- longitudinal forces ---
+     *
+     * The road's slope is a tangent, so the component of gravity along it
+     * is g*sin(theta), not g*tan(theta): on Breakneck's 29% that is a 4%
+     * difference, and it is free to get right. The same angle takes weight
+     * off the tires — the load is m*g*cos(theta) — so a steep climb costs
+     * grip as well as speed.
+     */
     {
+        float theta = atanf(t->slope[k->seg]);
         float dirdot = cosf(k->heading) * t->dx[k->seg] +
                        sinf(k->heading) * t->dz[k->seg];
-        a += -GRAVITY * t->slope[k->seg] * dirdot;   /* road grade */
+        float load = 1.0f - g->settings.grade_load_effect *
+                            (1.0f - cosf(theta));
+        a += -GRAVITY * sinf(theta) * dirdot *
+             g->settings.grade_gravity_mult;
+        mu_a *= load;
     }
     if (in->accel && !in->brake) {
         float a_drive = P / (s->mass_kg * (fabsf(v) > 3.0f ? fabsf(v) : 3.0f));

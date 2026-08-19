@@ -40,6 +40,11 @@
     "overcommit_seconds": 1.15,
     "overcommit_overshoot_m": 1.10
   },
+  "hills": {
+    "_comment": "Gravity along a road at angle theta is g*sin(theta) and the load on the tires is m*g*cos(theta). These multiply those two real effects: raise the first to exaggerate every climb and descent, lower the second if you would rather steep ground did not cost grip.",
+    "gravity_multiplier": 1.0,
+    "load_effect": 1.0
+  },
   "instruments": {
     "_comment": "The simulation has no crankshaft; the tachometer maps how far into the current gear the car is onto this rev range.",
     "tacho_idle_rpm": 1200,

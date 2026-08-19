@@ -1,6 +1,6 @@
 # WiiKart future work
 
-These are design targets for releases after v1.6.0. Details may change after
+These are design targets for releases after v1.7.0. Details may change after
 testing, because apparently cars, mountains, and tires all object to being
 reduced to one convenient slider.
 
@@ -57,15 +57,17 @@ Left for later, now that the camera has somewhere to live:
 
 ## Powertrain, boost, and instruments
 
-- [ ] Revisit grade and power behavior so acceleration is reduced more
+- [x] Revisit grade and power behavior so acceleration is reduced more
   convincingly uphill while cars retain or gain speed more naturally downhill.
+      *(v1.7.0: gravity uses sin rather than tan of the road angle, tire load
+      falls off with cos, and both are scalable from the `hills` block.)*
 - [ ] Add a rechargeable nitro/boost resource and a clearly readable boost
   gauge.
 - [ ] Add a JSON `turbo` capability and tuning block available only to cars
   designed to use it.
-- [ ] Add per-car and optionally per-gear automatic shift ranges to `cars.json`,
+- [x] Add per-car and optionally per-gear automatic shift ranges to `cars.json`,
   including configurable upshift/downshift points rather than only limiter
-  speeds.
+  speeds. *(v1.7.0.)*
 - [x] Add a numerical/digital tachometer alongside the existing rev band.
       *(v1.5.0, with idle and redline in `settings.json`.)*
 - [x] Make the tachometer band change colors as the engine moves through the

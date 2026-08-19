@@ -141,9 +141,19 @@ typedef struct {
     float offroad_grip;      /* fraction of grip/power kept off road    */
     int   n_gears;
     float gear_top[MAX_GEARS];  /* m/s at the limiter in each gear      */
+    /*
+     * Where the automatic box changes gear, as a fraction of the gear it
+     * is in. One pair per gear, so a car can short-shift out of first and
+     * hold second to the limiter; cars.json may set them per car or per
+     * gear, and anything it leaves out keeps the defaults.
+     */
+    float auto_up[MAX_GEARS];
+    float auto_down[MAX_GEARS];
 } KartSpec;
 
 #define SHIFT_TIME    0.18f   /* seconds of cut drive while shifting    */
+#define AUTO_UP_FRAC   0.95f  /* default automatic upshift point        */
+#define AUTO_DOWN_FRAC 0.38f  /* default automatic downshift point      */
 #define BOG_FRACTION  0.34f   /* below this much of the gear, it bogs   */
 
 /* engine output multiplier for being at `frac` of the current gear's
@@ -162,6 +172,9 @@ float tire_drag_mult(int compound);
 extern KartSpec kart_specs[MAX_KART_SPECS];
 extern int kart_spec_count;
 void kart_specs_reset_defaults(void);
+
+/* fill in any shift point a car did not specify */
+void kart_spec_default_shifts(KartSpec *s);
 
 /* ------------------------------------------------------------------ */
 /* Race                                                               */
@@ -291,6 +304,13 @@ struct GameSettings {
     float cam_pitch_smoothing;
     float cam_pitch_min_deg;         /* negative = allowed to look up    */
     float cam_pitch_max_deg;
+
+    /* hills. The gravity component along a road at angle theta is
+     * g*sin(theta) and the load pressing the tires down is m*g*cos(theta);
+     * both multipliers are here so a circuit can be made to feel more
+     * mountainous than it is without breaking the model. */
+    float grade_gravity_mult;
+    float grade_load_effect;     /* 0 = ignore load loss, 1 = full cos  */
 
     /* instruments: the sim has no crankshaft, so the tachometer maps
      * where the car is in its gear onto a readable rev range */
