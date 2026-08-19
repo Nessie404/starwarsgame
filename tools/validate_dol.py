@@ -16,8 +16,11 @@ What it checks, mirroring Dolphin's DolReader:
     file, counting the 32-byte rounding the loader applies when it reads
     (this is what several early WiiKart releases got wrong: they promised
     up to 28 bytes that the file did not contain)
-  * loaded sections and BSS land inside Wii memory and do not overlap
-    each other
+  * loaded sections and BSS land inside Wii memory, and no two loaded
+    sections overlap each other. BSS is treated separately: the 32-byte
+    rounding normally reaches a few bytes into the start of BSS, which is
+    fine because crt0 zeroes it, so only an advertised extent that runs
+    into BSS counts as a fault
   * the entry point is inside a section that gets loaded
   * a write to HID4 appears in the text, since that is how Dolphin
     decides a DOL is Wii software rather than GameCube software
@@ -111,18 +114,36 @@ def validate(path, quiet=False):
     if not loaded:
         problems.append('no sections carry any data')
 
-    loaded.append(('bss', dol.bss_addr, dol.bss_size))
     if dol.bss_size and not in_wii_memory(dol.bss_addr, dol.bss_size):
         problems.append('bss 0x%08x..0x%08x is outside Wii memory'
                         % (dol.bss_addr, dol.bss_addr + dol.bss_size))
 
+    # Two loaded sections landing on top of each other is a real fault: the
+    # second copy would overwrite the first.
     ordered = sorted((a, s, n) for n, a, s in loaded if s)
-    for (a0, s0, n0), (a1, s1, n1) in zip(ordered, ordered[1:]):
+    for (a0, s0, n0), (a1, _s1, n1) in zip(ordered, ordered[1:]):
         if a0 + s0 > a1:
-            # BSS following the last data section is normal and adjacent;
-            # a genuine overlap is not.
             problems.append('%s (0x%08x+0x%x) overlaps %s (0x%08x)'
                             % (n0, a0, s0, n1, a1))
+
+    # BSS is different, and the difference matters: the linker puts it
+    # immediately above the last data section, so once the loader rounds
+    # that section up to 32 bytes the copy reaches a few bytes into the
+    # start of BSS. Every normal DOL does this, and it is harmless because
+    # crt0 zeroes BSS before main runs. Only a section whose *advertised*
+    # extent already runs into BSS is a genuine collision.
+    if dol.bss_size:
+        for name, _offset, addr, size in dol.sections():
+            if addr + size > dol.bss_addr and addr < dol.bss_addr:
+                problems.append(
+                    '%s (0x%08x+0x%x) runs into bss at 0x%08x'
+                    % (name, addr, size, dol.bss_addr))
+            elif addr + align_up(size) > dol.bss_addr and addr < dol.bss_addr:
+                notes.append(
+                    '%s ends at 0x%08x and the loader rounds it to 0x%08x, '
+                    '%d bytes into bss at 0x%08x — normal, crt0 zeroes bss'
+                    % (name, addr + size, addr + align_up(size),
+                       addr + align_up(size) - dol.bss_addr, dol.bss_addr))
 
     entry_ok = any(addr <= dol.entry < addr + align_up(size)
                    for _, _, addr, size in

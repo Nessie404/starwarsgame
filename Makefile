@@ -100,6 +100,12 @@ export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib) \
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
+	@# elf2dol ends the file at the last section's real size, but a loader
+	@# reads sections in 32-byte units, so the DOL can be up to 31 bytes
+	@# shorter than it promises. Dolphin rejects the whole executable for
+	@# that ("Failed to init core") before running anything. See
+	@# tools/pad_dol.py.
+	@python3 $(CURDIR)/tools/pad_dol.py $(CURDIR)/$(TARGET).dol
 
 #---------------------------------------------------------------------------------
 clean:

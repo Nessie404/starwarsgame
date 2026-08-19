@@ -61,6 +61,13 @@ jobs:
         working-directory: base
         run: make
 
+      - name: Pad the DOL to the length a loader reads
+        working-directory: base
+        # Older tags predate the Makefile doing this, and their elf2dol
+        # leaves the file up to 31 bytes shorter than its own header
+        # promises — which is exactly what makes Dolphin refuse it.
+        run: python3 ../head/tools/pad_dol.py wiikart.dol
+
       - name: Check the DOL the way Dolphin's loader does
         working-directory: base
         run: python3 ../head/tools/validate_dol.py wiikart.dol

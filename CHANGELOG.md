@@ -4,6 +4,48 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.11.0] - 2026-08-19
+
+### Fixed
+
+- **A DOL that a loader would refuse to open.** `elf2dol` ends the file at
+  the last section's real size, but a loader reads sections in 32-byte
+  units, so the file can promise up to 31 bytes it does not contain.
+  Dolphin's `DolReader::Initialize` rejects the whole executable for that
+  and reports it as "Failed to init core", before a single instruction
+  runs. Whether it bites is luck — it depends on the last section's size
+  modulo 32 — and WiiKart shipped it in v0.1 (12 bytes short) and v1.0
+  through v1.2.1 (28 bytes short). `tools/pad_dol.py` now runs from the
+  Makefile after every build and appends exactly the missing zero bytes,
+  and `tools/validate_dol.py` fails the build if anything is still short.
+  Found by the validator refusing to publish a build that was 4 bytes
+  short. (#1)
+
+### Added
+
+- **An AI takes over when you cross the line.** Finishing used to hand your
+  car to a driver with no plan, which on a mountain pass meant it might
+  simply drive off. Now a cool-down driver takes the wheel: it aims for the
+  shoulder on the side you are already on, scans 55 m ahead and slows for
+  whatever corner is coming, bleeds the target speed down over eleven
+  seconds, and parks the car. It brakes only when it is actually going too
+  fast, so the car rolls to a stop rather than stamping on the pedal. Every
+  finisher gets it, not just the player, so the field comes home instead of
+  scattering.
+- Tests for the above: the cool-down driver brings the car home on Monarch,
+  Guanella and Berthoud with no falls, no reversing, at least 30 m driven
+  and a genuine standstill; and no finished car in a whole field falls off
+  the mountain after the flag.
+
+### Changed
+
+- `tools/validate_dol.py` no longer treats the loader's 32-byte rounding
+  reaching into the start of BSS as a fault. Every normal DOL does that and
+  crt0 zeroes BSS before `main`, so it is now a note; only a section whose
+  advertised extent runs into BSS is reported as a collision.
+- The historical patch workflow pads the DOL too, so a fix built on an old
+  tag gets a loadable binary even though that tag's Makefile predates this.
+
 ## [1.10.0] - 2026-08-19
 
 ### Added

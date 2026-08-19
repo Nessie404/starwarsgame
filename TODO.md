@@ -1,6 +1,6 @@
 # WiiKart future work
 
-These are design targets for releases after v1.10.0. Details may change after
+These are design targets for releases after v1.11.0. Details may change after
 testing, because apparently cars, mountains, and tires all object to being
 reduced to one convenient slider.
 
@@ -35,6 +35,25 @@ Left for later, now that the camera has somewhere to live:
   look-ahead settings.
 - [ ] Let the camera lead into corners slightly rather than only along the
   car's nose.
+
+## Race end and marshals
+
+- [x] Hand the car to an AI when the player finishes, instead of leaving it
+  under a driver with no plan — it used to be able to drive off the
+  mountain. Done in v1.11.0: `cooldown_control` in `source/game.c` aims for
+  the shoulder, slows for the corner ahead, winds its target speed down
+  over eleven seconds and parks.
+- [ ] Send a marshal helicopter down when the player is going the wrong way.
+  Detect it from the car's velocity along the track centreline rather than
+  from heading alone, cut engine power while it lasts, and draw the
+  helicopter with a TURN AROUND message. Humans only — the AI's reverse
+  recovery must not be penalised. `Kart.wrong_way` and `Kart.wrong_way_t`
+  already exist for this; the settings need a threshold and a power cut,
+  through all six places in `docs/HANDOFF.md` section 4.
+- [ ] Tone the on-screen control hints down and give the space to the small
+  leaderboard instead. `show_input_overlay` should default to 0 in
+  `control_config_defaults` and `config/controls.json`, and the setup
+  screen's two hint lines should condense to one.
 
 ## Roads, passes, and conditions
 
