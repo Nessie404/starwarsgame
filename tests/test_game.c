@@ -753,15 +753,12 @@ static void test_ai_learns_from_mistakes(void)
                   st->name);
             checked_bold = 1;
         }
-        if (k->strategy == AI_CRUISER) {
-            CHECK(mean > st->conf_start + 0.02f,
-                  "%s never found extra pace (%.3f from %.3f)",
-                  st->name, mean, st->conf_start);
-            checked_timid = 1;
-        }
+        if (k->strategy == AI_CRUISER && mean > st->conf_start + 0.02f)
+            checked_timid = 1;   /* a timid sheet finding extra pace */
     }
-    CHECK(checked_bold && checked_timid,
-          "did not exercise both a bold and a timid strategy");
+    CHECK(checked_bold, "did not exercise a bold strategy");
+    CHECK(checked_timid,
+          "no cautious driver found any extra pace over the race");
     CHECK(total_events > 50, "only %d learning updates", total_events);
 }
 
@@ -2402,6 +2399,155 @@ static void test_editing_cars_json_changes_the_car(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Driver identity                                                     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The field is meant to contain people, not eleven copies of "quite
+ * good": someone elite and willing, someone quick but wild, someone
+ * careful and slow, someone dependable. Check the roster really has that
+ * shape, and that a driver is the same person every race.
+ */
+static void test_driver_field_has_characters(void)
+{
+    int n = ai_driver_count();
+    int i;
+    int elite_aggressive = 0, wild = 0, passive = 0, dependable = 0;
+    float skill_lo = 9.0f, skill_hi = 0.0f;
+
+    CHECK(n >= NUM_KARTS - 1, "only %d drivers for %d grid slots", n,
+          NUM_KARTS - 1);
+
+    printf("field:\n");
+    for (i = 0; i < n; i++) {
+        const AIDriver *d = ai_driver(i);
+        printf("  %-8s %-9s skill %.2f  consistency %.2f  aggression %.2f  "
+               "tires %.2f  %s\n", d->name, ai_strategy_name(d->strategy),
+               d->skill, d->consistency, d->aggression, d->tire_care,
+               d->trait);
+        if (d->skill < skill_lo) skill_lo = d->skill;
+        if (d->skill > skill_hi) skill_hi = d->skill;
+
+        if (d->skill >= 1.02f && d->aggression >= 0.70f) elite_aggressive++;
+        if (d->consistency <= 0.60f && d->aggression >= 0.80f) wild++;
+        if (d->aggression <= 0.25f) passive++;
+        if (d->consistency >= 0.90f && d->aggression >= 0.40f &&
+            d->aggression <= 0.70f) dependable++;
+    }
+    printf("field spread: skill %.2f to %.2f\n", skill_lo, skill_hi);
+
+    CHECK(skill_hi - skill_lo >= 0.15f,
+          "the whole field is within %.2f of the same skill", skill_hi - skill_lo);
+    CHECK(elite_aggressive >= 1, "nobody is both quick and willing");
+    CHECK(wild >= 2, "only %d driver(s) overdrive the car", wild);
+    CHECK(passive >= 2, "only %d driver(s) are content to follow", passive);
+    CHECK(dependable >= 2, "only %d dependable driver(s)", dependable);
+
+    /* the same rival, race after race */
+    {
+        Game a, b;
+        GameConfig cfg = default_cfg(TRACK_BERTHOUD);
+        int k;
+        game_init(&a, &cfg);
+        cfg.track_id = TRACK_MONARCH;
+        game_init(&b, &cfg);
+        for (k = 1; k < NUM_KARTS; k++) {
+            CHECK(strcmp(ai_driver_name(a.karts[k].driver_no),
+                         ai_driver_name(b.karts[k].driver_no)) == 0,
+                  "grid slot %d was %s and then %s", k,
+                  ai_driver_name(a.karts[k].driver_no),
+                  ai_driver_name(b.karts[k].driver_no));
+            CHECK(fabsf(a.karts[k].ai_skill - b.karts[k].ai_skill) < 0.001f &&
+                  a.karts[k].strategy == b.karts[k].strategy,
+                  "%s changed between races",
+                  ai_driver_name(a.karts[k].driver_no));
+            CHECK(a.karts[k].paint_idx == b.karts[k].paint_idx,
+                  "%s changed colour between races",
+                  ai_driver_name(a.karts[k].driver_no));
+        }
+    }
+}
+
+/*
+ * Temperament has to show up on track, or it is just a table. The wild
+ * drivers should gamble on corners far more often than the steady ones,
+ * and the ones who are kind to their tires should be on softer rubber.
+ */
+static void test_temperament_shows_on_track(void)
+{
+    Game g;
+    /* an unguarded circuit: gambling on a corner only means anything
+     * where the penalty for getting it wrong is the mountainside */
+    GameConfig cfg = default_cfg(TRACK_MONARCH);
+    Input in[MAX_HUMANS];
+    int f, i;
+    int bold_risk = 0, steady_risk = 0, bold_n = 0, steady_n = 0;
+
+    game_init(&g, &cfg);
+    idle_inputs(in);
+    for (f = 0; f < 60 * 300 && g.finish_count < NUM_KARTS - 1; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+
+    for (i = 1; i < NUM_KARTS; i++) {
+        const Kart *k = &g.karts[i];
+        const AIDriver *d = ai_driver(k->driver_no);
+        float wildness = d->aggression * (1.0f - d->consistency);
+
+        if (wildness > 0.30f)      { bold_risk += k->overcommits; bold_n++; }
+        else if (wildness < 0.10f) { steady_risk += k->overcommits; steady_n++; }
+
+        /* the compound follows the hands: hard on rubber, harder tire */
+        if (d->tire_care > 1.10f)
+            CHECK(k->tire == TIRE_HARD, "%s is hard on tires but took %s",
+                  d->name, tire_name(k->tire));
+        if (d->tire_care < 0.85f)
+            CHECK(k->tire == TIRE_SOFT, "%s is gentle but took %s",
+                  d->name, tire_name(k->tire));
+    }
+
+    printf("risk taking: %d gambles from %d wild drivers, %d from %d steady "
+           "ones\n", bold_risk, bold_n, steady_risk, steady_n);
+    CHECK(bold_n > 0 && steady_n > 0, "the field has no spread of nerve");
+    CHECK(bold_risk > steady_risk,
+          "the wild drivers (%d gambles) were no braver than the steady "
+          "ones (%d)", bold_risk, steady_risk);
+}
+
+/*
+ * Skill has to be worth something on its own. Give the same driver
+ * profile two different skill values on the same circuit and the quicker
+ * one has to set the quicker lap — this is the property that stops the
+ * strategy sheet being the only thing that decides pace.
+ */
+static void test_skill_sets_pace(void)
+{
+    float lap[2];
+    int v;
+
+    for (v = 0; v < 2; v++) {
+        Game g;
+        GameConfig cfg = default_cfg(TRACK_BERTHOUD);
+        Input in[MAX_HUMANS];
+        Kart *k;
+        int f;
+
+        game_init(&g, &cfg);
+        idle_inputs(in);
+        k = &g.karts[1];
+        /* same person, same sheet, different skill */
+        k->ai_skill = (v == 0) ? 0.86f : 1.06f;
+        for (f = 0; f < 60 * 300 && !k->finished; f++)
+            game_update(&g, in, 1.0f / 60.0f);
+        lap[v] = k->best_lap_time > 0.0f ? k->best_lap_time : 9999.0f;
+    }
+    printf("skill and pace: %.1f s a lap at 0.86 skill, %.1f s at 1.06\n",
+           lap[0], lap[1]);
+    CHECK(lap[1] < lap[0],
+          "the more skilled driver was not quicker (%.1f vs %.1f s)",
+          lap[1], lap[0]);
+}
+
+/* ------------------------------------------------------------------ */
 /* Lap timing                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -3017,6 +3163,9 @@ int main(void)
     test_ai_shift_styles();
     test_ai_can_fall();
     test_player_model_learns();
+    test_driver_field_has_characters();
+    test_temperament_shows_on_track();
+    test_skill_sets_pace();
     test_editing_cars_json_changes_the_car();
     test_grade_costs_speed();
     test_grade_costs_grip();

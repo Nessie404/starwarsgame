@@ -499,7 +499,10 @@ typedef struct {
 
     /* role / livery */
     int   human;          /* -1 = AI, else human player index          */
-    int   driver_no;      /* AI grid slot, for ai_driver_name()         */
+    int   driver_no;      /* AI grid slot, for ai_driver()              */
+    float tire_care;      /* driver's effect on tire wear, 1 = neutral  */
+    float consistency;    /* 0 ragged .. 1 never puts a wheel wrong     */
+    float aggression;     /* 0 follows .. 1 dives up the inside         */
     int   paint_idx;      /* index into the platform layer's palette   */
     float ai_line;        /* base racing-line offset, meters           */
     float ai_skill;
@@ -517,6 +520,7 @@ typedef struct {
     float overcommit_t;                      /* deliberate AI overreach  */
     float overcommit_line;                   /* risky outside line, m    */
     int   risk_corner;                       /* last corner risk-tested  */
+    int   overcommits;                       /* times they went for it   */
     unsigned int rng_state;                  /* deterministic local PRNG */
 
     /* timing: every driver's own stopwatch, humans and AI alike */
@@ -592,6 +596,33 @@ const char *ai_strategy_name(int strategy);
  * font can render.
  */
 const char *ai_driver_name(int grid_slot);
+
+/*
+ * A driver, as distinct from a driving style.
+ *
+ * The strategy sheets say *how* a car is driven — where it brakes, which
+ * line it takes, when it shifts. They were doing double duty as the
+ * drivers themselves, which left a field of eleven people who were all
+ * roughly as good as each other. Skill, consistency, aggression and how
+ * hard someone is on their tires are separate things: a wild driver can
+ * be fast or hopeless, and a careful one can be either as well.
+ *
+ * Each entry is fixed to a grid slot, so the same rival is the same rival
+ * between races.
+ */
+typedef struct {
+    const char *name;
+    int   strategy;      /* which sheet they drive to                   */
+    float skill;         /* pace: scales the grip they dare to use      */
+    float consistency;   /* 0 = ragged, 1 = never puts a wheel wrong    */
+    float aggression;    /* 0 = happy to follow, 1 = dives up the inside */
+    float tire_care;     /* multiplies their tire wear; <1 is kind      */
+    int   paint;         /* their colour, so a rival is recognisable     */
+    const char *trait;   /* one word for the results screen             */
+} AIDriver;
+
+const AIDriver *ai_driver(int grid_slot);
+int ai_driver_count(void);
 float       ai_corner_conf(const Kart *k, const Track *t, int seg);
 
 /* derived stats for menus: 0-100 km/h time (s) and top speed (km/h) */

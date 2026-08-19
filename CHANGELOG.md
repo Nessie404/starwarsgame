@@ -4,6 +4,38 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.10.0] - 2026-08-19
+
+### Added
+
+- Driver identity, separate from driving style. An `AIDriver` table gives
+  each of the eleven rivals a skill, a consistency, an aggression, a
+  tire-care value, a colour and a one-word trait, all fixed to their grid
+  slot so the same rival turns up every race. The field now has a sharp
+  end, a scruffy middle, two drivers who overdrive the car and two who are
+  content to follow.
+- Each driver's trait is shown beside their name on the results screen.
+- `docs/HANDOFF.md`: how to build and test the project, what every file
+  does, the conventions that matter, and a start-here recipe for each
+  remaining item on the TODO list.
+
+### Changed
+
+- Strategy sheets now decide *style* only — line, defending, attacking,
+  power-up patience, shift habits and how fast a driver adapts. The pace
+  ceiling and engine trim they used to carry are gone, so how quick a
+  driver ultimately is comes from their own skill. Measured on Berthoud,
+  the same driver profile is worth 65.0 s a lap at 0.86 skill and 60.7 s
+  at 1.06.
+- Consistency and aggression now drive behaviour rather than sitting in a
+  table: a ragged driver carries a few percent more speed into a corner
+  than the tires will take and loses nerve for it, and gambles on
+  unguarded corners far more often. Measured on Monarch, the three wildest
+  drivers gambled eight times against four from the seven steady ones.
+- Tire care picks a driver's compound and scales their wear, so the
+  drivers who are kind to their rubber run softs and the ones who abuse it
+  run hards.
+
 ## [1.9.0] - 2026-08-19
 
 ### Added
@@ -248,6 +280,7 @@ artifacts and their longer descriptions remain available on the
   strategies, learning, driver adaptation, Berthoud and Loveland Pass, and
   motorsport-style power-ups.
 
+[1.10.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.10.0
 [1.9.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.9.0
 [1.8.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.8.0
 [1.7.0]: https://github.com/Nessie404/starwarsgame/releases/tag/v1.7.0

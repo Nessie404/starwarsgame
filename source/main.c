@@ -2224,6 +2224,10 @@ static void draw_race_hud(void)
                      230, 230, 235, 230);
             hud_text(W * 0.5f - 132.0f, y, 11.0f, 18.0f, kart_label(k),
                      c[0], c[1], c[2], 240);
+            /* who they are, as well as where they finished */
+            if (k->human < 0)
+                hud_text(W * 0.5f - 44.0f, y, 8.0f, 13.0f,
+                         ai_driver(k->driver_no)->trait, 150, 158, 175, 190);
             if (k->finished)
                 snprintf(buf, sizeof(buf), "%.1fS", k->finish_time);
             else

@@ -1,6 +1,6 @@
 # WiiKart future work
 
-These are design targets for releases after v1.8.0. Details may change after
+These are design targets for releases after v1.10.0. Details may change after
 testing, because apparently cars, mountains, and tires all object to being
 reduced to one convenient slider.
 
@@ -76,13 +76,28 @@ Left for later, now that the camera has somewhere to live:
 
 ## Drivers, AI, and persistent competition
 
-- [ ] Separate driver skill from personality. Build a field containing elite
+- [x] Separate driver skill from personality. Build a field containing elite
   aggressive drivers, poor drivers who overcommit, overly passive drivers,
   and dependable safe drivers rather than eleven variations of "quite good."
-- [ ] Give every AI driver a unique name, character, visual identity, strengths,
-  weaknesses, and stable behavior profile. *(v1.5.0 did the names, fixed to
-  grid slots; character, identity and per-driver strengths are still open and
-  belong with the skill/personality split above.)*
+      *(v1.10.0: an `AIDriver` table in `source/game.c` gives each rival a
+      skill, a consistency, an aggression and a tire-care value, separate
+      from the strategy sheet that says how they drive. Skill is worth
+      4.3 s a lap on Berthoud; wild drivers gamble on unguarded corners
+      about five times as often as steady ones.)*
+- [x] Give every AI driver a unique name, character, visual identity, strengths,
+  weaknesses, and stable behavior profile. *(v1.10.0: name, colour and a
+  one-word trait shown on the results screen, all fixed to the grid slot,
+  so the same rival is the same rival every race.)*
+- [ ] **Make pace come from skill rather than from the racing line.** Right
+  now a driver's lap time is dominated by their sheet's `line_bias` — a
+  constant lateral offset — so the INSIDE sheet is quick because its line is
+  literally shorter and the CRUISER sheet is slow because its line is longer,
+  whoever is driving. The fix is a proper apex-based line (turn in wide, clip
+  the apex, run out) built from `Track.curv` in `ai_tactical_line`
+  (`source/game.c`), with the *style* deciding how much the driver commits to
+  that line rather than how far off-centre they sit all lap. Test it by
+  giving two drivers the same skill and different sheets and checking their
+  best laps land within a few percent of each other.
 - [x] Add a continuously updating on-screen leaderboard based on current race
   order and keep it visible without covering the useful driving view.
       *(v1.5.0: right-edge column with position, driver and gap in seconds.)*

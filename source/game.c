@@ -422,22 +422,35 @@ float tire_drag_mult_with_settings(const GameSettings *settings,
 /* Strategy sheets. conf_start over 1.0 means the driver begins the race
  * believing it can beat the grip limit: it will run wide, learn, and
  * settle down. Under 1.0 means it starts cautious and works up. */
+/*
+ * The sheets are *style*, not standing.
+ *
+ * conf_max used to differ per sheet, which meant the way a driver liked to
+ * race decided how quick they ultimately were: every CRUISER was slow and
+ * every LATE was fast, whoever was holding the wheel. The ceiling is now
+ * the same ambition for all of them and skill scales it per driver (see
+ * ai_learn), so a cautious elite is quick in a cautious way and a wild
+ * novice is slow in a wild way. Engine trim is uniform for the same
+ * reason. What the sheets still own: where a driver starts out on lap one,
+ * how fast they adapt, the line they like, whether they defend or attack,
+ * how long they sit on a power-up, and how they use the gearbox.
+ */
 const AIStrategy ai_strategies[AI_STRATEGY_COUNT] = {
 /*   name        conf_start conf_max learn_up learn_down line   defend attack wait  trim
  *                                                        up    down  shift delay     */
-  { "BALANCED",   0.97f,   1.05f,   0.014f,  0.10f,   0.00f,  0.35f, 0.40f, 1.0f, 1.000f,
+  { "BALANCED",   0.97f,   1.08f,   0.014f,  0.10f,   0.00f,  0.35f, 0.40f, 1.0f, 1.000f,
                                                              0.93f, 0.42f, 0.04f },
-  { "LATE",       1.12f,   1.14f,   0.010f,  0.17f,  -0.10f,  0.25f, 0.70f, 0.3f, 1.015f,
+  { "LATE",       1.12f,   1.08f,   0.010f,  0.17f,  -0.10f,  0.25f, 0.70f, 0.3f, 1.000f,
                                                              0.99f, 0.34f, 0.02f },
-  { "INSIDE",     0.99f,   1.06f,   0.013f,  0.11f,  -0.55f,  0.55f, 0.45f, 1.2f, 0.995f,
+  { "INSIDE",     0.99f,   1.08f,   0.013f,  0.11f,  -0.55f,  0.55f, 0.45f, 1.2f, 1.000f,
                                                              0.90f, 0.40f, 0.05f },
-  { "DEFENDER",   0.95f,   1.02f,   0.011f,  0.09f,   0.10f,  0.95f, 0.25f, 2.2f, 0.990f,
+  { "DEFENDER",   0.95f,   1.08f,   0.011f,  0.09f,   0.10f,  0.95f, 0.25f, 2.2f, 1.000f,
                                                              0.87f, 0.38f, 0.09f },
-  { "CHARGER",    1.06f,   1.11f,   0.012f,  0.14f,  -0.25f,  0.30f, 0.95f, 0.0f, 1.020f,
+  { "CHARGER",    1.06f,   1.08f,   0.012f,  0.14f,  -0.25f,  0.30f, 0.95f, 0.0f, 1.000f,
                                                              0.97f, 0.38f, 0.02f },
-  { "DRAFTER",    1.00f,   1.09f,   0.016f,  0.12f,   0.30f,  0.40f, 0.80f, 3.0f, 1.005f,
+  { "DRAFTER",    1.00f,   1.08f,   0.016f,  0.12f,   0.30f,  0.40f, 0.80f, 3.0f, 1.000f,
                                                              0.92f, 0.45f, 0.06f },
-  { "CRUISER",    0.88f,   1.03f,   0.018f,  0.07f,   0.45f,  0.20f, 0.30f, 1.6f, 0.985f,
+  { "CRUISER",    0.88f,   1.08f,   0.018f,  0.07f,   0.45f,  0.20f, 0.30f, 1.6f, 1.000f,
                                                              0.82f, 0.36f, 0.12f },
 };
 
@@ -463,16 +476,47 @@ const char *ai_strategy_name(int strategy)
  * something. Strategy still comes from the sheet rota, so a name is an
  * identity rather than a second copy of the behaviour.
  */
-const char *ai_driver_name(int grid_slot)
+/*
+ * The eleven rivals. Skill and temperament are set per driver rather than
+ * per strategy sheet, so the field has a sharp end, a scruffy middle and
+ * a couple of people who are simply along for the ride — which is what
+ * makes finishing fourth mean something.
+ *
+ *   name       sheet         skill  consist  aggr  tires  colour  trait
+ */
+static const AIDriver ai_drivers[] = {
+    /* the sharp end: quick and willing, and IBARRA is quick and wild */
+    { "HOLT",    AI_LATE,      1.05f, 0.86f, 0.90f, 1.15f, 0, "ATTACKER" },
+    { "RENARD",  AI_BALANCED,  1.03f, 0.94f, 0.55f, 0.92f, 1, "COMPLETE" },
+    { "IBARRA",  AI_CHARGER,   1.02f, 0.55f, 1.00f, 1.30f, 5, "WILD" },
+    /* the dependable middle */
+    { "BASTIEN", AI_DEFENDER,  0.99f, 0.90f, 0.60f, 0.95f, 2, "STUBBORN" },
+    { "OSEI",    AI_INSIDE,    0.98f, 0.92f, 0.50f, 0.90f, 3, "TIDY" },
+    { "NORDLI",  AI_CRUISER,   0.96f, 0.97f, 0.25f, 0.72f, 6, "SMOOTH" },
+    { "SOLANO",  AI_DRAFTER,   0.95f, 0.88f, 0.65f, 1.00f, 4, "PATIENT" },
+    /* the back: one who overdrives, one who under-drives, two learners */
+    { "TANAKA",  AI_CHARGER,   0.92f, 0.48f, 0.95f, 1.35f, 7, "RAGGED" },
+    { "DELGADO", AI_CRUISER,   0.90f, 0.95f, 0.15f, 0.75f, 2, "TIMID" },
+    { "CROSS",   AI_LATE,      0.89f, 0.60f, 0.80f, 1.20f, 5, "OVERDRIVES" },
+    { "PETRAN",  AI_BALANCED,  0.87f, 0.82f, 0.40f, 0.98f, 4, "STEADY" }
+};
+
+int ai_driver_count(void)
 {
-    static const char *names[] = {
-        "HOLT",   "RENARD", "BASTIEN", "OSEI",   "TANAHA", "DELGADO",
-        "CROSS",  "IBARRA",  "NORDLI",  "SOLANO", "PETRAN"
-    };
-    int n = (int)(sizeof(names) / sizeof(names[0]));
+    return (int)(sizeof(ai_drivers) / sizeof(ai_drivers[0]));
+}
+
+const AIDriver *ai_driver(int grid_slot)
+{
+    int n = ai_driver_count();
     if (grid_slot < 0)
         grid_slot = -grid_slot;
-    return names[grid_slot % n];
+    return &ai_drivers[grid_slot % n];
+}
+
+const char *ai_driver_name(int grid_slot)
+{
+    return ai_driver(grid_slot)->name;
 }
 
 /* what this driver currently believes about the corner at `seg` */
@@ -729,6 +773,9 @@ void game_init(Game *g, const GameConfig *cfg)
              * anyway: memset leaves zero skill and zero confidence, which
              * read as "brake for everything" if anything ever asks. */
             k->ai_skill = 1.0f;
+            k->tire_care = 1.0f;
+            k->consistency = 1.0f;
+            k->aggression = 0.5f;
             k->cur_corner = -1;
             for (r = 0; r < TRACK_MAX_CORNERS; r++)
                 k->corner_conf[r] = 1.0f;
@@ -740,25 +787,30 @@ void game_init(Game *g, const GameConfig *cfg)
             k->human = -1;
             k->driver_no = ai_no;
             k->spec = ai_no % kart_spec_count;
-            k->paint_idx = (i * 3 + 2) % PAINT_COUNT;
-            k->strategy = ai_no % AI_STRATEGY_COUNT;
+            k->paint_idx = ai_driver(ai_no)->paint % PAINT_COUNT;
+            {
+                const AIDriver *d = ai_driver(ai_no);
+                k->strategy = d->strategy;
+                k->ai_skill = d->skill * g->settings.ai_skill_mult;
+                k->tire_care = d->tire_care;
+                k->consistency = d->consistency;
+                k->aggression = d->aggression;
+            }
             st = &ai_strategies[k->strategy];
             k->ai_line = st->line_bias * g->track.road_half * 0.75f;
             k->line_target = k->ai_line;
-            /* a little spread inside each strategy so two drivers on the
-             * same sheet are still individuals */
-            k->ai_skill = (0.95f + 0.02f * (float)((ai_no * 5) % 4)) *
-                          g->settings.ai_skill_mult;
             for (c = 0; c < TRACK_MAX_CORNERS; c++)
                 k->corner_conf[c] = st->conf_start;
             k->cur_corner = -1;
             /* AI drive their own gearbox by hand, and pick rubber to suit
              * how they race: the aggressive sheets take softs */
             k->gearbox = GEARBOX_MANUAL;
-            k->tire = (k->strategy == AI_LATE || k->strategy == AI_CHARGER)
-                          ? TIRE_SOFT
-                          : (k->strategy == AI_CRUISER ? TIRE_HARD
-                                                       : TIRE_MEDIUM);
+            /* someone who is hard on rubber takes the harder compound;
+             * the gentle ones can afford softs and their extra grip */
+            k->tire = (k->tire_care > 1.10f)
+                          ? TIRE_HARD
+                          : (k->tire_care < 0.85f ? TIRE_SOFT
+                                                  : TIRE_MEDIUM);
         }
         /* humans start at the back of the grid */
         kart_place_on_grid(g, k,
@@ -872,7 +924,8 @@ static float ai_tactical_line(const Game *g, const Kart *k)
     if (who >= 0) {
         float side = (g->karts[who].lat > k->lat) ? -1.0f : 1.0f;
         float close = 1.0f - gap / AI_ATTACK_RANGE;
-        line += side * st->attack * close * room;
+        line += side * (st->attack * 0.4f + k->aggression * 0.6f) *
+                close * room;
     }
 
     return game_clampf(line, -room, room);
@@ -918,13 +971,17 @@ static void ai_control(const Game *g, Kart *k, Input *in, float dt)
                    k->respawn_t <= 0.0f && corner != k->risk_corner &&
                    t->corner_peak[corner] >=
                        g->settings.ai_overcommit_min_curvature) {
-            float attack_weight = game_clampf((st->attack - 0.25f) / 0.70f,
+            float aggr = st->attack * 0.35f + k->aggression * 0.65f;
+            float attack_weight = game_clampf((aggr - 0.25f) / 0.70f,
                                                0.0f, 1.0f);
-            float chance = g->settings.ai_overcommit_chance * attack_weight;
+            /* and a steady head does it far less often than a wild one */
+            float chance = g->settings.ai_overcommit_chance * attack_weight *
+                           (1.45f - k->consistency);
             float roll;
             k->risk_corner = corner;
             roll = ai_random01(k);
             if (roll < chance) {
+                k->overcommits++;
                 int ahead = (k->seg + 6) % t->n;
                 float h0 = atan2f(t->dz[k->seg], t->dx[k->seg]);
                 float h1 = atan2f(t->dz[ahead], t->dx[ahead]);
@@ -1002,7 +1059,14 @@ static void ai_control(const Game *g, Kart *k, Input *in, float dt)
     for (j = 0; j < 48; j++) {
         float curv = t->curv[seg] > 1e-4f ? t->curv[seg] : 1e-4f;
         float conf = ai_corner_conf(k, t, seg);
-        float vt = sqrtf(mu * GRAVITY / curv) * 0.88f * conf;
+        /*
+         * A consistent driver leaves a sliver in hand and rarely gets it
+         * wrong; a ragged one carries a few percent more into the corner
+         * than the tires will take, runs wide, and loses nerve for it.
+         * This is where "poor drivers who overcommit" comes from.
+         */
+        float margin = 1.03f - 0.06f * k->consistency;
+        float vt = sqrtf(mu * GRAVITY / curv) * 0.88f * conf * margin;
         float allowed = sqrtf(vt * vt + 2.0f * a_brk * d);
         if (allowed < vmax_allow) vmax_allow = allowed;
         d += t->seg_len[seg];
@@ -1123,7 +1187,17 @@ static void ai_learn(Game *g, Kart *k)
             if (g->pmodel[h].pace > pace)
                 pace = g->pmodel[h].pace;
         {
-            float ceiling = st->conf_max *
+            /*
+             * How close to the limit this driver can ever get is what
+             * skill means: an elite driver learns their way to the edge
+             * of the sheet's ambition, a poor one plateaus short of it
+             * however many clean laps they string together. Without this
+             * the strategy sheet decided everything and the field was
+             * eleven variations of the same pace.
+             */
+            float skill_ceiling = game_clampf(
+                0.85f + 1.05f * (k->ai_skill - 0.85f), 0.80f, 1.10f);
+            float ceiling = st->conf_max * skill_ceiling *
                             game_clampf(0.97f + 0.10f * (pace - 1.0f),
                                         0.95f, 1.10f);
             if (k->corner_fault) {
@@ -1243,7 +1317,8 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         if (k->tire_temp < -40.0f) k->tire_temp = -40.0f;
         if (k->tire_temp > 220.0f) k->tire_temp = 220.0f;
 
-        k->tire_wear += g->settings.tire_wear_rate[c] * work * dt;
+        k->tire_wear += g->settings.tire_wear_rate[c] * work * dt *
+                        (k->tire_care > 0.0f ? k->tire_care : 1.0f);
         if (k->tire_wear > 1.0f) k->tire_wear = 1.0f;
 
         k->tire_grip_now = tire_condition_grip(&g->settings, c,
