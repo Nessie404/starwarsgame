@@ -134,16 +134,25 @@ def validate(path, quiet=False):
     # extent already runs into BSS is a genuine collision.
     if dol.bss_size:
         for name, _offset, addr, size in dol.sections():
-            if addr + size > dol.bss_addr and addr < dol.bss_addr:
-                problems.append(
-                    '%s (0x%08x+0x%x) runs into bss at 0x%08x'
-                    % (name, addr, size, dol.bss_addr))
-            elif addr + align_up(size) > dol.bss_addr and addr < dol.bss_addr:
+            if addr >= dol.bss_addr:
+                continue
+            spill = addr + align_up(size) - dol.bss_addr
+            if spill <= 0:
+                continue
+            if spill < ALIGN:
+                # The last data section is placed immediately below BSS, so
+                # once its size is rounded to 32 bytes it reaches a little
+                # way into BSS. Every normal DOL does this — and it is what
+                # rounding the advertised sizes up produces on purpose —
+                # and it is harmless because crt0 zeroes BSS before main.
                 notes.append(
-                    '%s ends at 0x%08x and the loader rounds it to 0x%08x, '
-                    '%d bytes into bss at 0x%08x — normal, crt0 zeroes bss'
-                    % (name, addr + size, addr + align_up(size),
-                       addr + align_up(size) - dol.bss_addr, dol.bss_addr))
+                    '%s reaches 0x%08x, %d bytes into bss at 0x%08x — '
+                    'normal 32-byte rounding, crt0 zeroes bss'
+                    % (name, addr + align_up(size), spill, dol.bss_addr))
+            else:
+                problems.append(
+                    '%s (0x%08x+0x%x) runs %d bytes into bss at 0x%08x'
+                    % (name, addr, size, spill, dol.bss_addr))
 
     entry_ok = any(addr <= dol.entry < addr + align_up(size)
                    for _, _, addr, size in

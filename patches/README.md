@@ -12,6 +12,7 @@ builds it with devkitPPC and publishes the zip.
 | `v1.0.1.patch` | `v1.0` | `v1.0.1` | The steering-polarity fix only — no other behaviour change from v1.0 |
 | `v1.5.1-boot-trace.patch` | `v1.5.0` | `v1.5.1` | Boot tracing only, for the "Failed to init core" report (issue #1). No gameplay change. |
 | `v1.5.2-diagnostic-minimal.patch` | `v1.5.0` | `v1.5.2` | `main.c` replaced by a bare video-and-console homebrew, to tell a bad binary apart from a bad emulator (issue #1). Not playable. |
+| `v1.5.3-section-align.patch` | `v1.5.0` | `v1.5.3` | v1.5.0 with every DOL section size rounded up to 32 bytes by the build. Only source change is the version stamp; the fix is `tools/pad_dol.py` running in the workflow. |
 
 Each is verified to apply cleanly to its base tag, and the workflow runs
 that line's host test suite before building.
@@ -39,41 +40,61 @@ proper `v0.1.1` release and the fallback stops firing.
 
 ## What Dolphin's "Failed to init core" actually means
 
-Worth writing down, because it rules out most of what looks worth trying.
+Dolphin reaches that message for a `.dol` inside `DolReader` and
+`CBoot::BootUp`, and both routes happen **before the emulated CPU executes
+one instruction**:
 
-Dolphin reaches that message for a `.dol` in exactly two ways, both inside
-`DolReader` and `CBoot::BootUp`:
-
-1. `DolReader::Initialize` returns false. It rejects a file smaller than
-   the 0x100-byte header, and any section whose offset plus size — with the
-   size rounded **up to 32 bytes**, which is how the loader reads — runs
-   past the end of the file.
+1. `DolReader::Initialize` returns false. It rejects a file smaller than the
+   0x100-byte header, and any section whose offset plus size — with the size
+   rounded **up to 32 bytes**, which is how the loader reads — runs past the
+   end of the file.
 2. `LoadIntoMemory` fails while copying the sections into emulated RAM.
 
-Both happen **before the emulated CPU executes one instruction.** So no
-amount of tracing inside `main()` can report on this failure, and nothing
-the game does at startup can cause it: v1.5.1 added boot tracing and
+So no amount of tracing inside `main()` can report on this failure, and
+nothing the game does at startup can cause it. v1.5.1 added boot tracing and
 printed nothing, exactly as this predicts.
 
-`tools/validate_dol.py` implements check 1 and runs on every build, so the
-release binaries are known to satisfy it. Confirmed against the published
-artifacts: v1.3.0 through v1.10.0 all pass, with one text section, one data
-section, entry 0x80003f00 inside the text, BSS above the data and
-everything inside MEM1.
+## The section-size defect, and how it was pinned down
 
-Two theories died on that data:
+`elf2dol` writes each section's exact ELF byte count into the header and
+ends the file at the last section's exact size. A loader working in 32-byte
+units therefore wants up to 31 bytes per section that the header does not
+describe and the file does not contain.
 
-- **Section alignment.** v1.5.0 onwards do have a `text0` size that is not
-  a multiple of 32 (0x793ec and similar) while v1.3.0 and v1.4.0 are
-  aligned — but v1.0, v1.0.1, v1.1.0 and v1.2.1 are *also* unaligned and
-  boot. The loader rounds up when it reads; it does not object.
-- **Truncation.** v0.1 through v1.2.1 are genuinely 12 to 28 bytes shorter
-  than their headers promise, which is the one thing check 1 exists to
-  catch, and those are the builds that run.
+Two rounds of evidence were needed, and the first one misled us.
 
-The failing binaries are strictly better formed than the working ones, the
-package layouts are identical (`wiikart.dol` and `apps/wiikart/boot.dol`
-match in both v1.4.0 and v1.5.0), and `main()` is byte-identical between
-v1.4.0 and v1.5.0. That is what `v1.5.2` is for: it changes the binary
-without changing the build, so whichever way it goes narrows the search to
-one side.
+**Round one, wrong conclusion.** v0.1 through v1.2.1 have unaligned section
+sizes *and* are 12 to 28 bytes short, and were reported as working — so
+alignment looked disproved. It was the wrong control: those builds were last
+run on an older Dolphin, and being short is itself disqualifying on a
+current one, so they say nothing about the reporter's install.
+
+**Round two.** `v1.5.2`, a bare video-and-console homebrew built from the
+same tree, Makefile, libraries and pinned toolchain, also failed. That ruled
+the game's own code out entirely and left only the shape of the binary. Held
+to builds actually tested on the reporter's Dolphin, the correlation is
+exact:
+
+| Build | `text0` size mod 32 | `data0` size mod 32 | Result |
+|---|---:|---:|---|
+| v1.4.0 | 0 | 0 | **boots** |
+| v1.5.0 | 12 | 0 | fails |
+| v1.6.0 | 4 | 0 | fails |
+| v1.10.0 | 8 | 0 | fails |
+| v1.5.1 | 12 | 0 | fails |
+| v1.5.2 | 28 | 28 | fails |
+
+v1.4.0 is the last build in which every section size happened to be a
+multiple of 32 already.
+
+`tools/pad_dol.py` now rounds every nonzero section size up to 32 and
+extends the file to match. Both are safe: a rounded section covers padding
+elf2dol already wrote, and reaches exactly the next section's 32-byte
+aligned load address; for the last section the rounding can reach a few
+bytes into the start of BSS, which crt0 zeroes before `main`. Run against
+the published binaries it is a **no-op on v1.3.0 and v1.4.0** — the two that
+are known good — and normalizes every other release to the same shape.
+
+`tools/validate_dol.py` enforces the file-length half and treats a
+sub-32-byte reach into BSS as a note rather than a fault, since that is what
+correct rounding produces.

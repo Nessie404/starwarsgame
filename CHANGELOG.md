@@ -4,6 +4,42 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.11.1] - 2026-08-19
+
+### Fixed
+
+- **The rest of the DOL defect — section sizes, not just file length.**
+  v1.11.0 padded the file out to the length a loader reads. That was half
+  the problem. `elf2dol` also writes each section's exact ELF byte count
+  into the header, so a loader working in 32-byte units wants bytes the
+  header never described. `tools/pad_dol.py` now rounds every nonzero
+  section size up to 32 as well.
+
+  This is the one property that separates the builds that boot from the
+  builds that do not. v1.4.0, the last release confirmed booting, is also
+  the last one where every section size happened to be a multiple of 32
+  already; v1.5.0, v1.6.0, v1.10.0, v1.5.1 and v1.5.2 all have an unaligned
+  text section and all fail. v1.5.2 mattered because it was a bare
+  video-and-console program built from the same tree and toolchain, and it
+  failed too — which ruled the game's own code out and left only the shape
+  of the binary.
+
+  The change is a no-op on v1.3.0 and v1.4.0, the two builds known to work,
+  and normalizes every other release to the same shape. (#1)
+- `tools/validate_dol.py` treats a section reaching under 32 bytes into the
+  start of BSS as a note rather than a fault. That is what correct rounding
+  produces, and crt0 zeroes BSS before `main`.
+
+### Note on the earlier diagnosis
+
+v1.11.0's notes said the alignment theory in issue #1 was disproved. That
+was wrong, and the reason is worth recording: the counterexamples used were
+v1.0 through v1.2.1, which have unaligned sections and were reported
+working. They were the wrong control — they were last run on an older
+Dolphin, and they are separately 12 to 28 bytes short, which disqualifies
+them on a current one. Held to builds actually tested on the reporter's
+Dolphin, alignment tracks the failure exactly.
+
 ## [1.11.0] - 2026-08-19
 
 ### Fixed
