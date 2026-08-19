@@ -120,6 +120,8 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
 - **v1.12**: a marshal helicopter cuts your engine if you drive the wrong
   way; the on-screen controls panel is off by default in favour of the
   leaderboard.
+- **v1.13**: a real apex-based racing line, so pace comes from skill
+  rather than from which sheet a driver happens to run.
 
 ---
 
@@ -158,29 +160,25 @@ starts failing by timeout. It is the canary for physics changes.
 `TODO.md` is the list. Here is the extra context for the ones that are
 not obvious. Each is independent — pick any.
 
-### 7a. Make pace come from skill, not from the racing line *(start here)*
+### 7a. Make pace come from skill, not from the racing line — done in v1.13.0
 
-**The problem.** Each AI strategy sheet has a `line_bias` — a constant
-lateral offset held all lap. The INSIDE sheet sits 0.55 of the way to the
-inside edge, so its path around the circuit is literally shorter and it is
-quick; the CRUISER sheet sits wide and is slow. That happens regardless of
-who is driving, so a talented cautious driver is still slow. Measured on
-Berthoud, best laps track `line_bias` more closely than they track skill.
+`line_bias` used to be a constant lateral offset held all lap, so a
+sheet's pace tracked which way a given circuit's corners happened to bend
+rather than who was driving it. Fixed by a new `Track.curv_signed[i]`
+(alongside `curv[]`, same 5-sample smoothing window, but keeps the sign —
+positive bends toward positive lat, matching `track_locate`'s convention)
+and a rewritten `ai_tactical_line` (`source/game.c`) that looks 14 m up
+the road, reads the signed curvature there, and leans toward that apex
+scaled by `line_bias` — now 0..1 commitment rather than a signed offset.
+A straight reads near-zero curvature, so the lean relaxes to the
+centerline on its own; the defend/attack terms still layer on top
+unchanged. `test_racing_line_pace_is_not_the_sheet` (`tests/test_game.c`)
+is the proof: INSIDE and CRUISER, the two ends of the commitment range,
+given identical skill and identical learned corner confidence, land
+within 1.4% of each other on Berthoud, while `test_skill_sets_pace` still
+shows skill alone worth 7.3%.
 
-**The fix.** Build a real racing line instead of an offset: turn in from
-the outside, clip the apex, run out wide again. `Track.curv[]` (per
-sample, already smoothed) tells you where the corners are and which way
-they bend; `Track.corner_id[]` groups them. In `ai_tactical_line`
-(`source/game.c`) return an offset that follows that shape, and let each
-sheet decide *how committed* the line is (how close to the apex, how early
-the turn-in) rather than a constant offset.
-
-**How you will know it worked.** Add a test that gives two drivers the
-same `ai_skill` and different sheets, races them, and checks their best
-laps are within about 3% of each other — while `test_skill_sets_pace`
-(already written) still shows a skill difference being worth seconds.
-
-### 7b. A rechargeable boost, and a `turbo` block in `cars.json`
+### 7b. A rechargeable boost, and a `turbo` block in `cars.json` *(start here)*
 
 Add `boost_charge` (0–1) to `Kart`, recharging when off the throttle and
 draining while deployed; a button to fire it (add an action in

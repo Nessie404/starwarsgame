@@ -108,16 +108,20 @@ Left for later, now that the camera has somewhere to live:
   weaknesses, and stable behavior profile. *(v1.10.0: name, colour and a
   one-word trait shown on the results screen, all fixed to the grid slot,
   so the same rival is the same rival every race.)*
-- [ ] **Make pace come from skill rather than from the racing line.** Right
-  now a driver's lap time is dominated by their sheet's `line_bias` — a
-  constant lateral offset — so the INSIDE sheet is quick because its line is
-  literally shorter and the CRUISER sheet is slow because its line is longer,
-  whoever is driving. The fix is a proper apex-based line (turn in wide, clip
-  the apex, run out) built from `Track.curv` in `ai_tactical_line`
-  (`source/game.c`), with the *style* deciding how much the driver commits to
-  that line rather than how far off-centre they sit all lap. Test it by
-  giving two drivers the same skill and different sheets and checking their
-  best laps land within a few percent of each other.
+- [x] Make pace come from skill rather than from the racing line. `line_bias`
+  used to be a constant lateral offset held all lap, so the INSIDE sheet was
+  quick because its line was literally shorter and the CRUISER sheet was
+  slow because its line was longer — on whichever circuit that particular
+  offset happened to net out as a shortcut, whoever was driving. Fixed by
+  `Track.curv_signed` (new field alongside `curv`, same smoothing window,
+  keeps which way a bend turns) and `ai_tactical_line` (`source/game.c`),
+  which now looks 14 m up the road and leans toward whatever apex is
+  actually there, scaled by `line_bias` reused as 0..1 commitment rather
+  than a signed position. A straight reads near-zero curvature, so the
+  lean relaxes back to the centerline on its own. Measured on Berthoud:
+  INSIDE and CRUISER, same skill, same learned corner confidence, land
+  within 1.4% of each other; skill alone is still worth 7.3% (0.86 vs 1.06,
+  `test_skill_sets_pace`). Test: `test_racing_line_pace_is_not_the_sheet`.
 - [x] Add a continuously updating on-screen leaderboard based on current race
   order and keep it visible without covering the useful driving view.
       *(v1.5.0: right-edge column with position, driver and gap in seconds.)*

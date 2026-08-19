@@ -4,6 +4,29 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.13.0] - 2026-08-19
+
+### Changed
+
+- **The racing line is a real racing line now, not a fixed lateral
+  position.** Each AI strategy sheet's `line_bias` used to be a constant
+  offset held for the entire lap, so a sheet came out quick or slow
+  depending on which way a particular circuit's corners happened to bend
+  — nothing to do with the driver holding the wheel. `Track.curv_signed`
+  is a new per-sample field (alongside the existing `curv`, same
+  smoothing window, but keeping which way a bend turns rather than just
+  how sharp it is), and `ai_tactical_line` now looks 14 m up the road,
+  reads the curvature there, and leans toward that apex — scaled by
+  `line_bias`, repurposed as 0 to 1 commitment rather than a signed
+  position. A straight reads near-zero curvature, so the lean relaxes
+  back to the centerline between corners on its own.
+
+  Measured on Berthoud: INSIDE and CRUISER — the two ends of the
+  commitment range — given identical skill and identical learned corner
+  confidence, land within 1.4% of each other. Skill on its own is still
+  worth 7.3% (`test_skill_sets_pace`, unchanged). The new
+  `test_racing_line_pace_is_not_the_sheet` is what proves it.
+
 ## [1.12.0] - 2026-08-19
 
 ### Added

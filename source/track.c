@@ -423,17 +423,24 @@ void track_init_with_settings(Track *t, int track_id,
         if (t->py[i] > t->max_y) t->max_y = t->py[i];
     }
 
-    /* curvature = heading change per meter, smoothed over 5 samples */
+    /* curvature = heading change per meter, smoothed over 5 samples.
+     * The signed version keeps which way the road bends instead of just
+     * how sharply — positive means it bends toward positive lat (right),
+     * matching track_locate's lateral sign — which is what lets the AI's
+     * racing line lean into the actual apex instead of a fixed side. */
     for (i = 0; i < t->n; i++) {
-        float acc = 0.0f, lensum = 0.0f;
+        float acc = 0.0f, sacc = 0.0f, lensum = 0.0f;
         int j;
         for (j = -2; j <= 2; j++) {
             int a = ((i + j) % t->n + t->n) % t->n;
             int b = (a + 1) % t->n;
-            acc += fabsf(game_angle_wrap(heading[b] - heading[a]));
+            float dh = game_angle_wrap(heading[b] - heading[a]);
+            acc += fabsf(dh);
+            sacc += dh;
             lensum += t->seg_len[a];
         }
         t->curv[i] = acc / (lensum > 0.1f ? lensum : 0.1f);
+        t->curv_signed[i] = sacc / (lensum > 0.1f ? lensum : 0.1f);
     }
 
     /*

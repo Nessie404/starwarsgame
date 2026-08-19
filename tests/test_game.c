@@ -693,9 +693,9 @@ static void test_ai_strategies_differ(void)
         if (conf < min_conf) min_conf = conf;
         if (conf > max_conf) max_conf = conf;
 
-        lines[i] = k->ai_line;
+        lines[i] = ai_strategies[k->strategy].line_bias;
         for (j = 1; j < i; j++)
-            if (fabsf(lines[j] - k->ai_line) < 0.05f)
+            if (fabsf(lines[j] - lines[i]) < 0.05f)
                 dup = 1;
         if (!dup)
             distinct_lines++;
@@ -2740,6 +2740,50 @@ static void test_skill_sets_pace(void)
           lap[1], lap[0]);
 }
 
+/*
+ * The racing line used to be a fixed lateral offset held for the whole
+ * lap, so a sheet came out quicker or slower depending on which way a
+ * particular circuit's corners happened to bend — nothing to do with the
+ * driver holding the wheel. Give two drivers the same skill and the same
+ * learned corner confidence, differing only in which sheet (and so which
+ * apex commitment, ai_tactical_line) they drive solo round the same
+ * circuit, and their best laps should land close together. INSIDE and
+ * CRUISER are the two ends of the commitment range, so they are the
+ * sharpest version of this test.
+ */
+static void test_racing_line_pace_is_not_the_sheet(void)
+{
+    float lap[2];
+    const int strategies[2] = { AI_INSIDE, AI_CRUISER };
+    int v;
+
+    for (v = 0; v < 2; v++) {
+        Game g;
+        GameConfig cfg = default_cfg(TRACK_BERTHOUD);
+        Input in[MAX_HUMANS];
+        Kart *k;
+        int f, c;
+
+        game_init(&g, &cfg);
+        idle_inputs(in);
+        k = &g.karts[1];
+        k->ai_skill = 1.0f;
+        k->strategy = strategies[v];
+        for (c = 0; c < TRACK_MAX_CORNERS; c++)
+            k->corner_conf[c] = 1.0f;      /* equal nerve, isolate the line */
+        for (f = 0; f < 60 * 300 && !k->finished; f++)
+            game_update(&g, in, 1.0f / 60.0f);
+        lap[v] = k->best_lap_time > 0.0f ? k->best_lap_time : 9999.0f;
+    }
+
+    printf("same skill, INSIDE vs CRUISER on BERTHOUD: %.1f s vs %.1f s "
+           "(%.1f%% apart)\n", lap[0], lap[1],
+           100.0f * fabsf(lap[0] - lap[1]) / lap[0]);
+    CHECK(fabsf(lap[0] - lap[1]) < 0.03f * lap[0],
+          "%.1f s vs %.1f s — the sheet is still deciding pace, not skill",
+          lap[0], lap[1]);
+}
+
 /* ------------------------------------------------------------------ */
 /* Lap timing                                                          */
 /* ------------------------------------------------------------------ */
@@ -3363,6 +3407,7 @@ int main(void)
     test_driver_field_has_characters();
     test_temperament_shows_on_track();
     test_skill_sets_pace();
+    test_racing_line_pace_is_not_the_sheet();
     test_editing_cars_json_changes_the_car();
     test_grade_costs_speed();
     test_grade_costs_grip();

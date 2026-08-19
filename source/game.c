@@ -436,25 +436,34 @@ float tire_drag_mult_with_settings(const GameSettings *settings,
  * ai_learn), so a cautious elite is quick in a cautious way and a wild
  * novice is slow in a wild way. Engine trim is uniform for the same
  * reason. What the sheets still own: where a driver starts out on lap one,
- * how fast they adapt, the line they like, whether they defend or attack,
- * how long they sit on a power-up, and how they use the gearbox.
+ * how fast they adapt, how hard they commit to the apex, whether they
+ * defend or attack, how long they sit on a power-up, and how they use the
+ * gearbox.
+ *
+ * `line_bias` used to be a fixed lateral offset held for the whole lap —
+ * which meant a sheet's line was quicker or slower depending on which way
+ * that particular circuit's corners happened to bend, not on anything
+ * about the driver. It is now how hard the driver commits to the real
+ * apex of whatever corner is actually ahead (ai_tactical_line reads the
+ * track's own signed curvature for that), so it is never negative: 0
+ * drives every corner near the centerline, 1 clips it hard.
  */
 const AIStrategy ai_strategies[AI_STRATEGY_COUNT] = {
 /*   name        conf_start conf_max learn_up learn_down line   defend attack wait  trim
  *                                                        up    down  shift delay     */
-  { "BALANCED",   0.97f,   1.08f,   0.014f,  0.10f,   0.00f,  0.35f, 0.40f, 1.0f, 1.000f,
+  { "BALANCED",   0.97f,   1.08f,   0.014f,  0.10f,   0.75f,  0.35f, 0.40f, 1.0f, 1.000f,
                                                              0.93f, 0.42f, 0.04f },
-  { "LATE",       1.12f,   1.08f,   0.010f,  0.17f,  -0.10f,  0.25f, 0.70f, 0.3f, 1.000f,
+  { "LATE",       1.12f,   1.08f,   0.010f,  0.17f,   0.60f,  0.25f, 0.70f, 0.3f, 1.000f,
                                                              0.99f, 0.34f, 0.02f },
-  { "INSIDE",     0.99f,   1.08f,   0.013f,  0.11f,  -0.55f,  0.55f, 0.45f, 1.2f, 1.000f,
+  { "INSIDE",     0.99f,   1.08f,   0.013f,  0.11f,   1.00f,  0.55f, 0.45f, 1.2f, 1.000f,
                                                              0.90f, 0.40f, 0.05f },
-  { "DEFENDER",   0.95f,   1.08f,   0.011f,  0.09f,   0.10f,  0.95f, 0.25f, 2.2f, 1.000f,
+  { "DEFENDER",   0.95f,   1.08f,   0.011f,  0.09f,   0.45f,  0.95f, 0.25f, 2.2f, 1.000f,
                                                              0.87f, 0.38f, 0.09f },
-  { "CHARGER",    1.06f,   1.08f,   0.012f,  0.14f,  -0.25f,  0.30f, 0.95f, 0.0f, 1.000f,
+  { "CHARGER",    1.06f,   1.08f,   0.012f,  0.14f,   0.65f,  0.30f, 0.95f, 0.0f, 1.000f,
                                                              0.97f, 0.38f, 0.02f },
-  { "DRAFTER",    1.00f,   1.08f,   0.016f,  0.12f,   0.30f,  0.40f, 0.80f, 3.0f, 1.000f,
+  { "DRAFTER",    1.00f,   1.08f,   0.016f,  0.12f,   0.50f,  0.40f, 0.80f, 3.0f, 1.000f,
                                                              0.92f, 0.45f, 0.06f },
-  { "CRUISER",    0.88f,   1.08f,   0.018f,  0.07f,   0.45f,  0.20f, 0.30f, 1.6f, 1.000f,
+  { "CRUISER",    0.88f,   1.08f,   0.018f,  0.07f,   0.30f,  0.20f, 0.30f, 1.6f, 1.000f,
                                                              0.82f, 0.36f, 0.12f },
 };
 
@@ -801,8 +810,10 @@ void game_init(Game *g, const GameConfig *cfg)
                 k->aggression = d->aggression;
             }
             st = &ai_strategies[k->strategy];
-            k->ai_line = st->line_bias * g->track.road_half * 0.75f;
-            k->line_target = k->ai_line;
+            /* the racing line is computed fresh every frame from the
+             * track's own shape (see ai_tactical_line); start on the
+             * centerline and let it take over from the first frame */
+            k->line_target = 0.0f;
             for (c = 0; c < TRACK_MAX_CORNERS; c++)
                 k->corner_conf[c] = st->conf_start;
             k->cur_corner = -1;
@@ -888,19 +899,37 @@ static int nearest_rival(const Game *g, const Kart *k, int ahead,
 #define AI_DEFEND_RANGE 18.0f    /* metres: "someone is on my bumper"  */
 #define AI_ATTACK_RANGE 15.0f    /* metres: "I can have a go at them"  */
 
+/* how far ahead the racing line looks to find the apex it should be
+ * leaning toward, and how much of the track's signed curvature (1/m)
+ * turns into a lateral lean once scaled by a driver's commitment */
+#define AI_APEX_LOOKAHEAD_M 14.0f
+#define AI_APEX_LEAN_SCALE  16.0f
+
 /*
  * Decide where on the road this driver wants to be, as a signed offset
- * from the centerline (positive = right, see game.h). Base is the strategy's preferred line; on top of that
- * a driver being chased by a human covers the side that human keeps
- * passing on (learned in ai_observe_humans), and a driver hunting a car
- * ahead picks the opposite side to set up a run at it.
+ * from the centerline (positive = right, see game.h).
+ *
+ * The base is a real racing line rather than a fixed lateral position:
+ * it looks a short way up the road, reads which way and how sharply the
+ * track bends there (Track.curv_signed), and leans toward that apex by
+ * an amount the driver's style controls. A straight reads near zero
+ * curvature, so the lean relaxes back toward the centerline on its own —
+ * nothing here is held constant all lap, which is what used to make the
+ * INSIDE sheet quick and the CRUISER sheet slow on a track whose corners
+ * happened to mostly bend one way, regardless of who was driving.
+ *
+ * On top of that, a driver being chased by a human covers the side that
+ * human keeps passing on (learned in ai_observe_humans), and a driver
+ * hunting a car ahead picks the opposite side to set up a run at it.
  */
 static float ai_tactical_line(const Game *g, const Kart *k)
 {
     const Track *t = &g->track;
     const AIStrategy *st = &ai_strategies[k->strategy];
-    float line = k->ai_line;
+    float line;
     float room = track_road_half(t, k->seg) * 0.70f;
+    float gap;
+    int who;
 
     /* With nothing but air past the shoulder, everyone drives closer to
      * the middle, though the amount is configurable. The separate
@@ -908,8 +937,17 @@ static float ai_tactical_line(const Game *g, const Kart *k)
      * use more road and occasionally get that calculation wrong. */
     if (!t->has_walls)
         room *= g->settings.ai_unguarded_line_room;
-    float gap;
-    int who;
+
+    {
+        int ahead = k->seg;
+        float dist = 0.0f;
+        while (dist < AI_APEX_LOOKAHEAD_M) {
+            dist += t->seg_len[ahead];
+            ahead = (ahead + 1) % t->n;
+        }
+        line = st->line_bias * t->curv_signed[ahead] *
+               AI_APEX_LEAN_SCALE * room;
+    }
 
     /* being hunted: cover the side of the road this human keeps using */
     who = nearest_rival(g, k, 0, 1, AI_DEFEND_RANGE, &gap);

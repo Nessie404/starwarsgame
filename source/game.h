@@ -56,6 +56,9 @@ typedef struct {
     float dz[TRACK_MAX_POINTS];
     float slope[TRACK_MAX_POINTS];  /* dy/dlen along direction of travel */
     float curv[TRACK_MAX_POINTS];   /* |curvature| 1/m, smoothed         */
+    float curv_signed[TRACK_MAX_POINTS]; /* curvature 1/m, + = bends
+                                          * toward positive lat (right),
+                                          * same smoothing window as curv */
     float seg_len[TRACK_MAX_POINTS];/* ground-plane segment length       */
     float total_len;
     float road_half;                /* nominal half-width, paved road    */
@@ -435,7 +438,9 @@ typedef struct {
     float conf_max;        /* ceiling once it has learned               */
     float learn_up;        /* gain per clean corner                     */
     float learn_down;      /* loss per botched corner                   */
-    float line_bias;       /* preferred line, fraction of road half     */
+    float line_bias;       /* apex commitment, 0 = stays near centerline
+                            * through a corner, 1 = clips it hard; never
+                            * negative — see ai_tactical_line             */
     float defend;          /* 0..1 tendency to cover a chasing human    */
     float attack;          /* 0..1 tendency to dive for an overtake     */
     float power_wait;      /* seconds it holds a power-up before using  */
@@ -511,7 +516,6 @@ typedef struct {
     float consistency;    /* 0 ragged .. 1 never puts a wheel wrong     */
     float aggression;     /* 0 follows .. 1 dives up the inside         */
     int   paint_idx;      /* index into the platform layer's palette   */
-    float ai_line;        /* base racing-line offset, meters           */
     float ai_skill;
     float prev_progress;  /* last frame's progress, for pass detection */
 
