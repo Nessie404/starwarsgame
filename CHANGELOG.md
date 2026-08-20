@@ -4,6 +4,49 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.24.0] - 2026-08-24
+
+### Added
+
+- **Road banking on every circuit.** Every track's curves now cant into
+  the turn — a small, realistic crown on the mountain passes, and a
+  real (if gentle) bank on BULLRING's own turns, both derived directly
+  from curvature so they ramp in and out with the bend rather than
+  switching on at its edges. It is not just cosmetic: a banked corner
+  genuinely lends the tires extra cornering grip, the way a real banked
+  turn does.
+- **BULLRING's straights, doubled.** 200 m each to 400 m each — a short
+  track grown into a proper speedway, now with real banking in its
+  turns to go with the extra room on the straights.
+- **A rebuilt car designer.** Gear count is now a control, not fixed at
+  five; every gear's own top speed and upshift/downshift point is
+  directly, granularly editable instead of a single auto-derived
+  ladder. Mass is no longer a free dial: it now follows power directly
+  (more engine costs more weight, the way it does in a real car), so a
+  design can no longer have a superkart's power-to-weight and a truck's
+  raw horsepower at the same time.
+- **Cars look like their numbers.** A car's on-track (and in-garage)
+  model now varies with its spec instead of one fixed shape repainted —
+  a long wheelbase reads as a long car, more mass as a broader one, more
+  drag as a taller, boxier one, and the driven axle carries visibly
+  bigger tires.
+- **Your car, obvious on the minimap.** In single-player, your own dot
+  now carries a pulsing white ring so picking it out of eleven others
+  is instant, not a squint at colours mid-corner.
+
+### Changed
+
+- **Cornering physics reworked: cars hold a line much longer before
+  actually losing it.** A tire's grip does not end at a hard wall —
+  past the nominal grip limit there is now a "shoulder" where a car
+  pushed harder genuinely turns tighter instead of just being clamped,
+  before it truly lets go. Losing it outright (a real spin, not just
+  understeer) now has two distinct, deliberate causes instead of one:
+  big torque on lock in a tight turn (rear-driven and, with a harder
+  commitment, all-wheel-drive cars only — front-driven cars push wide
+  instead, they do not spin under power), or carrying too much speed
+  into a corner for any drivetrain to save.
+
 ## [1.23.0] - 2026-08-23
 
 ### Added

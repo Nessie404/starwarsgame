@@ -240,6 +240,31 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   car; `config_write_cars_text`/`config_save_cars_file` in `config.c`
   for the save half) reachable from the main menu as DESIGN A CAR.
   `MAX_KART_SPECS` raised from 16 to 24 for headroom.
+- **v1.24.0**: road banking on every circuit — `Track.bank`, derived
+  from `curv_signed` in `track_init_with_settings` (a small universal
+  `bank_mult` default of 0.3, BULLRING overriding it to 8.0) and fed
+  straight into `kart_step`'s cornering grip budget (`mu_a += GRAVITY *
+  tanf(fabsf(bank))`) — real grip, not just a rendering tilt (see
+  `bank_dy` in `main.c` for the render side). BULLRING's two straights
+  doubled (`CP_BULLRING`, 200 m → 400 m each). Cornering physics
+  reworked: `TIRE_SHOULDER` (12%) lets a car pushed past the nominal
+  grip cap actually turn tighter instead of just clamping; the old
+  RWD-only power-oversteer spin trigger is now `torque_spin_risk`
+  (RWD at the old thresholds, AWD only past a harder one, FWD never)
+  plus a new, drivetrain-blind `speed_spin_risk` for coming into a
+  corner too fast to save regardless of throttle — see §6 for how
+  fragile these thresholds turned out to be to get right. The car
+  designer no longer exposes mass directly — `main.c`'s
+  `designer_finalize` derives it from power
+  (`DESIGNER_MASS_BASE + power_hp * DESIGNER_MASS_PER_HP`) — and gear
+  count plus each gear's own top speed and shift points are now
+  directly editable (`RK_DES_GEARCOUNT`/`GEAR_SEL`/`GEAR_TOP`/
+  `GEAR_UP`/`GEAR_DOWN`), replacing the old fixed auto-derived ladder.
+  `draw_car_model` takes a `const KartSpec *` now and scales body
+  length/width/height and driven-wheel size from it. `draw_minimap`
+  takes a new `highlight` kart index that draws a pulsing ring around
+  one car — wired to kart 0 in the 1-human case only, since the
+  3-human shared minimap has no single "the player" to ring.
 
 ---
 
@@ -453,6 +478,60 @@ of fall loop as the paragraph above, for the same underlying reason:
 MONARCH already has close to zero margin, so anything that moves its
 geometry at all is worth a full `test_ai_races_all_tracks` pass before
 it ships, not just a look at the diff.
+
+**A new spin trigger has to be gated on steering, not just speed and
+curvature demand — `yaw_cmd / yaw_cap` alone grows unbounded with
+speed for any nonzero steering input.** `yaw_cap` (`kart_step`) is
+`mu_a / v`: it shrinks as speed rises, while `yaw_cmd` at a *fixed*
+steering fraction grows roughly with `v`, so their ratio grows with
+`v` squared for literally any nonzero steer. v1.24.0's first cut of
+`speed_spin_risk` (a new, drivetrain-blind "came in too hot" spin
+trigger) checked only `v > 22` and `yaw_cmd > yaw_cap * 1.6` — no
+steering floor — and it fired on a car doing nothing more aggressive
+than a 0.2 steering input at cruising speed, because at that speed the
+ratio clears 1.6 on its own. It surfaced as `test_oversteer_rewards_a_
+catch_and_punishes_a_miss` failing: an RWD car "caught" (steering
+eased to 0.2) kept building oversteer through the entire 60-frame
+catch window and spun anyway, because the new trigger, not the old
+torque one, was still firing. Fixed by adding a real steering floor
+(`fabsf(steer) > 0.5f`) to `speed_spin_risk` — any future speed-based
+trigger needs the same floor, or a low-speed, low-steering "catch"
+will stop working the same way.
+
+**The tire "shoulder" (`TIRE_SHOULDER`, `kart_step`) needs slip
+measured against the *original* `yaw_cap`, not the widened one, or the
+progressive understeer curve collapses.** The shoulder's whole point
+is letting `yaw` reach `yaw_cap * TIRE_SHOULDER` instead of clamping
+at `yaw_cap`, so a car pushed a little past the old limit genuinely
+turns tighter. The first cut also computed `k->slip` as a fraction of
+the *shoulder's width* (`yaw_cap * (TIRE_SHOULDER - 1)`, about 12% of
+`yaw_cap`) instead of `yaw_cap` itself — a much narrower denominator —
+so both a mild oversteer input and a full-lock one saturated `slip` to
+1.0 almost immediately, and `test_understeer_scrub_is_progressive`
+(which specifically checks a mild case stays mild) failed. `yaw`
+(how much the car actually rotates) and `k->slip` (how severe the
+scrub penalty is) are clamped against two different limits on
+purpose: the shoulder governs the first, the original `yaw_cap` still
+governs the second.
+
+**RWD's power-oversteer reward margin over FWD got diluted, not
+erased, by the tire shoulder above — the fix was to strengthen the
+reward, not to leave the test where it was.**
+`test_oversteer_rewards_a_catch_and_punishes_a_miss` compares total
+heading rotated over a fixed 1.5 s (0.5 s building oversteer, 1.0 s
+easing off/"catching" it) between an RWD car and an otherwise-identical
+FWD one. The shoulder change lifts *both* cars' rotation over that
+long catch tail, since FWD also benefits from it during its own clean
+cornering, which shrinks RWD's relative share of the total almost
+regardless of how large `oversteer_max_bonus` gets — the reward window
+(0.5 s) is short next to the tail (1.0 s) that dilutes it. Raising
+`oversteer_grow_rate` (0.70 → 1.00) so the bonus reaches its ceiling
+*sooner* within that 0.5 s, and `oversteer_max_bonus` itself (0.35 →
+0.40) recovered a real, reliable margin; the test's own threshold
+(the old code needed >5%) was loosened to >3% to match — both moves
+together, not the test change alone, since a threshold that no
+implementation could reasonably clear is not actually testing
+anything.
 
 **Growing `ai_drivers[]` past `NUM_KARTS - 1` (11) entries silently
 adds unreachable drivers, not new ones — replace, don't append.** Car

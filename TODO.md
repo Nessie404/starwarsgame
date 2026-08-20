@@ -129,6 +129,41 @@ Any patch release that followed a minor release is folded into that
 release's entry rather than getting its own. For anything older,
 `CHANGELOG.md` and `docs/release-notes/` have the full record back to v1.0.
 
+### v1.24.0 — road banking, a bigger BULLRING, cars that hold a line, a rebuilt designer
+
+- [x] Every circuit now cants into its curves: a small, realistic
+  crown on the mountain passes (`bank_mult` defaults to 0.3), a real,
+  deliberately much stronger bank on BULLRING's own turns (`bank_mult`
+  8.0). `Track.bank` is derived straight from `curv_signed` in
+  `track_init_with_settings`, so it ramps in and out with the bend
+  rather than switching on at its edges. Not just cosmetic: `kart_step`
+  adds `GRAVITY * tan(bank)` to the cornering grip budget (`mu_a`), the
+  same reason a real banked turn lets you carry more speed through it.
+- [x] BULLRING's two straights doubled, 200 m to 400 m each
+  (`CP_BULLRING` in `track.c`) — total lap length 838 m to 1238 m.
+- [x] Cornering physics reworked in `kart_step`: past the nominal grip
+  limit there is now a "tire shoulder" (`TIRE_SHOULDER`, 12%) where a
+  car pushed harder genuinely turns tighter instead of being clamped,
+  before it truly lets go. A real spin (not just understeer) now has
+  two distinct causes: big torque on lock in a tight turn (RWD at a
+  modest commitment, AWD only at a much harder one, FWD never — it
+  pushes wide instead), or carrying too much speed into a corner,
+  independent of drivetrain or throttle.
+- [x] The in-game car designer reworked: mass is no longer a free
+  dial — it now derives from power (`DESIGNER_MASS_BASE +
+  power_hp * DESIGNER_MASS_PER_HP` in `main.c`), a real trade-off
+  instead of an independent choice. Gear count and each gear's own top
+  speed and upshift/downshift point are now directly, granularly
+  editable (`RK_DES_GEARCOUNT`/`GEAR_SEL`/`GEAR_TOP`/`GEAR_UP`/
+  `GEAR_DOWN`), replacing the old fixed, auto-derived five-gear ladder.
+- [x] `draw_car_model` now varies a car's on-track and in-garage
+  proportions with its actual spec (wheelbase, mass, drag, drivetrain)
+  instead of one fixed shape in different paint; the driven axle also
+  carries visibly bigger tires.
+- [x] The local player's own kart on the minimap now carries a pulsing
+  white ring (`draw_minimap`'s new `highlight` parameter), reachable
+  in the single-player case where "the player" is unambiguous.
+
 ### v1.23.0 — BULLRING, two oval cars, smoother corners, and a car designer
 
 - [x] A ninth circuit, BULLRING: flat, wide, barriered, generated from
@@ -241,42 +276,6 @@ release's entry rather than getting its own. For anything older,
   (`weather_puddle_drag_mult`), and the AI's own corner-speed lookahead
   discounts grip for whatever weather patch is ahead instead of
   assuming dry pavement everywhere.
-
-### v1.19.0 — weather, boost, a wilder AI, wider corners, and two follow-up patches
-
-- [x] Weather on CLASSIC only: three zones age independently from snow
-  to ice to a puddle, each tire compound suited to a different stage.
-  `track_weather_at` (`track.c`), tunable in the `weather` block of
-  `settings.json`.
-- [x] Boost as a universal meter (`Kart.boost_meter` at the time —
-  reworked into the automatic turbo in v1.21.0): charged with revs
-  on a curve, spent all at once on a button for an instant speed bump.
-- [x] A new `AI_YOLO` "no guts, no glory" strategy sheet, assigned to
-  TANAKA and CROSS; field-wide `ai_skill_mult` up from 0.97 to 1.02; the
-  weakest couple of drivers buffed so the roster keeps a genuine top and
-  bottom (`test_driver_field_has_characters`).
-- [x] Every barriered circuit's shoulder brought in to a consistent
-  ~1.4 m curb, closing off the run-wide-to-cut-a-corner line; Berthoud,
-  Loveland, Monarch and Guanella scaled up 8-30% to open out their
-  tightest turns without touching their hand-authored shape.
-- [x] Data-only scaffolding for a difficulty preset (`DifficultyPreset`,
-  `GameConfig.difficulty`) — not wired into a race yet; see Release
-  planning above for what finishing it needs.
-- [x] *(v1.19.1 patch)* Restored Berthoud Pass 2.0's original v1.15.0
-  hairpin layout — v1.17.0 had smoothed it into a sine-wiggle shape to
-  satisfy a plan-view self-intersection check that turned out to be
-  unreachable during actual driving (see `docs/HANDOFF.md` §6) — and
-  scaled it up further for room without losing the hairpins: 3704 m,
-  85 m of climb, 36 corners, tightest radius 8 m.
-  `test_berthoud2_keeps_its_switchbacks` guards against losing it again.
-- [x] *(v1.19.2 patch)* Fixed a real (if inert) drift bug between the
-  compiled fallback roster and `cars.json` (`awd_front_bias` defaulting
-  to `0.0` instead of the JSON parser's `0.5`); `test_compiled_roster_
-  matches_cars_json` now diffs every field of every car between the two
-  rosters, not just the count. Also clarified (no code change): there
-  is no turbocharger/supercharger system — retired in v1.16.0 — and
-  `boost` (now v1.21.0's `turbo`) is an unrelated, universal mechanic
-  tuned in `settings.json`, not `cars.json`.
 
 ## Overall direction
 

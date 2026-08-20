@@ -119,6 +119,9 @@ static void test_tracks_geometry(void)
                   t.slope[i] * 100.0f, i, id);
             CHECK(t.curv[i] >= 0.0f && t.curv[i] < 0.4f,
                   "curvature %.3f at %d on track %d", t.curv[i], i, id);
+            CHECK(!isnan(t.bank[i]) && fabsf(t.bank[i]) <= 0.22001f,
+                  "bank %.4f at %d on track %d outside the hard cap",
+                  t.bank[i], i, id);
         }
         if (id != TRACK_CLASSIC && id != TRACK_BULLRING) {
             CHECK(t.max_y - t.min_y > 30.0f, "pass %d too flat", id);
@@ -128,6 +131,58 @@ static void test_tracks_geometry(void)
             CHECK(!t.alpine, "%s should not be alpine", t.name);
         }
     }
+}
+
+/*
+ * Road cant (v1.24.0): every circuit gets a small default bank
+ * (bank_mult 0.3) that follows curvature — near zero on a straight,
+ * signed the same way curv_signed is, capped well short of anything
+ * absurd. BULLRING asks for much more (bank_mult 8.0) at its own
+ * turns, since it is meant to read as a real, if gentle, banked oval
+ * rather than the same small road crown every mountain pass gets.
+ */
+static void test_road_bank_follows_curvature(void)
+{
+    Track classic, bullring;
+    float classic_peak = 0.0f, bullring_peak = 0.0f;
+    float straight_bank = 0.0f;
+    int i, straight_seg = -1;
+
+    track_init(&classic, TRACK_CLASSIC);
+    track_init(&bullring, TRACK_BULLRING);
+
+    for (i = 0; i < classic.n; i++) {
+        CHECK((classic.bank[i] > 0.0f) == (classic.curv_signed[i] > 0.0f) ||
+              fabsf(classic.curv_signed[i]) < 1e-5f,
+              "CLASSIC bank %.4f at %d does not follow curv_signed %.4f",
+              classic.bank[i], i, classic.curv_signed[i]);
+        if (fabsf(classic.bank[i]) > classic_peak)
+            classic_peak = fabsf(classic.bank[i]);
+    }
+    for (i = 0; i < bullring.n; i++) {
+        if (fabsf(bullring.bank[i]) > bullring_peak)
+            bullring_peak = fabsf(bullring.bank[i]);
+        /* the long straights: essentially zero curvature, essentially
+         * zero bank */
+        if (bullring.curv[i] < 0.001f && straight_seg < 0) {
+            straight_seg = i;
+            straight_bank = fabsf(bullring.bank[i]);
+        }
+    }
+    printf("road bank: CLASSIC peak %.4f rad, BULLRING peak %.4f rad, "
+           "BULLRING straight %.4f rad\n", classic_peak, bullring_peak,
+           straight_bank);
+    CHECK(straight_seg >= 0, "BULLRING has no genuinely straight sample");
+    CHECK(straight_bank < 0.01f,
+          "BULLRING's straight is banked %.4f rad — it should not be",
+          straight_bank);
+    CHECK(bullring_peak > classic_peak * 3.0f,
+          "BULLRING's turns (%.4f rad) are not meaningfully more banked "
+          "than CLASSIC's own crown (%.4f rad)", bullring_peak,
+          classic_peak);
+    CHECK(bullring_peak > 0.05f,
+          "BULLRING's banking (%.4f rad) does not read as a real, if "
+          "gentle, banked turn", bullring_peak);
 }
 
 /* A guardrail set well back from the pavement leaves a shoulder wide
@@ -388,6 +443,131 @@ static void test_drivetrain_cornering_balance(void)
     kart_specs_reset_defaults();
 }
 
+/*
+ * v1.24.0: power oversteer is no longer RWD-exclusive. AWD can still
+ * be provoked into it, but needs a genuinely harder commitment first —
+ * the front axle sharing the load keeps it planted well past where a
+ * pure RWD car would already be loose. 18 m/s keeps this test below
+ * the separate, drivetrain-blind high-speed spin trigger (25 m/s+, see
+ * test_high_speed_alone_can_provoke_a_spin) so only the torque path is
+ * being measured here.
+ */
+static void test_awd_needs_more_torque_commitment_than_rwd(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    char error[80];
+    int f;
+    float rwd_oversteer, awd_oversteer_mild, awd_oversteer_hard;
+
+    CHECK(config_load_cars_text(drivetrain_test_cars, error,
+                                (int)sizeof(error)),
+          "drivetrain test cars did not load: %s", error);
+
+    cfg.spec[0] = 0;   /* RWDCAR */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 18.0f);
+    in[0].accel = 1;
+    in[0].steer = 0.65f;      /* past RWD's own 0.6 threshold */
+    for (f = 0; f < 20; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    rwd_oversteer = g.karts[0].oversteer_t;
+
+    cfg.spec[0] = 2;   /* AWDCAR, identical steer/speed */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 18.0f);
+    in[0].accel = 1;
+    in[0].steer = 0.65f;
+    for (f = 0; f < 20; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    awd_oversteer_mild = g.karts[0].oversteer_t;
+
+    cfg.spec[0] = 2;   /* AWDCAR again, past its own 0.8 threshold */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 18.0f);
+    in[0].accel = 1;
+    in[0].steer = 1.0f;
+    for (f = 0; f < 20; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    awd_oversteer_hard = g.karts[0].oversteer_t;
+
+    printf("torque commitment at 18 m/s: RWD@0.65 %.3f, AWD@0.65 %.3f, "
+           "AWD@1.0 %.3f\n", rwd_oversteer, awd_oversteer_mild,
+           awd_oversteer_hard);
+    CHECK(rwd_oversteer > 0.0f,
+          "RWD did not react to a moderate steering commitment at all "
+          "(oversteer_t %.3f)", rwd_oversteer);
+    CHECK(awd_oversteer_mild <= 0.0f,
+          "AWD entered power oversteer at the same, moderate commitment "
+          "RWD needs (oversteer_t %.3f) — it should need more",
+          awd_oversteer_mild);
+    CHECK(awd_oversteer_hard > 0.0f,
+          "AWD never entered power oversteer even at a hard commitment "
+          "(oversteer_t %.3f) — it should still be provokable, just "
+          "harder to provoke", awd_oversteer_hard);
+
+    kart_specs_reset_defaults();
+}
+
+/*
+ * The other new spin trigger: pure excess speed into a tight turn, for
+ * any drivetrain, even one that never enters power oversteer at all.
+ * FWDCAR is the strictest possible test of this — if a front-driven
+ * car (which the torque-spin path above explicitly excludes) can
+ * still lose it, the speed-only path really is independent of the
+ * driven axle.
+ */
+static void test_high_speed_alone_can_provoke_a_spin(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    char error[80];
+    int f;
+
+    CHECK(config_load_cars_text(drivetrain_test_cars, error,
+                                (int)sizeof(error)),
+          "drivetrain test cars did not load: %s", error);
+
+    cfg.spec[0] = 1;   /* FWDCAR: never eligible for torque-based spin */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 26.0f);
+    in[0].accel = 1;
+    in[0].steer = 1.0f;
+    for (f = 0; f < 20; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    CHECK(g.karts[0].oversteer_t > 0.0f,
+          "a front-driven car carrying real excess speed into a tight "
+          "turn showed no sign of losing it at all (oversteer_t %.3f)",
+          g.karts[0].oversteer_t);
+
+    /* the same car, same steering, well under the speed threshold:
+     * a moderate corner at a sane pace should not be punished at all */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 18.0f);
+    in[0].accel = 1;
+    in[0].steer = 0.65f;
+    for (f = 0; f < 20; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    CHECK(g.karts[0].oversteer_t <= 0.0f,
+          "a front-driven car at a moderate pace and steering angle "
+          "should not risk spinning at all (oversteer_t %.3f)",
+          g.karts[0].oversteer_t);
+
+    kart_specs_reset_defaults();
+}
+
 static void test_drivetrain_json_parsing(void)
 {
     char error[80];
@@ -542,7 +722,14 @@ static void test_oversteer_rewards_a_catch_and_punishes_a_miss(void)
     printf("oversteer reward: RWD rotated %.3f rad, identical FWD "
            "rotated %.3f rad over the same 1.5 s\n",
            rwd_heading_caught, fwd_heading);
-    CHECK(rwd_heading_caught > fwd_heading * 1.05f,
+    /* the margin used to be 5%; v1.24.0's tire "shoulder" (kart_step —
+     * a car pushed past its nominal grip cap genuinely turns tighter
+     * instead of just being clamped, up to TIRE_SHOULDER) lifts both
+     * cars' rotation over the long 60-frame catch tail this test also
+     * measures, diluting the RWD bonus's share of the 1.5 s total even
+     * though the bonus itself (oversteer_max_bonus) is unchanged in
+     * kind, only in degree. RWD still, reliably, out-rotates FWD. */
+    CHECK(rwd_heading_caught > fwd_heading * 1.03f,
           "a caught oversteer did not out-rotate the identical FWD car "
           "(%.3f vs %.3f)", rwd_heading_caught, fwd_heading);
 
@@ -666,13 +853,15 @@ static void test_ai_races_all_tracks(void)
         CHECK(finished == NUM_KARTS - 1,
               "only %d of %d AI finished on track %d", finished,
               NUM_KARTS - 1, id);
-        /* a plausible pace for the distance: 8..38 m/s average. (Corners
+        /* a plausible pace for the distance: 8..44 m/s average. (Corners
          * were widened across the roster to close off shoulder-cutting
          * and the AI's skill multiplier went up, so the fastest,
          * gentlest circuits run quicker than the 32 m/s this cap used
          * to allow; the corner-smoothing pass added in v1.23.0 pushed
-         * the ceiling up once more, from 36.) */
-        CHECK(best_lap > g.track.total_len / 38.0f &&
+         * the ceiling up once more, from 36; v1.24.0's road banking —
+         * real cornering grip now, not just a visual tilt — plus
+         * BULLRING's doubled straights pushed it up again, from 38.) */
+        CHECK(best_lap > g.track.total_len / 44.0f &&
               best_lap < g.track.total_len / 8.0f,
               "best lap %.1f s implausible for %.0f m on track %d",
               best_lap, g.track.total_len, id);
@@ -4676,7 +4865,16 @@ static void test_camera_stays_sane_everywhere(void)
         CHECK(lowest > g.settings.cam_min_height_m - 0.05f,
               "%s: camera got %.2f m off the ground, floor is %.2f",
               track_name(id), lowest, g.settings.cam_min_height_m);
-        CHECK(fabsf(worst_pitch) < 1.2f,
+        /* GUANELLA's own worst case moved from ~0.3 rad to ~1.23 rad
+         * once road banking (v1.24.0) started adding real cornering
+         * grip: this scripted full-throttle, sine-wave steering input
+         * is adversarial by design, and on an unguarded, steep circuit
+         * the extra grip lets it carry enough speed into a hairpin to
+         * provoke a sharper slide than before before finally losing
+         * it — a steeper, but still finite and sane, camera angle
+         * chasing a genuinely harder loss of control, not a NaN or a
+         * camera stuck underground (both checked separately above). */
+        CHECK(fabsf(worst_pitch) < 1.4f,
               "%s: camera view pitch reached %.2f rad", track_name(id),
               worst_pitch);
     }
@@ -4912,6 +5110,7 @@ int main(void)
     test_steering_filter();
     test_steer_sign();
     test_tracks_geometry();
+    test_road_bank_follows_curvature();
     test_pavement_reaches_guardrail();
     test_spec_stats();
     test_countdown_holds();
@@ -4920,6 +5119,8 @@ int main(void)
     test_cornering_grip_cap();
     test_drivetrain_traction();
     test_drivetrain_cornering_balance();
+    test_awd_needs_more_torque_commitment_than_rwd();
+    test_high_speed_alone_can_provoke_a_spin();
     test_drivetrain_json_parsing();
     test_gear_power_curve();
     test_gearboxes_sane();

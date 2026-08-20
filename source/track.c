@@ -36,6 +36,12 @@ typedef struct {
      * entry below leaves this unspecified, which zero-initializes it —
      * see the note on Track.grandstands in game.h */
     int   grandstands;
+    /* how strongly Track.bank follows curvature (radians of bank per
+     * radian/m of curv_signed), before the hard cap in track_init. Left
+     * unspecified (0) by every mountain pass, which gets a small
+     * universal default instead — see track_init_with_settings — so
+     * only a track that wants to override that default sets this. */
+    float bank_mult;
 } TrackDef;
 
 /* ---------------- CLASSIC: flat speedway ---------------- */
@@ -283,25 +289,31 @@ static const float CP_BERTHOUD2[][3] = {
 };
 
 /* ---------------- BULLRING ----------------
- * The one flat, wide oval in the roster: two 200 m straights joined by
- * two constant-radius, swept turns (radius 70 m) rather than anything
- * hand-drawn — a true "donut" shape has no business having a kink in
- * it anywhere, so this is generated from the geometry directly instead
- * of authored by eye like the mountain passes. No elevation change
- * anywhere on the lap. Grandstands (main.c, gated on Track.grandstands)
- * run the length of both straights.
+ * The one flat, wide oval in the roster: two 400 m straights (doubled
+ * from the original 200 m in v1.24.0 — a short track grown into a
+ * proper speedway) joined by two constant-radius, swept turns (radius
+ * 70 m) rather than anything hand-drawn — a true "donut" shape has no
+ * business having a kink in it anywhere, so this is generated from the
+ * geometry directly instead of authored by eye like the mountain
+ * passes. No elevation change anywhere on the lap; the turns carry a
+ * gentle bank instead (Track.bank, see track_init_with_settings — this
+ * is the one circuit with real banking, not just the small universal
+ * road-crown every circuit gets). Grandstands (main.c, gated on
+ * Track.grandstands) run the length of both straights.
  */
 static const float CP_BULLRING[][3] = {
-    { -100.00,  -70.00, 0 }, {  -50.00,  -70.00, 0 }, {    0.00,  -70.00, 0 },
-    {   50.00,  -70.00, 0 }, {  100.00,  -70.00, 0 },
-    {  123.94,  -65.78, 0 }, {  145.03,  -53.62, 0 }, {  160.62,  -35.00, 0 },
-    {  168.94,  -12.16, 0 }, {  168.94,   12.16, 0 }, {  160.62,   35.00, 0 },
-    {  145.03,   53.62, 0 }, {  123.94,   65.78, 0 },
-    {  100.00,   70.00, 0 }, {   50.00,   70.00, 0 }, {    0.00,   70.00, 0 },
-    {  -50.00,   70.00, 0 }, { -100.00,   70.00, 0 },
-    { -123.94,   65.78, 0 }, { -145.03,   53.62, 0 }, { -160.62,   35.00, 0 },
-    { -168.94,   12.16, 0 }, { -168.94,  -12.16, 0 }, { -160.62,  -35.00, 0 },
-    { -145.03,  -53.62, 0 }, { -123.94,  -65.78, 0 },
+    { -200.00,  -70.00, 0 }, { -150.00,  -70.00, 0 }, { -100.00,  -70.00, 0 },
+    {  -50.00,  -70.00, 0 }, {    0.00,  -70.00, 0 }, {   50.00,  -70.00, 0 },
+    {  100.00,  -70.00, 0 }, {  150.00,  -70.00, 0 }, {  200.00,  -70.00, 0 },
+    {  223.94,  -65.78, 0 }, {  245.03,  -53.62, 0 }, {  260.62,  -35.00, 0 },
+    {  268.94,  -12.16, 0 }, {  268.94,   12.16, 0 }, {  260.62,   35.00, 0 },
+    {  245.03,   53.62, 0 }, {  223.94,   65.78, 0 },
+    {  200.00,   70.00, 0 }, {  150.00,   70.00, 0 }, {  100.00,   70.00, 0 },
+    {   50.00,   70.00, 0 }, {    0.00,   70.00, 0 }, {  -50.00,   70.00, 0 },
+    { -100.00,   70.00, 0 }, { -150.00,   70.00, 0 }, { -200.00,   70.00, 0 },
+    { -223.94,   65.78, 0 }, { -245.03,   53.62, 0 }, { -260.62,   35.00, 0 },
+    { -268.94,   12.16, 0 }, { -268.94,  -12.16, 0 }, { -260.62,  -35.00, 0 },
+    { -245.03,  -53.62, 0 }, { -223.94,  -65.78, 0 },
 };
 
 /*
@@ -345,7 +357,8 @@ static const TrackDef track_defs[TRACK_COUNT] = {
     { "BULLRING",
       CP_BULLRING, (int)(sizeof(CP_BULLRING) / sizeof(CP_BULLRING[0])),
       7.5f,  9.0f, NULL, 0, 1, 1.00f, 1.00f, /* flat, wide, barriered */
-      1 },
+      1, 8.0f /* real (if gentle) banking, well above every mountain
+                 pass's small universal crown */ },
 };
 
 const char *track_name(int track_id)
@@ -580,6 +593,25 @@ void track_init_with_settings(Track *t, int track_id,
         }
         t->curv[i] = acc / (lensum > 0.1f ? lensum : 0.1f);
         t->curv_signed[i] = sacc / (lensum > 0.1f ? lensum : 0.1f);
+    }
+
+    /*
+     * Road cant: every circuit crowns a little into its own curvature
+     * (real roads do this too), tracks that don't ask for more get a
+     * small universal default rather than none at all — that is the
+     * "every map" half of this. Deriving it straight from curv_signed
+     * means it ramps in and out exactly as the turn itself does, no
+     * separate transition logic needed, and the hard cap keeps a wild
+     * combination (a strong bank_mult over a genuine hairpin) from
+     * producing something absurd.
+     */
+    {
+        const float BANK_MULT_DEFAULT = 0.3f;
+        const float BANK_MAX = 0.22f;      /* ~12.6 degrees, hard cap  */
+        float mult = d->bank_mult > 0.0f ? d->bank_mult : BANK_MULT_DEFAULT;
+        for (i = 0; i < t->n; i++)
+            t->bank[i] = game_clampf(t->curv_signed[i] * mult, -BANK_MAX,
+                                     BANK_MAX);
     }
 
     /*

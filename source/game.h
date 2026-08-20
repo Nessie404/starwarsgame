@@ -66,6 +66,17 @@ typedef struct {
     float curv_signed[TRACK_MAX_POINTS]; /* curvature 1/m, + = bends
                                           * toward positive lat (right),
                                           * same smoothing window as curv */
+    /* road cant: how far the cross-section is tilted into the turn,
+     * radians, same sign convention as curv_signed (+ = banked toward
+     * positive lat/right, outside edge higher). Derived from curvature
+     * — see track_init_with_settings — so it ramps in and out with the
+     * turn itself rather than switching on at a hairpin's edges. Every
+     * circuit gets a little of this (real roads crown into a bend);
+     * BULLRING's is deliberately much stronger. Physics
+     * (kart_step) reads it to add cornering grip the way a real banked
+     * turn does; main.c reads it to tilt the road surface, curbs and
+     * guardrails when drawing. */
+    float bank[TRACK_MAX_POINTS];
     float seg_len[TRACK_MAX_POINTS];/* ground-plane segment length       */
     float total_len;
     float road_half;                /* nominal half-width, paved road    */

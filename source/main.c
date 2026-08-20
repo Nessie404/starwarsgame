@@ -910,6 +910,17 @@ static u8 shade(u8 c, float f)
     return (u8)v;
 }
 
+/* How far a point at signed lateral offset `lat` sits above or below
+ * the centerline once the road is canted by `bank` (Track.bank; same
+ * sign convention as lat itself — see the field's comment in game.h).
+ * A positive bank tilts the surface down on the positive-lat side (the
+ * inside of the turn a positive curvature bends toward) and up on the
+ * negative side, the way a real banked corner drops toward the apex. */
+static float bank_dy(float lat, float bank)
+{
+    return -lat * sinf(bank);
+}
+
 /* box rotated by yaw (about Y) then pitched (nose up positive) */
 static void draw_box(float cx, float cy, float cz, float yaw, float pitch,
                      float hfw, float hh, float hlat,
@@ -1081,6 +1092,7 @@ static void draw_track(const Track *t, int viewer_seg, float race_t)
          * different width at each of them */
         float rw0 = track_road_half(t, i),  rw1 = track_road_half(t, in);
         float ww0 = track_wall_half(t, i),  ww1 = track_wall_half(t, in);
+        float bank0 = t->bank[i], bank1 = t->bank[in];
         u8 r, g, b;
 
         if (!seg_in_window(t, viewer_seg, i, win_ahead, win_behind))
@@ -1101,38 +1113,59 @@ static void draw_track(const Track *t, int viewer_seg, float race_t)
         default: break;
         }
 
-        /* road surface */
-        quad(t->px[i]  + l0x * rw0, y0, t->pz[i]  + l0z * rw0,
-             t->px[in] + l1x * rw1, y1, t->pz[in] + l1z * rw1,
-             t->px[in] - l1x * rw1, y1, t->pz[in] - l1z * rw1,
-             t->px[i]  - l0x * rw0, y0, t->pz[i]  - l0z * rw0,
+        /* road surface, canted by Track.bank — outer edge (negative lat
+         * of a right-hand bend, positive curvature) rides higher, inner
+         * edge lower, same as a real banked corner */
+        quad(t->px[i]  + l0x * rw0, y0 + bank_dy(rw0, bank0),
+             t->pz[i]  + l0z * rw0,
+             t->px[in] + l1x * rw1, y1 + bank_dy(rw1, bank1),
+             t->pz[in] + l1z * rw1,
+             t->px[in] - l1x * rw1, y1 + bank_dy(-rw1, bank1),
+             t->pz[in] - l1z * rw1,
+             t->px[i]  - l0x * rw0, y0 + bank_dy(-rw0, bank0),
+             t->pz[i]  - l0z * rw0,
              r, g, b, 255);
 
         /* curbs / shoulder stripe */
         if (i & 1) { r = 210; g = 40; b = 40; }
         else       { r = 235; g = 235; b = 235; }
-        quad(t->px[i]  + l0x * (rw0 + 0.9f), y0, t->pz[i]  + l0z * (rw0 + 0.9f),
-             t->px[in] + l1x * (rw1 + 0.9f), y1, t->pz[in] + l1z * (rw1 + 0.9f),
-             t->px[in] + l1x * rw1,          y1, t->pz[in] + l1z * rw1,
-             t->px[i]  + l0x * rw0,          y0, t->pz[i]  + l0z * rw0,
+        quad(t->px[i]  + l0x * (rw0 + 0.9f),
+             y0 + bank_dy(rw0 + 0.9f, bank0), t->pz[i]  + l0z * (rw0 + 0.9f),
+             t->px[in] + l1x * (rw1 + 0.9f),
+             y1 + bank_dy(rw1 + 0.9f, bank1), t->pz[in] + l1z * (rw1 + 0.9f),
+             t->px[in] + l1x * rw1,
+             y1 + bank_dy(rw1, bank1),        t->pz[in] + l1z * rw1,
+             t->px[i]  + l0x * rw0,
+             y0 + bank_dy(rw0, bank0),        t->pz[i]  + l0z * rw0,
              r, g, b, 255);
-        quad(t->px[i]  - l0x * rw0,          y0, t->pz[i]  - l0z * rw0,
-             t->px[in] - l1x * rw1,          y1, t->pz[in] - l1z * rw1,
-             t->px[in] - l1x * (rw1 + 0.9f), y1, t->pz[in] - l1z * (rw1 + 0.9f),
-             t->px[i]  - l0x * (rw0 + 0.9f), y0, t->pz[i]  - l0z * (rw0 + 0.9f),
+        quad(t->px[i]  - l0x * rw0,
+             y0 + bank_dy(-rw0, bank0),        t->pz[i]  - l0z * rw0,
+             t->px[in] - l1x * rw1,
+             y1 + bank_dy(-rw1, bank1),        t->pz[in] - l1z * rw1,
+             t->px[in] - l1x * (rw1 + 0.9f),
+             y1 + bank_dy(-(rw1 + 0.9f), bank1), t->pz[in] - l1z * (rw1 + 0.9f),
+             t->px[i]  - l0x * (rw0 + 0.9f),
+             y0 + bank_dy(-(rw0 + 0.9f), bank0), t->pz[i]  - l0z * (rw0 + 0.9f),
              r, g, b, 255);
 
         if (t->alpine) {
-            /* mountainside skirts falling away from the shoulder */
+            /* mountainside skirts falling away from the shoulder — the
+             * near edge (E0) is the curb's own outer edge, so it picks
+             * up the same bank offset the curb quads above used, or
+             * there would be a visible seam where they meet; the drop
+             * itself (d1/d2 below the road) is left unbanked past that,
+             * since a few degrees of cant is lost in a scree slope */
             const float E0 = 0.9f, E1 = 12.0f, E2 = 34.0f;
             float d1 = 7.0f, d2 = 22.0f;
             int side;
             for (side = -1; side <= 1; side += 2) {
                 float s = (float)side;
+                float e0y0 = y0 + bank_dy((rw0 + E0) * s, bank0) - 0.02f;
+                float e0y1 = y1 + bank_dy((rw1 + E0) * s, bank1) - 0.02f;
                 u8 rr = 122, gg = 108, bb = 92;   /* rock */
-                quad(t->px[i]  + l0x * (rw0 + E0) * s, y0 - 0.02f,
+                quad(t->px[i]  + l0x * (rw0 + E0) * s, e0y0,
                      t->pz[i]  + l0z * (rw0 + E0) * s,
-                     t->px[in] + l1x * (rw1 + E0) * s, y1 - 0.02f,
+                     t->px[in] + l1x * (rw1 + E0) * s, e0y1,
                      t->pz[in] + l1z * (rw1 + E0) * s,
                      t->px[in] + l1x * (rw1 + E1) * s, y1 - d1,
                      t->pz[in] + l1z * (rw1 + E1) * s,
@@ -1153,38 +1186,54 @@ static void draw_track(const Track *t, int viewer_seg, float race_t)
             /* guardrails, where this road has them */
             if (t->has_walls) {
                 float wall0 = ww0 - 0.2f, wall1 = ww1 - 0.2f;
+                float rby0 = y0 + bank_dy(wall0, bank0);
+                float rby1 = y1 + bank_dy(wall1, bank1);
+                float lby0 = y0 + bank_dy(-wall0, bank0);
+                float lby1 = y1 + bank_dy(-wall1, bank1);
                 u8 rr = 225, gg = 228, bb = 232;
                 if (i & 1) { rr = 180; gg = 184; bb = 190; }
-                quad(t->px[i]  + l0x * wall0, y0 + 0.15f, t->pz[i]  + l0z * wall0,
-                     t->px[in] + l1x * wall1, y1 + 0.15f, t->pz[in] + l1z * wall1,
-                     t->px[in] + l1x * wall1, y1 + 0.75f, t->pz[in] + l1z * wall1,
-                     t->px[i]  + l0x * wall0, y0 + 0.75f, t->pz[i]  + l0z * wall0,
+                quad(t->px[i]  + l0x * wall0, rby0 + 0.15f,
+                     t->pz[i]  + l0z * wall0,
+                     t->px[in] + l1x * wall1, rby1 + 0.15f,
+                     t->pz[in] + l1z * wall1,
+                     t->px[in] + l1x * wall1, rby1 + 0.75f,
+                     t->pz[in] + l1z * wall1,
+                     t->px[i]  + l0x * wall0, rby0 + 0.75f,
+                     t->pz[i]  + l0z * wall0,
                      rr, gg, bb, 255);
-                quad(t->px[i]  - l0x * wall0, y0 + 0.15f, t->pz[i]  - l0z * wall0,
-                     t->px[in] - l1x * wall1, y1 + 0.15f, t->pz[in] - l1z * wall1,
-                     t->px[in] - l1x * wall1, y1 + 0.75f, t->pz[in] - l1z * wall1,
-                     t->px[i]  - l0x * wall0, y0 + 0.75f, t->pz[i]  - l0z * wall0,
+                quad(t->px[i]  - l0x * wall0, lby0 + 0.15f,
+                     t->pz[i]  - l0z * wall0,
+                     t->px[in] - l1x * wall1, lby1 + 0.15f,
+                     t->pz[in] - l1z * wall1,
+                     t->px[in] - l1x * wall1, lby1 + 0.75f,
+                     t->pz[in] - l1z * wall1,
+                     t->px[i]  - l0x * wall0, lby0 + 0.75f,
+                     t->pz[i]  - l0z * wall0,
                      rr, gg, bb, 255);
             } else {
                 /* No barrier: mark the edge with a stripe and drop the
-                 * ground away sharply, so the cliff reads as a cliff */
+                 * ground away sharply, so the cliff reads as a cliff.
+                 * Banked purely at the road edge, same as the skirts —
+                 * the drop itself does not need to follow the tilt. */
                 float wall0 = ww0, wall1 = ww1;
                 int side;
                 for (side = -1; side <= 1; side += 2) {
                     float sg = (float)side;
+                    float ey0 = y0 + bank_dy(wall0 * sg, bank0);
+                    float ey1 = y1 + bank_dy(wall1 * sg, bank1);
                     u8 er = (i & 1) ? 235 : 90, eg = (i & 1) ? 180 : 90;
-                    quad(t->px[i]  + l0x * (wall0 - 0.5f) * sg, y0 + 0.02f,
+                    quad(t->px[i]  + l0x * (wall0 - 0.5f) * sg, ey0 + 0.02f,
                          t->pz[i]  + l0z * (wall0 - 0.5f) * sg,
-                         t->px[in] + l1x * (wall1 - 0.5f) * sg, y1 + 0.02f,
+                         t->px[in] + l1x * (wall1 - 0.5f) * sg, ey1 + 0.02f,
                          t->pz[in] + l1z * (wall1 - 0.5f) * sg,
-                         t->px[in] + l1x * wall1 * sg, y1 + 0.02f,
+                         t->px[in] + l1x * wall1 * sg, ey1 + 0.02f,
                          t->pz[in] + l1z * wall1 * sg,
-                         t->px[i]  + l0x * wall0 * sg, y0 + 0.02f,
+                         t->px[i]  + l0x * wall0 * sg, ey0 + 0.02f,
                          t->pz[i]  + l0z * wall0 * sg,
                          er, eg, 70, 255);
-                    quad(t->px[i]  + l0x * wall0 * sg, y0,
+                    quad(t->px[i]  + l0x * wall0 * sg, ey0,
                          t->pz[i]  + l0z * wall0 * sg,
-                         t->px[in] + l1x * wall1 * sg, y1,
+                         t->px[in] + l1x * wall1 * sg, ey1,
                          t->pz[in] + l1z * wall1 * sg,
                          t->px[in] + l1x * (wall1 + 1.5f) * sg, y1 - 26.0f,
                          t->pz[in] + l1z * (wall1 + 1.5f) * sg,
@@ -1272,25 +1321,50 @@ static void draw_track(const Track *t, int viewer_seg, float race_t)
 
 /* the car itself: body, cabin and four wheels, shared by the race view
  * and the garage turntable */
+/*
+ * Proportions follow the spec, not just the paint, so two cars with
+ * very different numbers read as different cars at a glance and not
+ * just a different colour on the same shape: a long wheelbase reads as
+ * a long car, a heavy one as broad, a high-drag one as tall and boxy
+ * (a low-drag one low and lean), and the driven axle carries visibly
+ * bigger tires, the way a real rear- or all-wheel-drive car often
+ * does. spec may be NULL (a few call sites have no KartSpec handy),
+ * in which case every scale is 1.0 — the original fixed proportions.
+ */
 static void draw_car_model(float cx, float cy, float cz, float yaw,
-                           float pitch, float steer_vis, const u8 col[3])
+                           float pitch, float steer_vis, const u8 col[3],
+                           const KartSpec *spec)
 {
     float fx = cosf(yaw), fz = sinf(yaw);
     float lx = -fz, lz = fx;
+    float len = spec ? game_clampf(spec->wheelbase / 2.6f, 0.72f, 1.35f)
+                      : 1.0f;
+    float wid = spec ? game_clampf(powf(spec->mass_kg / 1000.0f, 0.30f),
+                                   0.78f, 1.28f)
+                      : 1.0f;
+    float hgt = spec ? game_clampf(0.82f + spec->cd_a * 0.40f, 0.82f, 1.22f)
+                      : 1.0f;
+    float track = 0.72f * wid;
+    float wheel_fw = 0.85f * len;
+    int front_driven = !spec || spec->drivetrain != DRIVETRAIN_RWD;
+    int rear_driven = !spec || spec->drivetrain != DRIVETRAIN_FWD;
     int w;
 
-    draw_box(cx, cy + 0.42f, cz, yaw, pitch,
-             1.10f, 0.28f, 0.65f, col[0], col[1], col[2]);
-    draw_box(cx - fx * 0.25f, cy + 0.92f, cz - fz * 0.25f, yaw, pitch,
-             0.30f, 0.26f, 0.30f, 40, 40, 45);
+    draw_box(cx, cy + 0.42f * hgt, cz, yaw, pitch,
+             1.10f * len, 0.28f * hgt, 0.65f * wid, col[0], col[1], col[2]);
+    draw_box(cx - fx * 0.25f * len, cy + 0.92f * hgt, cz - fz * 0.25f * len,
+             yaw, pitch, 0.30f * len, 0.26f * hgt, 0.30f * wid, 40, 40, 45);
 
     for (w = 0; w < 4; w++) {
         float s_f = (w < 2) ? 1.0f : -1.0f;
         float s_l = (w & 1) ? 1.0f : -1.0f;
         float wyaw = yaw + ((w < 2) ? steer_vis * 0.45f : 0.0f);
-        draw_box(cx + fx * 0.85f * s_f + lx * 0.72f * s_l, cy + 0.30f,
-                 cz + fz * 0.85f * s_f + lz * 0.72f * s_l,
-                 wyaw, 0.0f, 0.30f, 0.30f, 0.14f, 25, 25, 28);
+        float driven = (s_f > 0.0f) ? (float)front_driven
+                                     : (float)rear_driven;
+        float wheel_r = 0.28f + 0.05f * driven;
+        draw_box(cx + fx * wheel_fw * s_f + lx * track * s_l, cy + 0.30f,
+                 cz + fz * wheel_fw * s_f + lz * track * s_l,
+                 wyaw, 0.0f, wheel_r, wheel_r, 0.14f, 25, 25, 28);
     }
 }
 
@@ -1326,7 +1400,8 @@ static void draw_kart(const Track *t, const Kart *k)
          k->z - fz * 1.3f + lz * 0.85f,
          0, 0, 0, 90);
 
-    draw_car_model(k->x, by, k->z, yaw, pitch, k->steer_vis, col);
+    draw_car_model(k->x, by, k->z, yaw, pitch, k->steer_vis, col,
+                   &kart_specs[k->spec]);
 
     /* tire smoke when sliding hard */
     if (k->slip > 0.35f && fabsf(k->speed) > 5.0f) {
@@ -1615,7 +1690,7 @@ static float hud_text_width(float cw, const char *s)
  * north/up. Mapping +Z to screen "up" instead (i.e. flipping this sign)
  * mirrors the whole minimap left-for-right relative to the real track.
  */
-static void draw_minimap(const Track *t, int with_karts,
+static void draw_minimap(const Track *t, int with_karts, int highlight,
                          float ox, float oy, float size)
 {
     float span_x = t->max_x - t->min_x;
@@ -1672,6 +1747,16 @@ static void draw_minimap(const Track *t, int with_karts,
         float mx = ox + (k->x - t->min_x) * scale;
         float my = oy + (k->z - t->min_z) * scale;
         float s = (k->human >= 0) ? 5.0f : 4.0f;
+        if (i == highlight) {
+            /* the viewer's own car: a pulsing white ring behind its own
+             * marker, so picking it out of eleven other dots does not
+             * mean reading colours against the clock mid-corner */
+            float pulse = 2.0f + 1.4f * sinf(game.race_t * 6.0f);
+            float ring = s + 5.0f + pulse;
+            hud_rect(mx - ring * 0.5f, my - ring * 0.5f, ring, ring,
+                     255, 255, 255, 230);
+            s += 2.0f;
+        }
         hud_rect(mx - s * 0.5f, my - s * 0.5f, s, s, c[0], c[1], c[2], 255);
     }
 }
@@ -2307,11 +2392,15 @@ static void draw_race_hud(void)
         draw_player_hud(p);
     draw_input_translator(0);
 
-    /* minimap: corner in 1P, spare quadrant in 3P */
+    /* minimap: corner in 1P, spare quadrant in 3P. Highlighting a
+     * single car only makes sense when there is one obvious "the
+     * player" looking at it — kart 0 in the 1P case; the 3P case is
+     * one shared map for three different people, so no single ring
+     * would mean the same thing to all of them */
     if (game.cfg.n_humans == 1)
-        draw_minimap(&game.track, 1, W - 130.0f, H - 140.0f, 100.0f);
+        draw_minimap(&game.track, 1, 0, W - 130.0f, H - 140.0f, 100.0f);
     else if (game.cfg.n_humans == 3)
-        draw_minimap(&game.track, 1, W * 0.5f + 60.0f, H * 0.5f + 40.0f,
+        draw_minimap(&game.track, 1, -1, W * 0.5f + 60.0f, H * 0.5f + 40.0f,
                      150.0f);
 
     /* countdown / go */
@@ -2433,7 +2522,7 @@ static void draw_race_exit_confirmation(void)
 /* Garage: a real 3D workshop with the chosen car on a turntable       */
 /* ------------------------------------------------------------------ */
 
-static void draw_garage_scene(int paint_idx)
+static void draw_garage_scene(int paint_idx, const KartSpec *spec)
 {
     Mtx view;
     Mtx44 persp;
@@ -2492,7 +2581,7 @@ static void draw_garage_scene(int paint_idx)
     quad(-1.6f, 0.19f, -1.1f,  1.6f, 0.19f, -1.1f,
           1.6f, 0.19f,  1.1f, -1.6f, 0.19f,  1.1f, 0, 0, 0, 90);
     draw_car_model(0.0f, 0.18f, 0.0f, turn, 0.0f, 0.0f,
-                   paint_palette[paint_idx % PAINT_COUNT]);
+                   paint_palette[paint_idx % PAINT_COUNT], spec);
 }
 
 static void menu_update_track_preview(void)
@@ -2521,8 +2610,10 @@ enum {
     RK_PLAYERS = 0, RK_TRACK, RK_LAPS, RK_GARAGE, RK_DESIGN, RK_CONFIG,
     RK_START, RK_EXIT,                                        /* setup   */
     RK_CAR, RK_PAINT, RK_GEARBOX, RK_TIRES, RK_DONE,          /* garage  */
-    RK_DES_NAME, RK_DES_MASS, RK_DES_POWER, RK_DES_BRAKE, RK_DES_GRIP,
+    RK_DES_NAME, RK_DES_POWER, RK_DES_BRAKE, RK_DES_GRIP,
     RK_DES_DRAG, RK_DES_OFFROAD, RK_DES_DRIVETRAIN, RK_DES_AWD_BIAS,
+    RK_DES_GEARCOUNT, RK_DES_GEAR_SEL, RK_DES_GEAR_TOP, RK_DES_GEAR_UP,
+    RK_DES_GEAR_DOWN,
     RK_DES_SAVE, RK_DES_CANCEL                                /* designer */
 };
 
@@ -2555,12 +2646,22 @@ static void menu_notice(const char *text)
  * track is — consistent with every other choice in this menu, and one
  * fewer input widget to build and test blind.
  *
- * Only the stats a driver actually feels are exposed; wheelbase and the
- * gear ladder are derived (designer_finalize) from mass/power/drag the
- * same way STOCKER and SLIPSTREAM were hand-tuned in cars.json, so a
- * designed car always ships with a complete, sane KartSpec without
- * asking the player to fill in six more numbers they have no feel for
- * yet.
+ * Mass is not one of the exposed stats: it is derived from power
+ * (DESIGNER_MASS_BASE + power_hp * DESIGNER_MASS_PER_HP, see
+ * designer_finalize), on purpose. A slider that let power and mass move
+ * independently would let a design get both a superkart's power-to-
+ * weight and a truck's raw horsepower with no cost anywhere — every
+ * real car pays for more engine with more weight around it, and this
+ * makes the power row the one place that trade-off actually lives:
+ * push it up and the car gets both stronger and heavier, same as a
+ * bigger engine really would.
+ *
+ * Wheelbase is still derived from mass, the same way it always was.
+ * Gearing is not: gear count, each gear's top speed, and each gear's
+ * own upshift/downshift point are all directly editable — GEAR_SEL
+ * pages through whichever gear GEAR_TOP/GEAR_UP/GEAR_DOWN are currently
+ * pointed at, rather than showing every gear as its own row, so the
+ * row count stays fixed regardless of how many gears the car has.
  */
 static const char *designer_names[] = {
     "PROTOTYPE", "HOMEBREW", "BLUEPRINT", "MAVERICK", "RENEGADE",
@@ -2570,16 +2671,26 @@ static const char *designer_names[] = {
 #define DESIGNER_NAME_COUNT \
     (int)(sizeof(designer_names) / sizeof(designer_names[0]))
 
+/* the power/mass trade-off: every extra hp costs real weight, so a
+ * light car and a powerful car are no longer independent choices */
+#define DESIGNER_MASS_BASE    500.0f
+#define DESIGNER_MASS_PER_HP    1.8f
+
 static KartSpec designer_car;
 static int designer_name_idx;
+static int designer_gear_sel;   /* 0-indexed gear GEAR_TOP/UP/DOWN edit */
 
 static void designer_reset(void)
 {
+    static const float base_gears[5] =
+        { 16.111f, 27.222f, 40.278f, 54.167f, 69.444f };
+    int g;
+
     memset(&designer_car, 0, sizeof(designer_car));
     designer_name_idx = 0;
+    designer_gear_sel = 0;
     snprintf(designer_car.name, sizeof(designer_car.name), "%s",
              designer_names[designer_name_idx]);
-    designer_car.mass_kg = 1000.0f;
     designer_car.power_hp = 220.0f;
     designer_car.brake_dist_100 = 35.0f;
     designer_car.lat_g = 1.15f;
@@ -2587,29 +2698,22 @@ static void designer_reset(void)
     designer_car.offroad_grip = 0.40f;
     designer_car.drivetrain = DRIVETRAIN_RWD;
     designer_car.awd_front_bias = 0.5f;
+    designer_car.n_gears = 5;
+    for (g = 0; g < 5; g++)
+        designer_car.gear_top[g] = base_gears[g];
+    kart_spec_default_shifts(&designer_car);
 }
 
-/* Fill in the fields the designer doesn't expose directly (wheelbase,
- * the gear ladder, shift points), producing the complete KartSpec that
- * preview numbers are computed from and that SAVE actually adds. */
+/* Fill in the one field the designer still derives outright rather
+ * than exposing: wheelbase, from whatever mass the power trade-off
+ * settled on. Producing the complete KartSpec that both the live
+ * preview and SAVE itself work from. */
 static void designer_finalize(KartSpec *out)
 {
-    static const float base_gears[5] =
-        { 16.111f, 27.222f, 40.278f, 54.167f, 69.444f };
-    float factor;
-    int g;
-
     *out = designer_car;
+    out->mass_kg = DESIGNER_MASS_BASE +
+                   out->power_hp * DESIGNER_MASS_PER_HP;
     out->wheelbase = 2.0f + out->mass_kg / 2500.0f;
-    out->n_gears = 5;
-    /* the same power/drag scaling used to tune STOCKER's and
-     * SLIPSTREAM's ladders against MUSCLE's (420 hp, 0.68 m^2) baseline
-     * — see cars.json */
-    factor = powf((out->power_hp / out->cd_a) / (420.0f / 0.68f),
-                  1.0f / 3.0f);
-    for (g = 0; g < 5; g++)
-        out->gear_top[g] = base_gears[g] * factor;
-    kart_spec_default_shifts(out);
 }
 
 static void build_rows(void)
@@ -2641,7 +2745,7 @@ static void build_rows(void)
         menu_rows[n_menu_rows++].player = 0;
     } else if (menu_screen == SCREEN_DESIGNER) {
         static const int rows[] = {
-            RK_DES_NAME, RK_DES_MASS, RK_DES_POWER, RK_DES_BRAKE,
+            RK_DES_NAME, RK_DES_POWER, RK_DES_BRAKE,
             RK_DES_GRIP, RK_DES_DRAG, RK_DES_OFFROAD, RK_DES_DRIVETRAIN
         };
         int i;
@@ -2652,6 +2756,17 @@ static void build_rows(void)
         if (designer_car.drivetrain == DRIVETRAIN_AWD) {
             menu_rows[n_menu_rows].kind = RK_DES_AWD_BIAS;
             menu_rows[n_menu_rows++].player = 0;
+        }
+        {
+            static const int gear_rows[] = {
+                RK_DES_GEARCOUNT, RK_DES_GEAR_SEL, RK_DES_GEAR_TOP,
+                RK_DES_GEAR_UP, RK_DES_GEAR_DOWN
+            };
+            for (i = 0; i < (int)(sizeof(gear_rows) / sizeof(gear_rows[0]));
+                 i++) {
+                menu_rows[n_menu_rows].kind = gear_rows[i];
+                menu_rows[n_menu_rows++].player = 0;
+            }
         }
         menu_rows[n_menu_rows].kind = RK_DES_SAVE;
         menu_rows[n_menu_rows++].player = 0;
@@ -2691,7 +2806,6 @@ static void row_label(const MenuRow *r, char *out, int cap)
     case RK_TIRES:   snprintf(out, cap, "TIRES");              break;
     case RK_DESIGN:  snprintf(out, cap, "DESIGN A CAR");       break;
     case RK_DES_NAME:       snprintf(out, cap, "NAME");        break;
-    case RK_DES_MASS:       snprintf(out, cap, "MASS");        break;
     case RK_DES_POWER:      snprintf(out, cap, "POWER");       break;
     case RK_DES_BRAKE:      snprintf(out, cap, "BRAKES");      break;
     case RK_DES_GRIP:       snprintf(out, cap, "GRIP");        break;
@@ -2699,6 +2813,11 @@ static void row_label(const MenuRow *r, char *out, int cap)
     case RK_DES_OFFROAD:    snprintf(out, cap, "DIRT GRIP");   break;
     case RK_DES_DRIVETRAIN: snprintf(out, cap, "DRIVE");       break;
     case RK_DES_AWD_BIAS:   snprintf(out, cap, "AWD BIAS");    break;
+    case RK_DES_GEARCOUNT:  snprintf(out, cap, "GEARS");       break;
+    case RK_DES_GEAR_SEL:   snprintf(out, cap, "EDIT GEAR");   break;
+    case RK_DES_GEAR_TOP:   snprintf(out, cap, "GEAR TOP SPEED"); break;
+    case RK_DES_GEAR_UP:    snprintf(out, cap, "GEAR UPSHIFT");  break;
+    case RK_DES_GEAR_DOWN:  snprintf(out, cap, "GEAR DOWNSHIFT"); break;
     case RK_DES_SAVE:       snprintf(out, cap, "SAVE");        break;
     case RK_DES_CANCEL:     snprintf(out, cap, "CANCEL");      break;
     default:         snprintf(out, cap, "DONE");               break;
@@ -2730,8 +2849,6 @@ static void row_value(const MenuRow *r, char *out, int cap)
     case RK_TIRES:   snprintf(out, cap, "%s", tire_name(sel_tire[p]));      break;
     case RK_DES_NAME:
         snprintf(out, cap, "%s", designer_names[designer_name_idx]); break;
-    case RK_DES_MASS:
-        snprintf(out, cap, "%d KG", (int)designer_car.mass_kg);      break;
     case RK_DES_POWER:
         snprintf(out, cap, "%d HP", (int)designer_car.power_hp);     break;
     case RK_DES_BRAKE:
@@ -2750,6 +2867,24 @@ static void row_value(const MenuRow *r, char *out, int cap)
         snprintf(out, cap, "%d F",
                 (int)(designer_car.awd_front_bias * 100.0f));
         break;
+    case RK_DES_GEARCOUNT:
+        snprintf(out, cap, "%d", designer_car.n_gears); break;
+    case RK_DES_GEAR_SEL:
+        snprintf(out, cap, "%d/%d", designer_gear_sel + 1,
+                designer_car.n_gears);
+        break;
+    case RK_DES_GEAR_TOP:
+        snprintf(out, cap, "%d KM/H",
+                (int)(designer_car.gear_top[designer_gear_sel] * 3.6f));
+        break;
+    case RK_DES_GEAR_UP:
+        snprintf(out, cap, "%d%%",
+                (int)(designer_car.auto_up[designer_gear_sel] * 100.0f));
+        break;
+    case RK_DES_GEAR_DOWN:
+        snprintf(out, cap, "%d%%",
+                (int)(designer_car.auto_down[designer_gear_sel] * 100.0f));
+        break;
     default:         out[0] = 0;                                            break;
     }
 }
@@ -2760,11 +2895,13 @@ static int row_has_value(const MenuRow *r)
             r->kind == RK_LAPS ||
             r->kind == RK_CAR || r->kind == RK_PAINT ||
             r->kind == RK_GEARBOX || r->kind == RK_TIRES ||
-            r->kind == RK_DES_NAME || r->kind == RK_DES_MASS ||
+            r->kind == RK_DES_NAME ||
             r->kind == RK_DES_POWER || r->kind == RK_DES_BRAKE ||
             r->kind == RK_DES_GRIP || r->kind == RK_DES_DRAG ||
             r->kind == RK_DES_OFFROAD || r->kind == RK_DES_DRIVETRAIN ||
-            r->kind == RK_DES_AWD_BIAS);
+            r->kind == RK_DES_AWD_BIAS || r->kind == RK_DES_GEARCOUNT ||
+            r->kind == RK_DES_GEAR_SEL || r->kind == RK_DES_GEAR_TOP ||
+            r->kind == RK_DES_GEAR_UP || r->kind == RK_DES_GEAR_DOWN);
 }
 
 static void row_change(const MenuRow *r, int d)
@@ -2808,10 +2945,6 @@ static void row_change(const MenuRow *r, int d)
         snprintf(designer_car.name, sizeof(designer_car.name), "%s",
                 designer_names[designer_name_idx]);
         break;
-    case RK_DES_MASS:
-        designer_car.mass_kg = game_clampf(designer_car.mass_kg +
-                                           (float)d * 40.0f, 600.0f, 2200.0f);
-        break;
     case RK_DES_POWER:
         designer_car.power_hp = game_clampf(designer_car.power_hp +
                                             (float)d * 20.0f, 60.0f, 650.0f);
@@ -2846,6 +2979,59 @@ static void row_change(const MenuRow *r, int d)
         designer_car.awd_front_bias = game_clampf(
             designer_car.awd_front_bias + (float)d * 0.05f, 0.0f, 1.0f);
         break;
+    case RK_DES_GEARCOUNT: {
+        int new_n = designer_car.n_gears + d;
+        if (new_n < 1) new_n = 1;
+        if (new_n > MAX_GEARS) new_n = MAX_GEARS;
+        if (new_n > designer_car.n_gears) {
+            int g;
+            /* a gear grown back after being shrunk keeps whatever it
+             * had before; a genuinely new one gets a sane starting
+             * point instead of the zero it reads as right now */
+            for (g = designer_car.n_gears; g < new_n; g++)
+                if (!(designer_car.gear_top[g] > 0.0f))
+                    designer_car.gear_top[g] = fminf(
+                        designer_car.gear_top[g - 1] + 8.0f, 140.0f);
+            designer_car.n_gears = new_n;
+            kart_spec_default_shifts(&designer_car);
+        } else {
+            designer_car.n_gears = new_n;
+        }
+        if (designer_gear_sel >= designer_car.n_gears)
+            designer_gear_sel = designer_car.n_gears - 1;
+        break;
+    }
+    case RK_DES_GEAR_SEL:
+        designer_gear_sel = ((designer_gear_sel + d) % designer_car.n_gears +
+                             designer_car.n_gears) % designer_car.n_gears;
+        break;
+    case RK_DES_GEAR_TOP: {
+        int sel = designer_gear_sel;
+        /* stays strictly between its neighbors — kart_spec_validate
+         * would reject a ladder that did not, and there is no reason
+         * to make a player discover that at SAVE instead of here */
+        float lo = (sel > 0) ? designer_car.gear_top[sel - 1] + 0.5f
+                              : 2.0f;
+        float hi = (sel < designer_car.n_gears - 1)
+                       ? designer_car.gear_top[sel + 1] - 0.5f : 140.0f;
+        designer_car.gear_top[sel] = game_clampf(
+            designer_car.gear_top[sel] + (float)d * 0.833f, lo, hi);
+        break;
+    }
+    case RK_DES_GEAR_UP: {
+        int sel = designer_gear_sel;
+        float lo = fmaxf(0.30f, designer_car.auto_down[sel] + 0.20f);
+        designer_car.auto_up[sel] = game_clampf(
+            designer_car.auto_up[sel] + (float)d * 0.02f, lo, 1.20f);
+        break;
+    }
+    case RK_DES_GEAR_DOWN: {
+        int sel = designer_gear_sel;
+        float hi = fminf(0.90f, designer_car.auto_up[sel] - 0.20f);
+        designer_car.auto_down[sel] = game_clampf(
+            designer_car.auto_down[sel] + (float)d * 0.02f, 0.05f, hi);
+        break;
+    }
     default:
         break;
     }
@@ -3172,9 +3358,9 @@ static void draw_designer_screen(void)
     else
         snprintf(buf, sizeof(buf), "DRIVE %s", drivetrain_name(sp.drivetrain));
     hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 28.0f;
-    hud_text(panel_x, y, 7.0f, 12.0f, "WHEELBASE + GEARING SET FOR YOU",
+    hud_text(panel_x, y, 7.0f, 12.0f, "CURB WEIGHT FOLLOWS POWER",
              150, 158, 175, 210); y += 14.0f;
-    hud_text(panel_x, y, 7.0f, 12.0f, "FROM POWER, DRAG AND MASS",
+    hud_text(panel_x, y, 7.0f, 12.0f, "WHEELBASE FOLLOWS CURB WEIGHT",
              150, 158, 175, 210);
     if (!cars_json_path[0]) {
         y += 22.0f;
@@ -3232,7 +3418,7 @@ static void draw_setup_screen(void)
              menu_track.has_walls ? "RAILS" : "NO RAILS",
              menu_track.has_walls ? 150 : 255,
              menu_track.has_walls ? 200 : 150, 170, 235);
-    draw_minimap(&menu_track, 0, W - 236.0f, 208.0f, 160.0f);
+    draw_minimap(&menu_track, 0, -1, W - 236.0f, 208.0f, 160.0f);
 
     if (menu_msg_t > 0.0f)
         hud_text(W * 0.5f - hud_text_width(11.0f, menu_msg) * 0.5f,
@@ -3388,7 +3574,9 @@ static void menu_frame(float dt)
 
     build_rows();
     if (menu_screen == SCREEN_GARAGE) {
-        draw_garage_scene(sel_paint[garage_player]);
+        draw_garage_scene(sel_paint[garage_player],
+                          &kart_specs[sel_spec[garage_player] %
+                                     kart_spec_count]);
         draw_garage_overlay(garage_player);
     } else if (menu_screen == SCREEN_CONFIG) {
         draw_config_screen();

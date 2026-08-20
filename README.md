@@ -173,6 +173,22 @@ for the hairpins.
   drivetrain from the garage menu, and save it into the roster for the
   rest of the session (and to disk, wherever `cars.json` was actually
   found).
+- **v1.24.0** — road banking on every circuit, genuinely lending extra
+  cornering grip, not just a visual tilt; a small crown on the seven
+  mountain passes and CLASSIC, a real, deliberately stronger bank on
+  BULLRING's own turns, whose two straights also doubled to 400 m each.
+  Cornering physics reworked: cars hold a line much further past the
+  nominal grip limit before losing it, and a genuine spin now has two
+  distinct causes — big torque on lock in a tight turn (rear-driven
+  cars easily, all-wheel-drive only with a much harder commitment,
+  front-driven cars never) or carrying too much speed into a corner for
+  any drivetrain to save. The car designer no longer lets mass move on
+  its own — it now follows power directly, a real trade-off instead of
+  a free dial — in exchange for full control of gear count and every
+  gear's own top speed and shift points. Cars now look like their
+  numbers (wheelbase, mass, drag and drivetrain all show in the model,
+  on track and in the garage), and the local player's own car carries a
+  pulsing ring on the minimap.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -211,9 +227,13 @@ for the hairpins.
 - **Physically-based driving.** Acceleration comes from engine power
   (F = P/v, traction-capped), top speed emerges from aerodynamic drag,
   braking matches the car's quoted 100-0 km/h stopping distance, and
-  cornering is limited by lateral grip (v²/r ≤ μg) — push past it and the
-  car understeers wide, scrubbing speed. Gravity acts along the road
-  grade: climbs cost speed, descents give it back.
+  cornering is limited by lateral grip (v²/r ≤ μg, boosted by road
+  banking where a circuit has it) — push a little past it and the tires
+  have a shoulder, holding a tighter line than the nominal limit before
+  it truly gives way; push a lot past it, or lean hard on a rear-driven
+  car's throttle in a tight turn, and it spins instead of just running
+  wide. Gravity acts along the road grade: climbs cost speed, descents
+  give it back.
 - **Thirteen cars, and no two drive alike.** RACER (a 260 kg superkart) and
   TRUCK (a 2100 kg pickup) sit at opposite ends of the roster; between
   them are a hot hatch (RUBY), a rally car (RALLY) and a dune buggy
@@ -242,7 +262,7 @@ for the hairpins.
   | BREAKNECK | 938 m | 7.4 m | 12 | 32 m | 44 m | 29% | **no** | 3 |
   | GUANELLA | 2349 m | 7.8 m | 16 | 7 m | 77 m | 19% | **no** | 2 |
   | BERTHOUD 2.0 | 3628 m | 13.2 m | 31 | 7 m | 85 m | 21% | yes | 2 |
-  | BULLRING | 838 m | 15.0 m | 10 | 62 m | flat | — | yes | 4 |
+  | BULLRING | 1238 m | 15.0 m | 10 | 62 m | flat | — | yes | 3 |
 
   **Berthoud 2.0** is the longest pass; **Monarch** climbs the most and
   has no rails. **Kenosha** is the widest of the mountain passes and has
@@ -252,6 +272,14 @@ for the hairpins.
   anywhere on the lap, the widest pavement in the game, and nothing
   tighter than a wide, sweeping turn — a generated oval rather than a
   hand-drawn pass, specifically so it has no abrupt curves anywhere.
+  Its own turns carry a real, deliberately gentle bank (see Road
+  banking below) well beyond the small crown every other circuit gets.
+- **Road banking.** Every circuit's curves cant into the turn — a small
+  crown on the mountain passes and CLASSIC, scaled to how tight the
+  bend is, and a real bank on BULLRING's own turns. It is not just a
+  tilt to look at: a banked corner genuinely adds cornering grip, part
+  of gravity now pointing toward the apex instead of straight down, the
+  same reason a real banked turn lets you carry more speed through it.
 - **Gearboxes.** Every car has a real gearbox — 4 to 6 gears, each with a
   road speed at the limiter. Where you are in the band decides your power:
   bog it below a third of the band and it pulls badly, sit on the limiter

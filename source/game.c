@@ -31,6 +31,13 @@
 #define DEFAULT_DRIVE 0.85f    /* drivetrain efficiency                */
 #define HP_TO_W    745.7f
 #define V100       27.78f      /* 100 km/h in m/s                      */
+/* A real tire's grip does not end at a hard wall: past the nominal
+ * v^2/r <= mu*g limit there is a "shoulder" where it still delivers
+ * most of what is asked, at a steepening cost, before it actually lets
+ * go. TIRE_SHOULDER is how much more yaw rate that buys a driver who
+ * pushes past yaw_cap — see the cornering step in kart_step — before
+ * the road really does start scrubbing away underneath them. */
+#define TIRE_SHOULDER 1.12f
 
 /*
  * The compiled-in roster mirrors config/cars.json exactly, so opening the
@@ -316,8 +323,8 @@ void game_settings_defaults(GameSettings *s)
     s->turbo_max_power_bonus = 0.35f;
     s->understeer_scrub = 0.22f;
     s->understeer_scrub_curve = 0.60f;
-    s->oversteer_grow_rate = 0.70f;
-    s->oversteer_max_bonus = 0.35f;
+    s->oversteer_grow_rate = 1.00f;
+    s->oversteer_max_bonus = 0.40f;
     s->oversteer_catch_decay = 2.5f;
     s->oversteer_spin_seconds = 1.0f;
     s->spin_seconds = 0.6f;
@@ -1971,6 +1978,14 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     float weather_grip = weather_tire_grip_mult(&g->settings, weather,
                                                 k->tire);
     float mu_a = s->lat_g * GRAVITY * grip * weather_grip * k->tire_grip_now;
+    /* a banked road lends the tires a hand: part of gravity now points
+     * toward the corner instead of straight down, the way it does on a
+     * real banked turn (v^2/r <= g*(mu + tan(bank)) rather than g*mu
+     * alone). Unsigned — the bank at this exact point does not know or
+     * care which way the driver is actually sliding, and every banked
+     * corner in the game is banked to help the turn the road itself
+     * makes, never the other way. */
+    mu_a += GRAVITY * tanf(fabsf(t->bank[k->seg]));
     float cd_a = s->cd_a *
                  tire_drag_mult_with_settings(&g->settings, k->tire) *
                  (weather == WEATHER_PUDDLE
@@ -2224,7 +2239,6 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         float yaw_cmd = v * tanf(steer * delta_max) / s->wheelbase;
         float yaw_cap = mu_a / (fabsf(v) > 0.5f ? fabsf(v) : 0.5f);
         float yaw;
-        float rwd_bias = 1.0f - dt_front;   /* 1 = pure RWD, 0 = pure FWD */
         int oversteer_risk;
 
         /* the driven axle spends some of its own grip on traction rather
@@ -2259,9 +2273,39 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
          * would catch it after barely easing off — the same 0.6 of
          * steering lock means the same thing to a driver in any car.
          */
-        oversteer_risk = accel && !brake && !k->drifting &&
-                         rwd_bias > 0.5f && fabsf(steer) > 0.6f &&
-                         fabsf(v) > 12.0f && fabsf(yaw_cmd) > yaw_cap;
+        /*
+         * Two independent ways to actually spin, not just understeer,
+         * each standing in for a real drivetrain difference:
+         *
+         * - Torque, on lock, in a tight turn. A rear-driven car's rear
+         *   axle is free to step out under power with only a modest
+         *   commitment (steering, speed) since none of its own grip is
+         *   spent finding traction up front. AWD needs a much harder
+         *   commitment first — the front axle sharing the load keeps
+         *   it planted well past where a pure RWD car would already be
+         *   loose — and a front-driven car never reaches this at all;
+         *   it understeers instead (the yaw_cap reduction above), the
+         *   way a real FWD car pushes rather than spins under power.
+         * - Speed alone, for any drivetrain: carrying enough more
+         *   speed than a corner's grip allows that no amount of
+         *   throttle discipline would have saved it — the "just came
+         *   in too hot" case, independent of the driven axle.
+         */
+        {
+            int is_fwd = (s->drivetrain == DRIVETRAIN_FWD);
+            int is_awd = (s->drivetrain == DRIVETRAIN_AWD);
+            float torque_steer_min = is_awd ? 0.80f : 0.6f;
+            float torque_speed_min = is_awd ? 16.0f : 12.0f;
+            int torque_spin_risk = accel && !brake && !k->drifting &&
+                                   !is_fwd &&
+                                   fabsf(steer) > torque_steer_min &&
+                                   fabsf(v) > torque_speed_min &&
+                                   fabsf(yaw_cmd) > yaw_cap;
+            int speed_spin_risk = !k->drifting && fabsf(steer) > 0.5f &&
+                                  fabsf(v) > 25.0f &&
+                                  fabsf(yaw_cmd) > yaw_cap * 2.0f;
+            oversteer_risk = torque_spin_risk || speed_spin_risk;
+        }
         if (k->spin_t <= 0.0f) {
             if (oversteer_risk) {
                 k->oversteer_t += dt;
@@ -2296,13 +2340,21 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
             v -= g->settings.spin_speed_loss * mu_a * dt;
             k->slip = 1.0f;
         } else if (yaw_cmd > yaw_cap) {
-            yaw = yaw_cap;
+            /* the tire's shoulder: genuinely deliver more turn-in than
+             * the nominal grip circle allows, up to TIRE_SHOULDER, so a
+             * driver who pushes a little past the limit holds the
+             * tighter line instead of the car simply refusing to turn
+             * that much — at a scrub cost that ramps up over the same
+             * shoulder instead of over the whole cap again */
+            float shoulder_cap = yaw_cap * TIRE_SHOULDER;
+            yaw = fminf(yaw_cmd, shoulder_cap);
             k->slip = game_clampf((yaw_cmd - yaw_cap) / yaw_cap, 0.0f, 1.0f);
             v -= g->settings.understeer_scrub *
                  (1.0f + g->settings.understeer_scrub_curve * k->slip) *
                  mu_a * k->slip * dt;                /* understeer scrub */
         } else if (yaw_cmd < -yaw_cap) {
-            yaw = -yaw_cap;
+            float shoulder_cap = yaw_cap * TIRE_SHOULDER;
+            yaw = fmaxf(yaw_cmd, -shoulder_cap);
             k->slip = game_clampf((-yaw_cmd - yaw_cap) / yaw_cap, 0.0f, 1.0f);
             v -= g->settings.understeer_scrub *
                  (1.0f + g->settings.understeer_scrub_curve * k->slip) *
