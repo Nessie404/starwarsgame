@@ -433,6 +433,177 @@ static void test_drivetrain_json_parsing(void)
     kart_specs_reset_defaults();
 }
 
+/* Overcooking a corner a little should barely register; overcooking it
+ * a lot has to really cost something — the scrub is not a flat rate
+ * per unit of slip, it gets steeper the further past the limit the car
+ * is. */
+static void test_understeer_scrub_is_progressive(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    float v_before, mild_loss, severe_loss;
+
+    /* mild: just over the limit (gentle steer well past what full grip
+     * allows at this speed, but not by a huge margin) */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 25.0f);
+    v_before = g.karts[0].speed;
+    in[0].steer = 0.15f;
+    game_update(&g, in, 1.0f / 60.0f);
+    mild_loss = v_before - g.karts[0].speed;
+    CHECK(g.karts[0].slip > 0.0f && g.karts[0].slip < 0.7f,
+          "mild case is not actually mild (slip %.2f)", g.karts[0].slip);
+
+    /* severe: full lock, the same everything else */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 25.0f);
+    v_before = g.karts[0].speed;
+    in[0].steer = 1.0f;
+    game_update(&g, in, 1.0f / 60.0f);
+    severe_loss = v_before - g.karts[0].speed;
+    CHECK(g.karts[0].slip > 0.7f,
+          "severe case is not actually severe (slip %.2f)",
+          g.karts[0].slip);
+
+    printf("understeer scrub: mild slip loses %.4f m/s/frame, severe "
+           "slip loses %.4f m/s/frame\n", mild_loss, severe_loss);
+    /* if the scrub were purely proportional to slip, severe (slip near
+     * 1.0) would lose a bit more than double what mild (slip well
+     * under 0.5) loses; the progressive curve on top has to make it
+     * lose noticeably more than that */
+    CHECK(severe_loss > mild_loss * 2.5f,
+          "understeer scrub is not progressive (mild %.4f, severe %.4f)",
+          mild_loss, severe_loss);
+}
+
+/*
+ * Power oversteer: a rear-driven car committing hard to a corner on the
+ * throttle can rotate faster than pure grip would allow, for free, for
+ * as long as the driver keeps the wheel turned hard — ease off in time
+ * and it settles back down having gained real rotation over an
+ * identical front-driven car; keep it locked over and it spins,
+ * losing a lot of speed and control for a while.
+ */
+static void test_oversteer_rewards_a_catch_and_punishes_a_miss(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    int f;
+    float rwd_heading_caught, fwd_heading, v_before_spin, v_after_spin;
+
+    /* --- caught: RWD gains more rotation than an identical FWD car,
+     * and does not spin --- */
+    {
+        char error[80];
+        CHECK(config_load_cars_text(drivetrain_test_cars, error,
+                                    (int)sizeof(error)),
+              "drivetrain test cars did not load: %s", error);
+    }
+    cfg.spec[0] = 0;   /* RWDCAR */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 25.0f);
+    in[0].accel = 1;
+    in[0].steer = 1.0f;
+    for (f = 0; f < 30; f++) {          /* 0.5 s: builds oversteer      */
+        game_update(&g, in, 1.0f / 60.0f);
+    }
+    in[0].steer = 0.2f;                 /* ease off: catch it           */
+    for (f = 0; f < 60; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    rwd_heading_caught = fabsf(g.karts[0].heading);
+    CHECK(g.karts[0].spin_t <= 0.0f,
+          "an oversteer that was caught should not still be spinning");
+
+    cfg.spec[0] = 1;   /* FWDCAR, identical stats otherwise */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 25.0f);
+    in[0].accel = 1;
+    in[0].steer = 1.0f;
+    for (f = 0; f < 30; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    in[0].steer = 0.2f;
+    for (f = 0; f < 60; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    fwd_heading = fabsf(g.karts[0].heading);
+    CHECK(g.karts[0].oversteer_t <= 0.0f,
+          "a front-driven car should never enter power oversteer");
+
+    printf("oversteer reward: RWD rotated %.3f rad, identical FWD "
+           "rotated %.3f rad over the same 1.5 s\n",
+           rwd_heading_caught, fwd_heading);
+    CHECK(rwd_heading_caught > fwd_heading * 1.05f,
+          "a caught oversteer did not out-rotate the identical FWD car "
+          "(%.3f vs %.3f)", rwd_heading_caught, fwd_heading);
+
+    /* --- missed: the same RWD car, held flat out with no correction,
+     * has to spin: heavy speed loss and slip pinned at 1.0 --- */
+    cfg.spec[0] = 0;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 25.0f);
+    in[0].accel = 1;
+    in[0].steer = 1.0f;
+    for (f = 0; f < 65; f++)            /* past oversteer_spin_seconds  */
+        game_update(&g, in, 1.0f / 60.0f);
+    CHECK(g.karts[0].spin_t > 0.0f,
+          "holding the wheel over for a full second under power never "
+          "spun the car");
+    v_before_spin = g.karts[0].speed;
+    for (f = 0; f < 20; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+    v_after_spin = g.karts[0].speed;
+    printf("missed oversteer: %.1f -> %.1f m/s through the spin, "
+           "slip %.2f\n", v_before_spin, v_after_spin, g.karts[0].slip);
+    CHECK(v_after_spin < v_before_spin - 3.0f,
+          "a spin did not cost real speed (%.1f -> %.1f)",
+          v_before_spin, v_after_spin);
+    CHECK(g.karts[0].slip > 0.9f, "a spinning car should read as fully "
+          "sliding, not %.2f", g.karts[0].slip);
+
+    kart_specs_reset_defaults();
+}
+
+/* Gentle driving must never trip the oversteer mechanism — this is the
+ * regression test for a first cut of the risk condition that compared
+ * yaw_cmd against the grip cap directly, which broke down for
+ * short-wheelbase cars (their yaw_cmd so outsizes their own cap that
+ * "catching" it would have meant nearly releasing the wheel). Risk and
+ * catch are both judged on the steering input instead, which means the
+ * same 0.6 of lock means the same thing in any car. */
+static void test_oversteer_never_triggers_when_driving_gently(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    int f, spec;
+
+    for (spec = 0; spec < SPEC_COUNT; spec++) {
+        cfg.spec[0] = spec;
+        game_init(&g, &cfg);
+        g.state = STATE_RACING;
+        idle_inputs(in);
+        teleport(&g, &g.karts[0], 2, 20.0f);
+        in[0].accel = 1;
+        in[0].steer = 0.15f;
+        for (f = 0; f < 120; f++)
+            game_update(&g, in, 1.0f / 60.0f);
+        CHECK(g.karts[0].oversteer_t <= 0.0f && g.karts[0].spin_t <= 0.0f,
+              "%s entered oversteer from gentle steering",
+              kart_specs[spec].name);
+    }
+}
+
 /* The whole AI field must be able to finish a full race on every track,
  * cleanly: no NaNs, nobody outside the barriers, and a sane winning lap
  * time for the circuit's length. */
@@ -1573,6 +1744,103 @@ static void test_weather_reaches_the_physics(void)
           "one (%.3f) in fresh snow", yaw_soft, yaw_hard);
 }
 
+/* Standing water should cost more than cornering grip — it drags at the
+ * car in a straight line too, on top of whatever the tire's own
+ * drag_multiplier already costs. Coast the same kart through the same
+ * spot once while it is still snow (no extra drag) and once well into
+ * the puddle stage, and the puddle has to bleed off more speed. */
+static void test_weather_puddle_drag(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    int seg = -1, i;
+    float v_snow, v_puddle;
+
+    game_init(&g, &cfg);
+    for (i = 0; i < g.track.n; i++)
+        if (g.track.weather_zone[i] == 0) { seg = i; break; }
+    CHECK(seg >= 0, "could not find a weather zone to test on");
+
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.race_t = 0.0f;                    /* zone 0 is fresh snow at t=0 */
+    teleport(&g, &g.karts[0], seg, 30.0f);
+    game_update(&g, in, 1.0f / 60.0f);
+    v_snow = g.karts[0].speed;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.race_t = 200.0f;      /* well past ice_to_puddle_seconds for zone 0 */
+    teleport(&g, &g.karts[0], seg, 30.0f);
+    game_update(&g, in, 1.0f / 60.0f);
+    v_puddle = g.karts[0].speed;
+
+    printf("puddle drag: coasting from 30 m/s reaches %.3f m/s over snow, "
+           "%.3f m/s over a puddle\n", v_snow, v_puddle);
+    CHECK(v_puddle < v_snow,
+          "a puddle cost no extra speed while coasting (%.3f vs %.3f)",
+          v_puddle, v_snow);
+}
+
+/*
+ * The AI's corner-speed lookahead now discounts grip the same way the
+ * physics itself does for whatever is under the wheels — a segment sat
+ * in a weather patch gets approached slower, same as a corner this
+ * driver has learned to respect. Hard rubber is the one tire the
+ * puddle stage treats far better than the snow stage (0.55 -> 0.92,
+ * the sharpest swing in the whole weather table): send the same AI
+ * driver, on the same hard tire, through the same zone once while it
+ * is still fresh snow and once once it has become a puddle, and a
+ * weather-aware driver should genuinely go faster through the puddle
+ * — the grip really is there now, and it should know it, rather than
+ * driving both exactly the same because it cannot see the difference.
+ */
+static void test_ai_weather_awareness(void)
+{
+    int variant;
+    float end_speed[2];
+
+    for (variant = 0; variant < 2; variant++) {
+        Game g;
+        GameConfig cfg = default_cfg(TRACK_CLASSIC);
+        Input in[MAX_HUMANS];
+        int seg = -1, i, f;
+
+        game_init(&g, &cfg);
+        for (i = 0; i < g.track.n; i++)
+            if (g.track.weather_zone[i] == 0) { seg = i; break; }
+        CHECK(seg >= 0, "could not find a weather zone to test on");
+
+        g.state = STATE_RACING;
+        /* zone 0: fresh snow at t=0 (hard tire grip 0.55), a settled
+         * puddle by t=200 (hard tire grip 0.92) — same tire throughout */
+        g.race_t = (variant == 0) ? 0.0f : 200.0f;
+        idle_inputs(in);
+        /* TOURER: front_bias 0.50 puts rwd_bias at exactly 0.50, which
+         * is not > 0.50 — the power-oversteer mechanic never engages,
+         * so this isolates the weather-aware speed target from the
+         * separate (and separately tested) oversteer/spin behaviour */
+        g.karts[1].spec = 3;
+        g.karts[1].tire = TIRE_HARD;
+        teleport(&g, &g.karts[1], seg, 15.0f);
+
+        for (f = 0; f < 150; f++)
+            game_update(&g, in, 1.0f / 60.0f);
+        end_speed[variant] = g.karts[1].speed;
+    }
+
+    printf("AI on hard tires: %.2f m/s through fresh snow, %.2f m/s "
+           "through the same spot once it is a puddle\n",
+           end_speed[0], end_speed[1]);
+    CHECK(end_speed[1] > end_speed[0] * 1.05f,
+          "the AI did not speed up once the same tire's grip genuinely "
+          "improved (%.2f m/s in snow vs %.2f m/s in the puddle) — it "
+          "looks like it cannot see the weather change",
+          end_speed[0], end_speed[1]);
+}
+
 /*
  * The point of compounds is that none of them is the answer. Run the same
  * race on each and check that the sprint and the long haul want different
@@ -2352,7 +2620,7 @@ static void test_json_configuration(void)
     CHECK(config_load_settings_file(&settings, "config/settings.json",
                                     error, (int)sizeof(error)),
           "shipped settings.json did not load: %s", error);
-    CHECK(fabsf(settings.ai_skill_mult - 1.02f) < 0.001f,
+    CHECK(fabsf(settings.ai_skill_mult - 1.06f) < 0.001f,
           "AI skill setting did not load");
     CHECK(fabsf(settings.weather_snow_to_ice_s - 40.0f) < 0.001f &&
           fabsf(settings.weather_puddle_grip[TIRE_HARD] - 0.92f) < 0.001f,
@@ -3425,6 +3693,61 @@ static void test_difficulty_presets_scaffolding(void)
           "easy/hard do not lean the expected way on guardrails");
 }
 
+/* Team mode is scaffolding, same as difficulty presets: this only checks
+ * the data shape (names, distinct paint colours) is sane, not that a
+ * race actually groups karts into teams — nothing wires that up yet. */
+static void test_team_mode_scaffolding(void)
+{
+    int i, j;
+    GameConfig cfg;
+
+    for (i = 0; i < TEAM_COUNT; i++)
+        CHECK(team_defs[i].name && team_defs[i].name[0],
+              "team %d has no name", i);
+    CHECK(strcmp(team_name(0), team_defs[0].name) == 0,
+          "team_name(0) does not match the table");
+    CHECK(strcmp(team_name(99), "CRIMSON") == 0,
+          "an out-of-range team should fall back to CRIMSON");
+
+    for (i = 0; i < TEAM_COUNT; i++)
+        for (j = i + 1; j < TEAM_COUNT; j++)
+            CHECK(team_defs[i].paint_idx != team_defs[j].paint_idx,
+                  "teams %d and %d fly the same paint colour", i, j);
+
+    /* zero-initializing a GameConfig (the usual pattern) must leave team
+     * mode off — this is a scaffolding field, so nothing may start a
+     * race grouped into teams by accident */
+    memset(&cfg, 0, sizeof(cfg));
+    CHECK(cfg.team_mode == 0, "a zero-initialized config has team mode on");
+}
+
+/* Career mode is scaffolding too: check the one piece of plumbing it
+ * has (career_record_result) actually stores what it's given, and that
+ * a race does not yet act on it — every human still starts at the back
+ * of the grid no matter what CareerState says. */
+static void test_career_mode_scaffolding(void)
+{
+    CareerState cs;
+    Game plain, careered;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+
+    memset(&cs, 0, sizeof(cs));
+    CHECK(cs.has_last_result == 0, "a zero-initialized CareerState has a result");
+    career_record_result(&cs, 3);
+    CHECK(cs.has_last_result == 1 && cs.last_finish_rank == 3,
+          "career_record_result did not store the finish (%d, rank %d)",
+          cs.has_last_result, cs.last_finish_rank);
+
+    game_init(&plain, &cfg);
+    cfg.career[0] = cs;                 /* pretend the human finished 3rd */
+    game_init(&careered, &cfg);
+    CHECK(fabsf(plain.karts[0].x - careered.karts[0].x) < 0.001f &&
+          fabsf(plain.karts[0].z - careered.karts[0].z) < 0.001f &&
+          fabsf(plain.karts[0].heading - careered.karts[0].heading) < 0.001f,
+          "a populated CareerState changed the starting grid — "
+          "game_init should not read it yet");
+}
+
 static void test_driver_names(void)
 {
     Game g;
@@ -3906,6 +4229,8 @@ int main(void)
     test_weather_melts_over_time();
     test_weather_tire_grip_ordering();
     test_weather_reaches_the_physics();
+    test_weather_puddle_drag();
+    test_ai_weather_awareness();
     test_tire_strategy_crossover();
     test_tires_need_work();
     test_track_roster();
@@ -3920,6 +4245,9 @@ int main(void)
     test_corner_segmentation();
     test_berthoud2_keeps_its_switchbacks();
     test_full_grid_fits();
+    test_understeer_scrub_is_progressive();
+    test_oversteer_rewards_a_catch_and_punishes_a_miss();
+    test_oversteer_never_triggers_when_driving_gently();
     test_ai_races_all_tracks();
     test_full_race_classic();
     test_yolo_strategy_is_the_wildest();
@@ -3950,6 +4278,8 @@ int main(void)
     test_lap_times_survive_respawn();
     test_lap_count_override();
     test_difficulty_presets_scaffolding();
+    test_team_mode_scaffolding();
+    test_career_mode_scaffolding();
     test_driver_names();
     test_tacho_settings();
     test_camera_reverse_swing();

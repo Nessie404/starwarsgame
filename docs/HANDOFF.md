@@ -162,6 +162,28 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   bug — see §6 below — so the original v1.15.0 layout is restored and
   scaled up further (1.30 → 1.50) for room without smoothing anything
   out: 36 corners, an 8 m tightest radius, 85 m of climb.
+- **v1.19.2**: fixed a real (if inert) data-drift bug — the compiled
+  fallback roster hardcoded `awd_front_bias = 0.0` for FWD/RWD cars
+  while the JSON parser's own default is `0.5` — and added
+  `test_compiled_roster_matches_cars_json`, which diffs every field of
+  every car between the two rosters instead of just the count (see §6
+  below). No feature work; also clarified that there is no
+  turbocharger/supercharger system (retired in v1.16) and that
+  v1.19.0's `boost` is an unrelated, universal mechanic tuned in
+  `settings.json`, not `cars.json`.
+- **v1.20.0**: a genuinely punishing/rewarding oversteer and understeer
+  rework (progressive understeer scrub, plus a new catchable power-
+  oversteer/spin mechanic for rear-driven cars under throttle — new
+  `understeer`/`oversteer` settings blocks); another AI competitiveness
+  pass (`skill_multiplier` 1.02 → 1.06, `braking_multiplier` 0.72 →
+  0.76); the data-only bones of a colour-based team mode (`TeamDef`,
+  `GameConfig.team_mode`/`team[]`) and a career/campaign mode
+  (`CareerState`, `GameConfig.career[]`) — neither wired into a race
+  yet, same status as v1.19.0's difficulty preset; and the weather
+  system fleshed out further: standing water now drags at every car
+  (new `weather_puddle_drag_mult`), and the AI's own corner-speed
+  lookahead discounts grip for whatever weather patch is ahead instead
+  of assuming dry pavement everywhere.
 
 ---
 
@@ -275,6 +297,39 @@ narrowest, least forgiving circuit) exists because an early `AI_YOLO`
 tuning (`conf_start` 1.20) did exactly this. If a new/more aggressive
 AI strategy passes on every other track but times out specifically on
 Monarch, suspect this before anything else.
+
+**A steering-derived quantity is not car-independent just because the
+formula looks symmetric.** `yaw_cmd = v * tan(steer * delta_max) /
+wheelbase` scales as `1 / wheelbase`, so the same `steer` value means
+wildly different things car to car: RACER's 1.05 m wheelbase means even
+`steer = 0.3` can already exceed a bonused `yaw_cap`, while a long
+car's `yaw_cmd` stays well under it at full lock. v1.20.0's power-
+oversteer mechanic first judged whether a slide had been "caught" by
+comparing `yaw_cmd` against `yaw_cap` directly — which meant a
+short-wheelbase kart could never catch one (it would have to release
+the wheel almost entirely) while a long-wheelbase one caught trivially
+every time, an unintentional and very car-dependent difficulty spike.
+The fix judges risk and catch on the raw steering input magnitude
+instead (`fabsf(steer) > 0.6`), which means the same fraction of lock
+means the same thing in every car; `yaw_cmd > yaw_cap` is still used,
+but only as the initial "is this car actually cornering hard" gate.
+`test_oversteer_never_triggers_when_driving_gently` is the regression
+test — if a future change to the steering model reintroduces a
+car-dependent comparison here, that test is where it will show up
+first, likely on whichever car has the shortest wheelbase.
+
+**When writing a host test for AI behaviour on a rear-driven car, pick
+the spec deliberately or the power-oversteer mechanic will confound
+whatever you're actually trying to measure.** Any AI test that puts a
+kart under throttle through a hard corner on a car with `rwd_bias >
+0.5` (i.e. anything not close to 50/50 AWD or FWD-leaning) can trigger
+a genuine spin as a side effect, which pins `slip` at `1.0` and
+swamps whatever more specific effect the test was built to isolate —
+this happened while first writing `test_ai_weather_awareness`, which
+does not care about oversteer at all. TOURER (`front_bias = 0.50`,
+`rwd_bias` exactly `0.50`, not `> 0.50`) is the deliberate escape
+hatch: assign a test kart to it explicitly when the thing under test
+is unrelated to oversteer/spin behaviour.
 
 ---
 

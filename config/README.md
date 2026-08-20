@@ -104,6 +104,9 @@ This file exposes the main tuning surfaces:
   is, how fast it heats and cools, and how much grip is left outside the
   window — plus the ambient air temperature they cool towards;
 - weather: how a snow patch melts (see below);
+- understeer and oversteer: how much pushing past the grip limit costs,
+  and how a rear-driven car committing hard under power can rotate faster
+  than grip alone allows — reward it in time or spin;
 - AI pace, braking, safe-road use, and overcommit behavior;
 - cliff fall, blackout, fade, invincibility, and flash timing;
 - how long a human can drive the wrong way before the marshal helicopter
@@ -144,7 +147,8 @@ race, not from when it turned to ice) — and stays a puddle from there.
   "ice_to_puddle_seconds": 90,
   "medium": { "snow_grip": 0.80, "ice_grip": 0.72, "puddle_grip": 0.80 },
   "soft":   { "snow_grip": 0.92, "ice_grip": 0.85, "puddle_grip": 0.55 },
-  "hard":   { "snow_grip": 0.55, "ice_grip": 0.50, "puddle_grip": 0.92 }
+  "hard":   { "snow_grip": 0.55, "ice_grip": 0.50, "puddle_grip": 0.92 },
+  "puddle_drag_multiplier": 1.12
 }
 ```
 
@@ -153,7 +157,12 @@ Each of `medium`/`soft`/`hard` sets that compound's grip multiplier
 conditions. The shipped values make soft the tire to have while a patch
 is snow or ice and the worst choice once it has become a puddle, hard the
 exact opposite, and medium a car that is never the best or the worst
-choice either way.
+choice either way. `puddle_drag_multiplier` (default 1.12) is standing
+water dragging at every car regardless of tire choice, on top of that
+grip trade — a puddle costs top speed as well as cornering grip. The AI
+reads the same patches a human can see coming: it slows for one on the
+way in exactly like a corner it has learned to respect, on whichever
+tire it's actually carrying.
 
 ### The `instruments` block
 

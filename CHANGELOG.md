@@ -4,6 +4,52 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.20.0] - 2026-08-20
+
+### Added
+
+- **Oversteer and understeer are both far more punishing/rewarding.**
+  Understeer now scrubs speed progressively — `scrub * (1 +
+  scrub_curve * slip) * mu_a * slip * dt` instead of the old flat rate
+  — so a corner taken barely too hot just runs a little wide, one taken
+  way too hot really pays for it. Rear-driven cars get a brand new
+  power-oversteer mechanic on top of that, separate from the existing
+  handbrake drift: committing hard to a corner on the throttle
+  (`|steer| > 0.6`, genuinely cornering past the grip limit) builds
+  extra rotation for free the longer it's held; ease off in time and it
+  settles back down having gained real rotation over an identical
+  front-driven car, but hold it past `oversteer_spin_seconds` (default
+  1.0 s) and the car spins — losing real speed and control for
+  `spin_seconds` (default 0.6 s) before it's driveable again. Tunable
+  in the new `understeer`/`oversteer` blocks of `settings.json`.
+- **AI competitiveness, pushed further.** `skill_multiplier` up from
+  1.02 to 1.06 and `braking_multiplier` (how much of the theoretical
+  maximum deceleration the AI trusts itself with) up from 0.72 to
+  0.76, so the field corners and brakes closer to the real limit.
+- **Team mode, colour-based — SCAFFOLDING ONLY.** `TeamDef`,
+  `team_defs[]`, `team_name()`, and `GameConfig.team_mode`/`team[]` in
+  `game.h`/`game.c` describe four teams, each identified by a paint
+  colour, that a future garage choice would group humans and AI onto.
+  Nothing reads `team_mode` yet, so setting it today has no effect on
+  a race — see `TODO.md` for what real wiring needs (a menu control, a
+  combined team score, AI team assignment, and a decision on whether
+  team mates get any in-race awareness of each other).
+- **Career/campaign mode — SCAFFOLDING ONLY.** `CareerState`,
+  `career_record_result()`, and `GameConfig.career[]` describe a
+  human's grid slot for the next race defaulting to where they
+  finished the last one, instead of always starting at the back.
+  Nothing persists this to disk and `game_init` does not read it yet
+  — see `TODO.md` for the save/load I/O, grid-slot logic, and campaign
+  menu flow a real implementation still needs.
+- **Weather, fleshed out further.** Standing water now drags at every
+  car regardless of tire choice (`weather_puddle_drag_mult`, default
+  1.12, on top of the existing per-tire grip trade), so a puddle costs
+  top speed as well as cornering grip. The AI's own corner-speed
+  lookahead now discounts grip for whatever weather patch is ahead of
+  it — on CLASSIC, it slows for an upcoming snow/ice/puddle segment
+  the same way it already slows for a corner it has learned to
+  respect, instead of assuming dry pavement everywhere.
+
 ## [1.19.2] - 2026-08-20
 
 ### Fixed

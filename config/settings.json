@@ -42,22 +42,38 @@
     }
   },
   "weather": {
-    "_comment": "CLASSIC only. A patch starts as snow, melts into ice, then into a puddle, and stays a puddle. Soft is the tire to have while it's snow or ice; hard is the tire to have once it's a puddle; medium never wins or loses that trade.",
+    "_comment": "CLASSIC only. A patch starts as snow, melts into ice, then into a puddle, and stays a puddle. Soft is the tire to have while it's snow or ice; hard is the tire to have once it's a puddle; medium never wins or loses that trade. puddle_drag_multiplier is standing water dragging at every car regardless of tire choice, on top of that grip trade — it costs top speed, not just cornering. The AI reads the same patches: it slows for one on its way in exactly like a corner it has learned to respect.",
     "snow_to_ice_seconds": 40,
     "ice_to_puddle_seconds": 90,
     "medium": { "snow_grip": 0.80, "ice_grip": 0.72, "puddle_grip": 0.80 },
     "soft":   { "snow_grip": 0.92, "ice_grip": 0.85, "puddle_grip": 0.55 },
-    "hard":   { "snow_grip": 0.55, "ice_grip": 0.50, "puddle_grip": 0.92 }
+    "hard":   { "snow_grip": 0.55, "ice_grip": 0.50, "puddle_grip": 0.92 },
+    "puddle_drag_multiplier": 1.12
   },
   "boost": {
     "_comment": "The meter fills while the car is turning real revs, along a curve (build_rate applies at redline; it falls off toward zero low in the band), and the use button spends whatever is charged for an instant speed bump. Any gear change wipes it.",
     "build_rate_per_second": 0.55,
     "max_speed_bonus_mps": 9.0
   },
+  "understeer": {
+    "_comment": "Pushing past the grip limit costs speed at scrub * (1 + scrub_curve * slip) * dt, so a corner taken barely too hot still just runs a little wide, one taken way too hot really pays for it.",
+    "scrub": 0.22,
+    "scrub_curve": 0.60
+  },
+  "oversteer": {
+    "_comment": "A rear-driven car committing hard to a corner on the throttle can rotate faster than grip alone allows, for as long as the driver keeps asking for more than the car can grip (grow_rate_per_second builds it, up to max_bonus). Ease off (catch_decay_per_second) before spin_after_seconds runs out and it settles back down for free; keep pushing and it spins for spin_seconds, rotating at up to spin_yaw_multiplier times the car's own grip-limited yaw rate while losing speed at spin_speed_loss per second.",
+    "grow_rate_per_second": 0.70,
+    "max_bonus": 0.35,
+    "catch_decay_per_second": 2.5,
+    "spin_after_seconds": 1.0,
+    "spin_seconds": 0.6,
+    "spin_yaw_multiplier": 4.0,
+    "spin_speed_loss": 1.0
+  },
   "ai": {
     "_comment": "Lower skill slows the field. Overcommit chance is tested once per sufficiently tight unguarded corner and scaled by driver aggression.",
-    "skill_multiplier": 1.02,
-    "braking_multiplier": 0.72,
+    "skill_multiplier": 1.06,
+    "braking_multiplier": 0.76,
     "unguarded_line_room": 0.72,
     "overcommit_chance_per_corner": 0.055,
     "overcommit_min_curvature": 0.028,

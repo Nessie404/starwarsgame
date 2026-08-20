@@ -126,6 +126,21 @@ driving model that expects you to brake for the hairpins.
   was never reachable during actual driving — the real switchback
   stack, summit, and valley loop-back are restored and spread out
   further for room without losing the hairpins themselves.
+- **v1.19.2** — fixed a real (if inert) drift bug between the compiled
+  fallback roster and `cars.json`, backed by a new test that diffs
+  every field of every car between the two instead of just the count.
+  No feature work; also clarified that there is no
+  turbocharger/supercharger system and that v1.19.0's boost is an
+  unrelated, universal mechanic tuned in `settings.json`.
+- **v1.20.0** — oversteer and understeer are both far more
+  punishing/rewarding (progressive understeer scrub, plus a new
+  catchable power-oversteer/spin mechanic for rear-driven cars under
+  throttle); another AI competitiveness pass; standing water now drags
+  at every car and the AI slows for weather the same way it slows for
+  a corner it has learned to respect; and the data-only bones of a
+  colour-based team mode and a career/campaign mode that carries a
+  finishing position into the next race's starting grid — neither
+  wired into an actual race yet.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game

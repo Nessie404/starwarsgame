@@ -196,10 +196,20 @@ void game_settings_defaults(GameSettings *s)
     s->weather_snow_grip[TIRE_HARD]   = 0.55f;
     s->weather_ice_grip[TIRE_HARD]    = 0.50f;
     s->weather_puddle_grip[TIRE_HARD] = 0.92f;
+    s->weather_puddle_drag_mult = 1.12f;
     s->boost_build_rate = 0.55f;
     s->boost_max_speed_bonus_mps = 9.0f;
-    s->ai_skill_mult = 1.02f;
-    s->ai_brake_mult = 0.72f;
+    s->understeer_scrub = 0.22f;
+    s->understeer_scrub_curve = 0.60f;
+    s->oversteer_grow_rate = 0.70f;
+    s->oversteer_max_bonus = 0.35f;
+    s->oversteer_catch_decay = 2.5f;
+    s->oversteer_spin_seconds = 1.0f;
+    s->spin_seconds = 0.6f;
+    s->spin_yaw_mult = 4.0f;
+    s->spin_speed_loss = 1.0f;
+    s->ai_skill_mult = 1.06f;
+    s->ai_brake_mult = 0.76f;
     s->ai_unguarded_line_room = 0.72f;
     s->ai_overcommit_chance = 0.055f;
     s->ai_overcommit_min_curvature = 0.028f;
@@ -303,8 +313,19 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
         FINITE_RANGE(s->weather_puddle_grip[i], 0.10f, 1.20f,
                      "BAD PUDDLE GRIP");
     }
+    FINITE_RANGE(s->weather_puddle_drag_mult, 1.0f, 2.0f,
+                 "BAD PUDDLE DRAG");
     FINITE_RANGE(s->boost_build_rate, 0.02f, 20.0f, "BAD BOOST BUILD RATE");
     FINITE_RANGE(s->boost_max_speed_bonus_mps, 0.0f, 40.0f, "BAD BOOST BONUS");
+    FINITE_RANGE(s->understeer_scrub, 0.0f, 3.0f, "BAD UNDERSTEER SCRUB");
+    FINITE_RANGE(s->understeer_scrub_curve, 0.0f, 5.0f, "BAD UNDERSTEER CURVE");
+    FINITE_RANGE(s->oversteer_grow_rate, 0.0f, 10.0f, "BAD OVERSTEER GROWTH");
+    FINITE_RANGE(s->oversteer_max_bonus, 0.0f, 3.0f, "BAD OVERSTEER BONUS");
+    FINITE_RANGE(s->oversteer_catch_decay, 0.0f, 20.0f, "BAD OVERSTEER DECAY");
+    FINITE_RANGE(s->oversteer_spin_seconds, 0.05f, 10.0f, "BAD OVERSTEER TIMER");
+    FINITE_RANGE(s->spin_seconds, 0.05f, 10.0f, "BAD SPIN TIMER");
+    FINITE_RANGE(s->spin_yaw_mult, 0.0f, 20.0f, "BAD SPIN YAW");
+    FINITE_RANGE(s->spin_speed_loss, 0.0f, 5.0f, "BAD SPIN SPEED LOSS");
     FINITE_RANGE(s->grade_gravity_mult, 0.0f, 3.0f, "BAD GRADE GRAUITY");
     FINITE_RANGE(s->grade_load_effect, 0.0f, 1.0f, "BAD GRADE LOAD");
     FINITE_RANGE(s->tacho_idle_rpm, 0.0f, 20000.0f, "BAD IDLE RPM");
@@ -588,6 +609,38 @@ const char *difficulty_preset_name(int preset)
     if (preset < 0 || preset >= DIFFICULTY_PRESET_COUNT)
         return "NORMAL";
     return difficulty_presets[preset].name;
+}
+
+/*
+ * Team mode — SCAFFOLDING ONLY, see the TeamDef comment in game.h.
+ * Four teams, each flying a colour from the existing paint palette
+ * (main.c); nothing in game_init or anywhere downstream reads
+ * GameConfig.team_mode or GameConfig.team[] yet.
+ */
+const TeamDef team_defs[TEAM_COUNT] = {
+    { "CRIMSON", 0 },  /* RED    */
+    { "AZURE",   1 },  /* BLUE   */
+    { "VIPER",   2 },  /* GREEN  */
+    { "BULLION", 3 },  /* GOLD   */
+};
+
+const char *team_name(int team)
+{
+    if (team < 0 || team >= TEAM_COUNT)
+        return "CRIMSON";
+    return team_defs[team].name;
+}
+
+/*
+ * Career/campaign mode — SCAFFOLDING ONLY, see the CareerState comment
+ * in game.h. Nothing calls this from game_init or game_update; a real
+ * campaign shell would call it once a race finishes, then read
+ * last_finish_rank back out while building the next race's GameConfig.
+ */
+void career_record_result(CareerState *cs, int final_rank)
+{
+    cs->has_last_result = 1;
+    cs->last_finish_rank = final_rank;
 }
 
 /*
@@ -1218,7 +1271,14 @@ static void ai_control(const Game *g, Kart *k, Input *in, float dt)
          * This is where "poor drivers who overcommit" comes from.
          */
         float margin = 1.03f - 0.06f * k->consistency;
-        float vt = sqrtf(mu * GRAVITY / curv) * 0.88f * conf * margin;
+        /* a driver can see the road surface change ahead as well as a
+         * human can — snow, ice and standing water all cost grip, so a
+         * corner sat in a weather patch gets approached slower, same as
+         * a corner this driver has learned to respect (CLASSIC only;
+         * every other track's segments always read WEATHER_CLEAR) */
+        int wx = track_weather_at(t, seg, g->race_t, &g->settings);
+        float wgrip = weather_tire_grip_mult(&g->settings, wx, k->tire);
+        float vt = sqrtf(mu * wgrip * GRAVITY / curv) * 0.88f * conf * margin;
         float allowed = sqrtf(vt * vt + 2.0f * a_brk * d);
         if (allowed < vmax_allow) vmax_allow = allowed;
         d += t->seg_len[seg];
@@ -1530,7 +1590,9 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
                                                 k->tire);
     float mu_a = s->lat_g * GRAVITY * grip * weather_grip * k->tire_grip_now;
     float cd_a = s->cd_a *
-                 tire_drag_mult_with_settings(&g->settings, k->tire);
+                 tire_drag_mult_with_settings(&g->settings, k->tire) *
+                 (weather == WEATHER_PUDDLE
+                      ? g->settings.weather_puddle_drag_mult : 1.0f);
     float P = s->power_hp * HP_TO_W * g->settings.drivetrain_efficiency *
               grip * power_scale;
     float steer = game_clampf(in->steer, -1.0f, 1.0f);
@@ -1748,19 +1810,20 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->drifting = 0;
     }
 
-    /* --- steering: bicycle model, grip-capped yaw --- */
+    /* --- steering: bicycle model, grip-capped yaw, with real oversteer --- */
     {
         float delta_max = 0.48f / (1.0f + fabsf(v) * 0.02f);
         float yaw_cmd = v * tanf(steer * delta_max) / s->wheelbase;
         float yaw_cap = mu_a / (fabsf(v) > 0.5f ? fabsf(v) : 0.5f);
         float yaw;
+        float rwd_bias = 1.0f - dt_front;   /* 1 = pure RWD, 0 = pure FWD */
+        int oversteer_risk;
 
         /* the driven axle spends some of its own grip on traction rather
          * than cornering: a front-driven car understeers under power
-         * (the same tires steer and drive), a rear-driven one gets
-         * looser and easier to rotate instead. AWD leans whichever way
-         * awd_front_bias does, more gently than either extreme. */
-        if (in->accel && !in->brake)
+         * (the same tires steer and drive). A rear-driven car gets the
+         * oversteer treatment below instead of a flat bonus. */
+        if (in->accel && !in->brake && dt_front >= 0.5f)
             yaw_cap *= 1.0f - 0.04f * (dt_front - 0.5f) * 2.0f;
 
         if (k->drifting) {
@@ -1770,17 +1833,76 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
             k->slip = fmaxf(k->slip, 0.7f);
         }
 
-        if (yaw_cmd > yaw_cap) {
+        /*
+         * Power oversteer: committing hard to a corner on the throttle
+         * in a rear-driven car lets the rear step out — free extra
+         * rotation, for as long as the driver keeps the wheel turned
+         * hard. Ease off the steering before oversteer_t reaches
+         * oversteer_spin_seconds and it settles back down for nothing
+         * (the reward already banked as heading turned faster than
+         * pure grip would allow); keep it locked over and it spins.
+         *
+         * Catching it is judged on the steering input, not on whether
+         * yaw_cmd has technically dropped under the grip cap: a
+         * short-wheelbase kart's yaw_cmd is so oversized relative to
+         * its own cap (tan(steer*delta_max)/wheelbase, wheelbase as
+         * small as 1.05 m) that "under the cap" would mean almost
+         * releasing the wheel entirely, while a long-wheelbase car
+         * would catch it after barely easing off — the same 0.6 of
+         * steering lock means the same thing to a driver in any car.
+         */
+        oversteer_risk = in->accel && !in->brake && !k->drifting &&
+                         rwd_bias > 0.5f && fabsf(steer) > 0.6f &&
+                         fabsf(v) > 12.0f && fabsf(yaw_cmd) > yaw_cap;
+        if (k->spin_t <= 0.0f) {
+            if (oversteer_risk) {
+                k->oversteer_t += dt;
+            } else {
+                k->oversteer_t -= g->settings.oversteer_catch_decay * dt;
+                if (k->oversteer_t < 0.0f) k->oversteer_t = 0.0f;
+            }
+            if (k->oversteer_t > 0.0f) {
+                float max_bonus = g->settings.oversteer_max_bonus;
+                float bonus = fminf(k->oversteer_t *
+                                    g->settings.oversteer_grow_rate,
+                                    max_bonus);
+                yaw_cap *= 1.0f + bonus;
+                if (max_bonus > 0.0f)
+                    k->slip = fmaxf(k->slip, 0.6f * bonus / max_bonus);
+            }
+            if (k->oversteer_t > g->settings.oversteer_spin_seconds) {
+                k->spin_t = g->settings.spin_seconds;
+                k->spin_yaw = (yaw_cmd >= 0.0f ? 1.0f : -1.0f) * yaw_cap *
+                              g->settings.spin_yaw_mult;
+                k->oversteer_t = 0.0f;
+            }
+        }
+
+        if (k->spin_t > 0.0f) {
+            /* out of control: steering input does nothing useful until
+             * the spin runs its course */
+            k->spin_t -= dt;
+            yaw = k->spin_yaw *
+                  (k->spin_t > 0.0f ? k->spin_t / g->settings.spin_seconds
+                                    : 0.0f);
+            v -= g->settings.spin_speed_loss * mu_a * dt;
+            k->slip = 1.0f;
+        } else if (yaw_cmd > yaw_cap) {
             yaw = yaw_cap;
             k->slip = game_clampf((yaw_cmd - yaw_cap) / yaw_cap, 0.0f, 1.0f);
-            v -= 0.17f * mu_a * k->slip * dt;        /* understeer scrub */
+            v -= g->settings.understeer_scrub *
+                 (1.0f + g->settings.understeer_scrub_curve * k->slip) *
+                 mu_a * k->slip * dt;                /* understeer scrub */
         } else if (yaw_cmd < -yaw_cap) {
             yaw = -yaw_cap;
             k->slip = game_clampf((-yaw_cmd - yaw_cap) / yaw_cap, 0.0f, 1.0f);
-            v -= 0.17f * mu_a * k->slip * dt;
+            v -= g->settings.understeer_scrub *
+                 (1.0f + g->settings.understeer_scrub_curve * k->slip) *
+                 mu_a * k->slip * dt;
         } else {
             yaw = yaw_cmd;
-            k->slip *= (1.0f - 4.0f * dt);
+            if (k->oversteer_t <= 0.0f)
+                k->slip *= (1.0f - 4.0f * dt);
         }
         k->heading = game_angle_wrap(k->heading + yaw * dt);
     }

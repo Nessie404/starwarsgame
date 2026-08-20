@@ -887,6 +887,10 @@ int config_load_settings_text(GameSettings *settings, const char *json,
                                  error_cap))) goto fail;
         }
     }
+    if (obj >= 0 &&
+        !optional_float(json, tokens, count, obj, "puddle_drag_multiplier",
+                        &s.weather_puddle_drag_mult, error, error_cap))
+        goto fail;
 
     obj = object_get(json, tokens, count, 0, "boost");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
@@ -899,6 +903,39 @@ int config_load_settings_text(GameSettings *settings, const char *json,
          !optional_float(json, tokens, count, obj, "max_speed_bonus_mps",
                          &s.boost_max_speed_bonus_mps, error,
                          error_cap))) goto fail;
+
+    obj = object_get(json, tokens, count, 0, "understeer");
+    if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
+        set_error(error, error_cap, "UNDERSTEER NEEDS OBJECT");
+        goto fail;
+    }
+    if (obj >= 0 &&
+        (!optional_float(json, tokens, count, obj, "scrub",
+                         &s.understeer_scrub, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "scrub_curve",
+                         &s.understeer_scrub_curve, error,
+                         error_cap))) goto fail;
+
+    obj = object_get(json, tokens, count, 0, "oversteer");
+    if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
+        set_error(error, error_cap, "OVERSTEER NEEDS OBJECT");
+        goto fail;
+    }
+    if (obj >= 0 &&
+        (!optional_float(json, tokens, count, obj, "grow_rate_per_second",
+                         &s.oversteer_grow_rate, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "max_bonus",
+                         &s.oversteer_max_bonus, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "catch_decay_per_second",
+                         &s.oversteer_catch_decay, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "spin_after_seconds",
+                         &s.oversteer_spin_seconds, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "spin_seconds",
+                         &s.spin_seconds, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "spin_yaw_multiplier",
+                         &s.spin_yaw_mult, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "spin_speed_loss",
+                         &s.spin_speed_loss, error, error_cap))) goto fail;
 
     obj = object_get(json, tokens, count, 0, "ai");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {

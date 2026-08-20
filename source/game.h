@@ -323,6 +323,11 @@ struct GameSettings {
     float weather_snow_grip[TIRE_COMPOUNDS];
     float weather_ice_grip[TIRE_COMPOUNDS];
     float weather_puddle_grip[TIRE_COMPOUNDS];
+    /* Standing water drags at a car the way snow and ice do not — this
+     * multiplies cd_a (on top of the tire's own drag_multiplier) only
+     * while a segment reads WEATHER_PUDDLE, so a puddle costs top speed
+     * as well as cornering grip. */
+    float weather_puddle_drag_mult;
 
     /*
      * Boost: a meter that fills while the engine is turning fast, along
@@ -333,6 +338,32 @@ struct GameSettings {
      */
     float boost_build_rate;        /* meter/second at redline (curve=1) */
     float boost_max_speed_bonus_mps; /* bonus speed at a full meter     */
+
+    /*
+     * Understeer: pushing past the grip limit now costs a lot more the
+     * further past it you are, not a flat rate — a hairpin taken barely
+     * too hot still just runs a little wide, one taken way too hot
+     * really pays for it.
+     */
+    float understeer_scrub;        /* base speed loss per second of slip */
+    float understeer_scrub_curve;  /* extra loss at slip = 1.0, on top   */
+
+    /*
+     * Power oversteer: a rear-driven car committing hard to a corner on
+     * the throttle can rotate faster than its own grip alone would
+     * allow — the rear stepping out — for as long as the driver keeps
+     * asking for more than the car can grip. Ease off before it goes
+     * too far and it settles back down for free (the reward: extra
+     * rotation, no speed lost getting it); keep pushing past
+     * oversteer_spin_seconds and it spins.
+     */
+    float oversteer_grow_rate;     /* extra yaw fraction per second held */
+    float oversteer_max_bonus;     /* cap on that extra fraction         */
+    float oversteer_catch_decay;   /* how fast easing off settles it     */
+    float oversteer_spin_seconds;  /* uncaught duration before it spins  */
+    float spin_seconds;            /* how long a spin holds control away */
+    float spin_yaw_mult;           /* spin yaw rate, x the car's own cap */
+    float spin_speed_loss;         /* speed lost per second of spinning  */
 
     /* AI. overcommit_chance is checked once on each sufficiently tight,
      * unguarded corner and is scaled by the strategy's attack rating. */
@@ -551,6 +582,14 @@ typedef struct {
     int   respawned;      /* one-frame flag for the platform layer      */
     int   falls;          /* completed cliff falls (AI telemetry/tests) */
     int   drifting;       /* handbrake locked in, +1/-1 = direction     */
+    /* power oversteer: builds while a rear-driven car commits hard
+     * under throttle near the grip limit, decays fast if the driver
+     * countersteers to catch it, and forces a spin if it isn't caught
+     * in time — see kart_step */
+    float oversteer_t;    /* seconds building toward a spin, 0 = none   */
+    float spin_t;         /* >0 while a spin has taken control away     */
+    float spin_yaw;       /* signed yaw rate set at spin onset, decays
+                           * to 0 over spin_t                          */
     float tire_wear;      /* 0 = fresh, 1 = worn out                    */
     float tire_temp;      /* degrees C                                  */
     float tire_grip_now;  /* what the rubber is actually worth, 0..1+   */
@@ -665,6 +704,48 @@ typedef struct {
 extern const DifficultyPreset difficulty_presets[DIFFICULTY_PRESET_COUNT];
 const char *difficulty_preset_name(int preset);
 
+#define TEAM_COUNT 4
+
+/*
+ * Team mode — SCAFFOLDING ONLY, same status as DifficultyPreset above:
+ * the data shape a future "pick a team" garage choice would set, not a
+ * working team mode. A team is identified by which paint colour its
+ * cars fly (see PAINT_COUNT / paint_palette in main.c) so team mates
+ * are recognizable on track at a glance. Nothing reads
+ * GameConfig.team_mode or GameConfig.team[] yet — no combined team
+ * score or team-vs-team final ranking, no AI aware of who its team
+ * mates are, and no garage control to actually join one. See TODO.md
+ * for what real wiring needs.
+ */
+typedef struct {
+    const char *name;
+    int   paint_idx;   /* which PAINT_* colour (main.c) this team flies */
+} TeamDef;
+
+extern const TeamDef team_defs[TEAM_COUNT];
+const char *team_name(int team);
+
+/*
+ * Career/campaign mode — SCAFFOLDING ONLY. The idea: a human who
+ * finished 3rd last race should start 3rd on the grid next race
+ * instead of always at the back, so a run of races feels like one
+ * campaign rather than a reset each time. This is just the shape that
+ * would carry a result from one race into the next — no save/load I/O
+ * (nothing writes it to or reads it from an SD card), and game_init
+ * does not read it: every human still starts at the back of the grid
+ * regardless of what a CareerState says. See TODO.md for what real
+ * wiring needs.
+ */
+typedef struct {
+    int has_last_result;    /* 0 until a race has actually finished     */
+    int last_finish_rank;   /* Kart.final_rank from that race, 1..NUM_KARTS */
+} CareerState;
+
+/* Fold a finished race's result into a CareerState — the one piece of
+ * plumbing a real campaign mode would call after every race, before
+ * building the next one's GameConfig. Does not touch disk. */
+void career_record_result(CareerState *cs, int final_rank);
+
 typedef struct {
     int track_id;
     int n_humans;                 /* 1..MAX_HUMANS                     */
@@ -681,6 +762,17 @@ typedef struct {
      * at DIFFICULTY_EASY, not DIFFICULTY_NORMAL — decide the intended
      * default explicitly rather than relying on the zero value. */
     int difficulty;
+    /* Team mode — SCAFFOLDING, see TeamDef above. team_mode 0 (the
+     * zero-init default) means today's behaviour: every human picks
+     * their own paint and there are no teams. team[] is only
+     * meaningful when team_mode is set, and neither is read by
+     * game_init yet. */
+    int team_mode;
+    int team[MAX_HUMANS];         /* TEAM_* per human, if team_mode     */
+    /* Career/campaign mode — SCAFFOLDING, see CareerState above. Not
+     * read by game_init yet: humans still always start at the back of
+     * the grid regardless of what this holds. */
+    CareerState career[MAX_HUMANS];
 } GameConfig;
 
 typedef struct {

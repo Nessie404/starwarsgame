@@ -226,6 +226,47 @@ Left for later, now that the camera has somewhere to live:
   - a decision on what a zero-initialized `GameConfig` should mean for
     `difficulty` (today that's `DIFFICULTY_EASY`, likely not the intent —
     see the comment on the field).
+- [ ] Wire up team mode: group humans and AI onto teams identified by paint
+  colour, with a combined team score/ranking alongside each driver's own.
+  *(v1.20.0 added only the data shape — `TeamDef`, `team_defs[]` and
+  `team_name()` in `game.h`/`game.c`, `GameConfig.team_mode` and
+  `GameConfig.team[]`, `test_team_mode_scaffolding` checking the table
+  itself — deliberately not read by `game_init` or anywhere else yet, so
+  setting `team_mode` today has no effect on a race.)* Real wiring needs,
+  at minimum:
+  - a garage/setup menu control to join a team (currently none exists);
+  - `game_init` reading `cfg.team_mode`/`cfg.team[]` and forcing each
+    human's `paint_idx` to match their team's colour instead of the
+    individually-chosen one;
+  - a way to put AI drivers on a team too — whichever team is short a
+    car, or split evenly, rather than every AI keeping its own fixed
+    `paint` from the `ai_drivers[]` table;
+  - a combined per-team score or ranking computed alongside the existing
+    per-kart `final_rank`, plus a HUD element to show it;
+  - deciding whether team mates should get any in-race awareness of each
+    other (e.g. `ai_control`'s attack/defend logic treating a team mate
+    like a rival it should not fight).
+- [ ] Wire up career/campaign mode: a human's finishing position in one
+  race becomes their starting grid slot in the next, instead of always
+  starting at the back. *(v1.20.0 added only the data shape —
+  `CareerState`, `career_record_result()` and `GameConfig.career[]` in
+  `game.h`/`game.c`, `test_career_mode_scaffolding` checking that the
+  helper stores a result and that `game_init` still ignores it —
+  deliberately not read anywhere else yet, so populating `career[]`
+  today has no effect on a race.)* Real wiring needs, at minimum:
+  - save/load I/O to persist `CareerState` across sessions (an SD card
+    file, most likely) — today it only lives as long as the process;
+  - `game_init`/`kart_place_on_grid` reading `cfg.career[i]` and
+    starting that human somewhere other than the fixed back-of-grid
+    slot it always uses now;
+  - a decision on what "grid slot" means for a rank of 1 with a full
+    twelve-car field — the front slot is presumably still shared with
+    whichever AI would otherwise start there;
+  - a menu flow that actually strings races together as one campaign
+    (a "next race" button that reuses the same human/CareerState pair)
+    rather than every race being launched fresh from the garage;
+  - deciding what a first-ever race (`has_last_result == 0`) should do
+    — likely fall back to today's back-of-grid start.
 
 ## Laps and timing — done in v1.5.0
 
