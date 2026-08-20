@@ -265,6 +265,21 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   takes a new `highlight` kart index that draws a pulsing ring around
   one car — wired to kart 0 in the 1-human case only, since the
   3-human shared minimap has no single "the player" to ring.
+- **v1.24.1**: three follow-up fixes to v1.24.0's banking. `draw_box`
+  gained a `roll` parameter (rotates its already-pitched lateral/up axes
+  about the forward axis, same sign convention as `Track.bank`) and
+  `draw_kart` feeds it `t->bank[k->seg]`, so a car's model finally banks
+  with the road instead of staying dead level — it had yaw and pitch
+  before this but no roll at all. Non-alpine tracks (BULLRING, CLASSIC)
+  now get a per-segment fill quad from the banked curb edge to the flat
+  background ground plane, both sides, closing a gap that used to let
+  the ground clip through the road's low (inside-of-bank) edge and
+  leave a floating gap past the high (outside) edge — see §6 for why
+  this only showed up on flat tracks. And the guardrail/cliff-edge
+  drawing block, previously nested entirely inside `if (t->alpine)`, is
+  now gated on `t->has_walls` on its own — BULLRING and CLASSIC both set
+  `has_walls = 1` but are not alpine, so they had never actually drawn
+  a barrier despite the flag; see §6.
 
 ---
 
@@ -552,6 +567,44 @@ checking which named/strategy dependencies in `tests/test_game.c`
 each one alone was load-bearing for) rather than appending, to keep
 the roster at exactly 11 and guarantee the new characters actually
 show up in a normal race.
+
+**A `TrackDef` flag with no effect will not fail any test, because
+`main.c`'s rendering has no host tests at all.** BULLRING and CLASSIC
+both had `has_walls = 1` from the moment they were added, and the field
+genuinely does something on the physics side (`track_wall_half`,
+collision). But in `draw_track` the entire guardrail/cliff-edge block
+was nested inside `if (t->alpine)`, and neither track is alpine — so
+`has_walls` had zero visual effect on either one for multiple releases
+and nothing ever caught it, because `main.c` is Wii-only GX code with
+no host build to assert against. The only way this kind of bug
+surfaces is a human actually looking at the rendered track (or reading
+`draw_track` line by line with the specific question "does this flag
+actually reach a `quad()` call"). Worth doing that read whenever a new
+`TrackDef` boolean is added: check that every branch which claims to
+gate on it is actually reachable for the combination of flags a real
+track entry sets, not just the combination the code was written and
+tested against first.
+
+**A background quad drawn at a fixed height stops being safely "below
+everything" the moment something above it can tilt.** The valley-floor
+quad's height was chosen when every road surface was flat (or only
+lightly canted) — 0.02 m below nominal was plenty of clearance. Adding
+`bank_dy` in v1.24.0 let the road surface itself move up to roughly
+`road_half * sin(BANK_MAX)` (about 1.6-2 m on BULLRING's 7.5 m road
+half at the 12.6° cap) below that nominal height on the inside of a
+turn, and by the same amount above it on the outside — both comfortably
+past the old margin, so the flat ground either clipped through the low
+edge or left a visible gap past the high one. This only showed up on
+non-alpine tracks: alpine ones already drop their equivalent background
+(the rock/scrub skirt geometry, not this quad) 7-22 m below road height,
+miles clear of anything a `BANK_MAX`-capped tilt can reach. The fix
+(the per-segment fill quad in `draw_track`'s `else` branch, keyed off
+`bank_dy` at the *same* lateral offset the curb quad above it uses) is
+the general pattern for closing this kind of gap: connect the moving
+edge to the fixed background at the exact point they need to meet,
+rather than trying to push the fixed background far enough away to
+never need to think about it again — the latter works until the next
+thing that moves more than expected.
 
 ---
 

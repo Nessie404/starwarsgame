@@ -189,6 +189,14 @@ for the hairpins.
   numbers (wheelbase, mass, drag and drivetrain all show in the model,
   on track and in the garage), and the local player's own car carries a
   pulsing ring on the minimap.
+- **v1.24.1** — three fixes to v1.24.0's road banking: cars now visibly
+  roll with the road on a banked section instead of staying dead level;
+  the flat background ground no longer clips through BULLRING's banked
+  turns, where the road's low edge can dip more than a metre below it;
+  and BULLRING and CLASSIC finally render the guardrails their
+  `has_walls` flag always claimed they had — the drawing code lived
+  entirely inside an alpine-only branch, and neither track is alpine, so
+  the flag never actually drew anything.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game

@@ -4,6 +4,34 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.24.1] - 2026-08-24
+
+### Fixed
+
+- **Cars now roll with the road on banked sections.** v1.24.0 tilted the
+  road surface, curbs and guardrails on a banked corner, but every car
+  model kept rendering dead level — no roll, only yaw and pitch. The
+  kart's own visual roll now follows `Track.bank` at its segment, the
+  same way its pitch already follows the grade, so a car banking through
+  BULLRING's turns visibly leans with the road instead of floating flat
+  above it.
+- **The ground no longer clips through banked corners.** BULLRING's
+  turns bank hard enough (up to ~12.6°) that the road's inside edge can
+  dip more than a metre below the flat background "ground" plane, and
+  the outside edge rises clear above it — with nothing between them, the
+  low side visibly poked through the ground and the high side left a
+  gap. Flat (non-alpine) tracks now get a short fill quad per side, per
+  segment, closing both gaps from the banked curb edge straight to the
+  ground; it collapses to nothing on unbanked straights, so nothing
+  changes there.
+- **BULLRING (and CLASSIC) actually render their guardrails now.** Both
+  tracks have had `has_walls = 1` since they were added, but the
+  guardrail-drawing code lived entirely inside `if (t->alpine)`, and
+  neither track is alpine — so the flag never drew anything. Guardrail
+  (or, on an unguarded alpine track, cliff-edge) rendering is now gated
+  on `has_walls` on its own, independent of terrain, so a barriered flat
+  track gets a real barrier instead of a flag with no effect.
+
 ## [1.24.0] - 2026-08-24
 
 ### Added

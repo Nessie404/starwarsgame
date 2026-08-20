@@ -921,16 +921,25 @@ static float bank_dy(float lat, float bank)
     return -lat * sinf(bank);
 }
 
-/* box rotated by yaw (about Y) then pitched (nose up positive) */
+/* box rotated by yaw (about Y), then pitched (nose up positive), then
+ * rolled about its own forward axis (positive = same sign convention as
+ * Track.bank: the positive-lateral side dips). roll is applied last so
+ * it tilts the already-pitched lateral/up axes rather than the world
+ * ones, the way a car's roll rides on top of its pitch. */
 static void draw_box(float cx, float cy, float cz, float yaw, float pitch,
-                     float hfw, float hh, float hlat,
+                     float roll, float hfw, float hh, float hlat,
                      u8 r, u8 g, u8 b)
 {
     float cf = cosf(yaw), sf = sinf(yaw);
     float cp = cosf(pitch), sp = sinf(pitch);
+    float cr = cosf(roll), sr = sinf(roll);
     float fx = cf * cp, fy = sp, fz = sf * cp;      /* forward */
-    float lx = -sf,     ly = 0.0f, lz = cf;          /* lateral (left) */
-    float ux = -sp * cf, uy = cp, uz = -sp * sf;     /* up */
+    float lx0 = -sf,     ly0 = 0.0f, lz0 = cf;        /* lateral (left) */
+    float ux0 = -sp * cf, uy0 = cp, uz0 = -sp * sf;   /* up */
+    float lx = lx0 * cr - ux0 * sr, ly = ly0 * cr - uy0 * sr,
+          lz = lz0 * cr - uz0 * sr;
+    float ux = lx0 * sr + ux0 * cr, uy = ly0 * sr + uy0 * cr,
+          uz = lz0 * sr + uz0 * cr;
     float corner[8][3];
     int i;
 
@@ -1026,13 +1035,13 @@ static void draw_grandstands(float vx, float vz)
             u8 rr = (u8)(150 - tier * 14), gg = (u8)(158 - tier * 14),
                bb = (u8)(168 - tier * 10);
             draw_box(gs_x[i] + lx * depth_off * s, gs_y[i] + h,
-                     gs_z[i] + lz * depth_off * s, gs_yaw[i], 0.0f,
+                     gs_z[i] + lz * depth_off * s, gs_yaw[i], 0.0f, 0.0f,
                      11.0f, h, 3.4f, rr, gg, bb);
         }
         roof_off = 3.0f + (float)(TIERS - 1) * 3.6f + 2.2f;
         roof_h = 1.1f + (float)(TIERS - 1) * 0.35f + 1.4f;
         draw_box(gs_x[i] + lx * roof_off * s, gs_y[i] + roof_h,
-                 gs_z[i] + lz * roof_off * s, gs_yaw[i], 0.0f,
+                 gs_z[i] + lz * roof_off * s, gs_yaw[i], 0.0f, 0.0f,
                  12.0f, 0.15f, 4.2f, 70, 76, 92);
     }
 }
@@ -1067,6 +1076,15 @@ static int seg_in_window(const Track *t, int viewer_seg, int seg,
 static void draw_track(const Track *t, int viewer_seg, float race_t)
 {
     int win_ahead, win_behind;
+    /* flat background height the surrounding "ground" sits at; alpine
+     * tracks drop it well clear of anything the mountainside geometry
+     * does, flat ones keep it close to road height since it reads as
+     * infield/apron grass right up against the curb. On a flat track
+     * with real banking (BULLRING) the road surface itself dips below
+     * this on the inside of a turn and rises above it on the outside,
+     * which the per-segment fill quads below account for so neither
+     * edge pokes through or leaves a gap against this plane. */
+    float floor_y = t->min_y - (t->alpine ? 8.0f : 0.02f);
     int i;
 
     view_window(&win_ahead, &win_behind);
@@ -1075,11 +1093,10 @@ static void draw_track(const Track *t, int viewer_seg, float race_t)
     {
         u8 r = t->alpine ? 84 : 58, g = t->alpine ? 120 : 142,
            b = t->alpine ? 70 : 60;
-        float gy = t->min_y - (t->alpine ? 8.0f : 0.02f);
-        quad(t->min_x - 120.0f, gy, t->min_z - 120.0f,
-             t->max_x + 120.0f, gy, t->min_z - 120.0f,
-             t->max_x + 120.0f, gy, t->max_z + 120.0f,
-             t->min_x - 120.0f, gy, t->max_z + 120.0f,
+        quad(t->min_x - 120.0f, floor_y, t->min_z - 120.0f,
+             t->max_x + 120.0f, floor_y, t->min_z - 120.0f,
+             t->max_x + 120.0f, floor_y, t->max_z + 120.0f,
+             t->min_x - 120.0f, floor_y, t->max_z + 120.0f,
              r, g, b, 255);
     }
 
@@ -1183,64 +1200,92 @@ static void draw_track(const Track *t, int viewer_seg, float race_t)
                      t->pz[i]  + l0z * (rw0 + E2) * s,
                      rr, gg, bb, 255);
             }
-            /* guardrails, where this road has them */
-            if (t->has_walls) {
-                float wall0 = ww0 - 0.2f, wall1 = ww1 - 0.2f;
-                float rby0 = y0 + bank_dy(wall0, bank0);
-                float rby1 = y1 + bank_dy(wall1, bank1);
-                float lby0 = y0 + bank_dy(-wall0, bank0);
-                float lby1 = y1 + bank_dy(-wall1, bank1);
-                u8 rr = 225, gg = 228, bb = 232;
-                if (i & 1) { rr = 180; gg = 184; bb = 190; }
-                quad(t->px[i]  + l0x * wall0, rby0 + 0.15f,
-                     t->pz[i]  + l0z * wall0,
-                     t->px[in] + l1x * wall1, rby1 + 0.15f,
-                     t->pz[in] + l1z * wall1,
-                     t->px[in] + l1x * wall1, rby1 + 0.75f,
-                     t->pz[in] + l1z * wall1,
-                     t->px[i]  + l0x * wall0, rby0 + 0.75f,
-                     t->pz[i]  + l0z * wall0,
-                     rr, gg, bb, 255);
-                quad(t->px[i]  - l0x * wall0, lby0 + 0.15f,
-                     t->pz[i]  - l0z * wall0,
-                     t->px[in] - l1x * wall1, lby1 + 0.15f,
-                     t->pz[in] - l1z * wall1,
-                     t->px[in] - l1x * wall1, lby1 + 0.75f,
-                     t->pz[in] - l1z * wall1,
-                     t->px[i]  - l0x * wall0, lby0 + 0.75f,
-                     t->pz[i]  - l0z * wall0,
-                     rr, gg, bb, 255);
-            } else {
-                /* No barrier: mark the edge with a stripe and drop the
-                 * ground away sharply, so the cliff reads as a cliff.
-                 * Banked purely at the road edge, same as the skirts —
-                 * the drop itself does not need to follow the tilt. */
-                float wall0 = ww0, wall1 = ww1;
-                int side;
-                for (side = -1; side <= 1; side += 2) {
-                    float sg = (float)side;
-                    float ey0 = y0 + bank_dy(wall0 * sg, bank0);
-                    float ey1 = y1 + bank_dy(wall1 * sg, bank1);
-                    u8 er = (i & 1) ? 235 : 90, eg = (i & 1) ? 180 : 90;
-                    quad(t->px[i]  + l0x * (wall0 - 0.5f) * sg, ey0 + 0.02f,
-                         t->pz[i]  + l0z * (wall0 - 0.5f) * sg,
-                         t->px[in] + l1x * (wall1 - 0.5f) * sg, ey1 + 0.02f,
-                         t->pz[in] + l1z * (wall1 - 0.5f) * sg,
-                         t->px[in] + l1x * wall1 * sg, ey1 + 0.02f,
-                         t->pz[in] + l1z * wall1 * sg,
-                         t->px[i]  + l0x * wall0 * sg, ey0 + 0.02f,
-                         t->pz[i]  + l0z * wall0 * sg,
-                         er, eg, 70, 255);
-                    quad(t->px[i]  + l0x * wall0 * sg, ey0,
-                         t->pz[i]  + l0z * wall0 * sg,
-                         t->px[in] + l1x * wall1 * sg, ey1,
-                         t->pz[in] + l1z * wall1 * sg,
-                         t->px[in] + l1x * (wall1 + 1.5f) * sg, y1 - 26.0f,
-                         t->pz[in] + l1z * (wall1 + 1.5f) * sg,
-                         t->px[i]  + l0x * (wall0 + 1.5f) * sg, y0 - 26.0f,
-                         t->pz[i]  + l0z * (wall0 + 1.5f) * sg,
-                         84, 74, 64, 255);
-                }
+        } else {
+            /* Flat tracks have no mountainside, but a real banked corner
+             * (BULLRING) tilts the road clear of the flat background
+             * ground: the outside curb lifts clear above it, the inside
+             * curb dips below it. With nothing between them the ground
+             * either pokes through the low side or leaves a gap floating
+             * above the high side. This closes both with a short fill
+             * from the banked curb edge straight down/up to the flat
+             * ground height, using the same green as the ground itself
+             * so the join is seamless; on an unbanked stretch both ends
+             * land at the same height and the fill is an invisible
+             * sliver, so straights are unaffected. */
+            int side;
+            for (side = -1; side <= 1; side += 2) {
+                float s = (float)side;
+                float ex0 = (rw0 + 0.9f) * s, ex1 = (rw1 + 0.9f) * s;
+                float ey0 = y0 + bank_dy(ex0, bank0);
+                float ey1 = y1 + bank_dy(ex1, bank1);
+                quad(t->px[i]  + l0x * ex0, ey0, t->pz[i]  + l0z * ex0,
+                     t->px[in] + l1x * ex1, ey1, t->pz[in] + l1z * ex1,
+                     t->px[in] + l1x * ex1, floor_y, t->pz[in] + l1z * ex1,
+                     t->px[i]  + l0x * ex0, floor_y, t->pz[i]  + l0z * ex0,
+                     58, 142, 60, 255);
+            }
+        }
+        /* guardrails, where this road has them, independent of terrain
+         * (BULLRING and CLASSIC are flat ovals/speedways but still
+         * barriered — has_walls, not alpine, is what decides this) */
+        if (t->has_walls) {
+            float wall0 = ww0 - 0.2f, wall1 = ww1 - 0.2f;
+            float rby0 = y0 + bank_dy(wall0, bank0);
+            float rby1 = y1 + bank_dy(wall1, bank1);
+            float lby0 = y0 + bank_dy(-wall0, bank0);
+            float lby1 = y1 + bank_dy(-wall1, bank1);
+            u8 rr = 225, gg = 228, bb = 232;
+            if (i & 1) { rr = 180; gg = 184; bb = 190; }
+            quad(t->px[i]  + l0x * wall0, rby0 + 0.15f,
+                 t->pz[i]  + l0z * wall0,
+                 t->px[in] + l1x * wall1, rby1 + 0.15f,
+                 t->pz[in] + l1z * wall1,
+                 t->px[in] + l1x * wall1, rby1 + 0.75f,
+                 t->pz[in] + l1z * wall1,
+                 t->px[i]  + l0x * wall0, rby0 + 0.75f,
+                 t->pz[i]  + l0z * wall0,
+                 rr, gg, bb, 255);
+            quad(t->px[i]  - l0x * wall0, lby0 + 0.15f,
+                 t->pz[i]  - l0z * wall0,
+                 t->px[in] - l1x * wall1, lby1 + 0.15f,
+                 t->pz[in] - l1z * wall1,
+                 t->px[in] - l1x * wall1, lby1 + 0.75f,
+                 t->pz[in] - l1z * wall1,
+                 t->px[i]  - l0x * wall0, lby0 + 0.75f,
+                 t->pz[i]  - l0z * wall0,
+                 rr, gg, bb, 255);
+        } else if (t->alpine) {
+            /* No barrier on a mountainside: mark the edge with a stripe
+             * and drop the ground away sharply, so the cliff reads as a
+             * cliff. Banked purely at the road edge, same as the skirts
+             * — the drop itself does not need to follow the tilt. A
+             * flat, unguarded track would have no cliff to speak of, so
+             * this stays alpine-only (no such track exists today). */
+            float wall0 = ww0, wall1 = ww1;
+            int side;
+            for (side = -1; side <= 1; side += 2) {
+                float sg = (float)side;
+                float ey0 = y0 + bank_dy(wall0 * sg, bank0);
+                float ey1 = y1 + bank_dy(wall1 * sg, bank1);
+                u8 er = (i & 1) ? 235 : 90, eg = (i & 1) ? 180 : 90;
+                quad(t->px[i]  + l0x * (wall0 - 0.5f) * sg, ey0 + 0.02f,
+                     t->pz[i]  + l0z * (wall0 - 0.5f) * sg,
+                     t->px[in] + l1x * (wall1 - 0.5f) * sg, ey1 + 0.02f,
+                     t->pz[in] + l1z * (wall1 - 0.5f) * sg,
+                     t->px[in] + l1x * wall1 * sg, ey1 + 0.02f,
+                     t->pz[in] + l1z * wall1 * sg,
+                     t->px[i]  + l0x * wall0 * sg, ey0 + 0.02f,
+                     t->pz[i]  + l0z * wall0 * sg,
+                     er, eg, 70, 255);
+                quad(t->px[i]  + l0x * wall0 * sg, ey0,
+                     t->pz[i]  + l0z * wall0 * sg,
+                     t->px[in] + l1x * wall1 * sg, ey1,
+                     t->pz[in] + l1z * wall1 * sg,
+                     t->px[in] + l1x * (wall1 + 1.5f) * sg, y1 - 26.0f,
+                     t->pz[in] + l1z * (wall1 + 1.5f) * sg,
+                     t->px[i]  + l0x * (wall0 + 1.5f) * sg, y0 - 26.0f,
+                     t->pz[i]  + l0z * (wall0 + 1.5f) * sg,
+                     84, 74, 64, 255);
             }
         }
     }
@@ -1282,12 +1327,12 @@ static void draw_track(const Track *t, int viewer_seg, float race_t)
         float by = t->py[0];
         float RW = track_road_half(t, 0);
         draw_box(t->px[0] + lx * (RW + 1.8f), by + 2.75f,
-                 t->pz[0] + lz * (RW + 1.8f), yaw, 0.0f,
+                 t->pz[0] + lz * (RW + 1.8f), yaw, 0.0f, 0.0f,
                  0.4f, 2.75f, 0.4f, 225, 225, 230);
         draw_box(t->px[0] - lx * (RW + 1.8f), by + 2.75f,
-                 t->pz[0] - lz * (RW + 1.8f), yaw, 0.0f,
+                 t->pz[0] - lz * (RW + 1.8f), yaw, 0.0f, 0.0f,
                  0.4f, 2.75f, 0.4f, 225, 225, 230);
-        draw_box(t->px[0], by + 5.9f, t->pz[0], yaw, 0.0f,
+        draw_box(t->px[0], by + 5.9f, t->pz[0], yaw, 0.0f, 0.0f,
                  0.3f, 0.55f, RW + 2.2f, 200, 30, 30);
     }
 
@@ -1298,7 +1343,7 @@ static void draw_track(const Track *t, int viewer_seg, float race_t)
         float ddz = tree_z[i] - t->pz[viewer_seg];
         if (ddx * ddx + ddz * ddz > 150.0f * 150.0f)
             continue;
-        draw_box(tree_x[i], tree_y[i] + 0.6f, tree_z[i], 0.0f, 0.0f,
+        draw_box(tree_x[i], tree_y[i] + 0.6f, tree_z[i], 0.0f, 0.0f, 0.0f,
                  0.25f, 0.6f, 0.25f, 110, 75, 40);
         draw_cone(tree_x[i], tree_y[i] + 1.2f, tree_z[i], 1.7f, 3.4f,
                   t->alpine ? 24 : 30, t->alpine ? 100 : 130, 45);
@@ -1331,9 +1376,12 @@ static void draw_track(const Track *t, int viewer_seg, float race_t)
  * does. spec may be NULL (a few call sites have no KartSpec handy),
  * in which case every scale is 1.0 — the original fixed proportions.
  */
+/* roll: same sign convention as Track.bank (see game.h) — positive
+ * dips the car's positive-lateral (right) side, matching how the road
+ * itself cants beneath it on a banked section. 0 on flat ground. */
 static void draw_car_model(float cx, float cy, float cz, float yaw,
-                           float pitch, float steer_vis, const u8 col[3],
-                           const KartSpec *spec)
+                           float pitch, float roll, float steer_vis,
+                           const u8 col[3], const KartSpec *spec)
 {
     float fx = cosf(yaw), fz = sinf(yaw);
     float lx = -fz, lz = fx;
@@ -1350,10 +1398,11 @@ static void draw_car_model(float cx, float cy, float cz, float yaw,
     int rear_driven = !spec || spec->drivetrain != DRIVETRAIN_FWD;
     int w;
 
-    draw_box(cx, cy + 0.42f * hgt, cz, yaw, pitch,
+    draw_box(cx, cy + 0.42f * hgt, cz, yaw, pitch, roll,
              1.10f * len, 0.28f * hgt, 0.65f * wid, col[0], col[1], col[2]);
     draw_box(cx - fx * 0.25f * len, cy + 0.92f * hgt, cz - fz * 0.25f * len,
-             yaw, pitch, 0.30f * len, 0.26f * hgt, 0.30f * wid, 40, 40, 45);
+             yaw, pitch, roll, 0.30f * len, 0.26f * hgt, 0.30f * wid,
+             40, 40, 45);
 
     for (w = 0; w < 4; w++) {
         float s_f = (w < 2) ? 1.0f : -1.0f;
@@ -1362,9 +1411,12 @@ static void draw_car_model(float cx, float cy, float cz, float yaw,
         float driven = (s_f > 0.0f) ? (float)front_driven
                                      : (float)rear_driven;
         float wheel_r = 0.28f + 0.05f * driven;
-        draw_box(cx + fx * wheel_fw * s_f + lx * track * s_l, cy + 0.30f,
+        /* the axle itself rides up or down with roll, same as a point
+         * on the road surface offset by the same lateral distance */
+        float wy = cy + 0.30f + bank_dy(track * s_l, roll);
+        draw_box(cx + fx * wheel_fw * s_f + lx * track * s_l, wy,
                  cz + fz * wheel_fw * s_f + lz * track * s_l,
-                 wyaw, 0.0f, wheel_r, wheel_r, 0.14f, 25, 25, 28);
+                 wyaw, 0.0f, roll, wheel_r, wheel_r, 0.14f, 25, 25, 28);
     }
 }
 
@@ -1377,6 +1429,7 @@ static void draw_kart(const Track *t, const Kart *k)
     float dirdot = cosf(k->heading) * t->dx[k->seg] +
                    sinf(k->heading) * t->dz[k->seg];
     float pitch = atanf(t->slope[k->seg] * dirdot);
+    float roll = t->bank[k->seg];
     float fx = cosf(yaw), fz = sinf(yaw);
     float lx = -fz, lz = fx;
     float by = k->y;
@@ -1400,7 +1453,7 @@ static void draw_kart(const Track *t, const Kart *k)
          k->z - fz * 1.3f + lz * 0.85f,
          0, 0, 0, 90);
 
-    draw_car_model(k->x, by, k->z, yaw, pitch, k->steer_vis, col,
+    draw_car_model(k->x, by, k->z, yaw, pitch, roll, k->steer_vis, col,
                    &kart_specs[k->spec]);
 
     /* tire smoke when sliding hard */
@@ -2580,7 +2633,7 @@ static void draw_garage_scene(int paint_idx, const KartSpec *spec)
     draw_cone(0.0f, 0.12f, 0.0f, 2.7f, 0.06f, 92, 98, 112);
     quad(-1.6f, 0.19f, -1.1f,  1.6f, 0.19f, -1.1f,
           1.6f, 0.19f,  1.1f, -1.6f, 0.19f,  1.1f, 0, 0, 0, 90);
-    draw_car_model(0.0f, 0.18f, 0.0f, turn, 0.0f, 0.0f,
+    draw_car_model(0.0f, 0.18f, 0.0f, turn, 0.0f, 0.0f, 0.0f,
                    paint_palette[paint_idx % PAINT_COUNT], spec);
 }
 

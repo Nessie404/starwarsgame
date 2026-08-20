@@ -129,7 +129,7 @@ Any patch release that followed a minor release is folded into that
 release's entry rather than getting its own. For anything older,
 `CHANGELOG.md` and `docs/release-notes/` have the full record back to v1.0.
 
-### v1.24.0 — road banking, a bigger BULLRING, cars that hold a line, a rebuilt designer
+### v1.24.0 — road banking, a bigger BULLRING, cars that hold a line, a rebuilt designer (plus a v1.24.1 follow-up patch)
 
 - [x] Every circuit now cants into its curves: a small, realistic
   crown on the mountain passes (`bank_mult` defaults to 0.3), a real,
@@ -163,6 +163,20 @@ release's entry rather than getting its own. For anything older,
 - [x] The local player's own kart on the minimap now carries a pulsing
   white ring (`draw_minimap`'s new `highlight` parameter), reachable
   in the single-player case where "the player" is unambiguous.
+- [x] **v1.24.1 patch:** three follow-up fixes once the above landed.
+  Cars now roll with the road on a banked section (`draw_box` gained a
+  `roll` parameter; `draw_kart` feeds it `t->bank[k->seg]`, the same
+  value the road surface itself is tilted by) — previously only yaw and
+  pitch were ever applied to a car model, so it stayed dead level
+  through a bank. The flat background "ground" quad no longer clips
+  through BULLRING's banked turns, where the road's inside edge can dip
+  more than a metre below it and the outside edge rises clear above it
+  — non-alpine tracks now get a per-segment fill quad closing both gaps
+  (collapses to nothing on an unbanked straight). And BULLRING/CLASSIC
+  finally render guardrails: the drawing code lived entirely inside
+  `if (t->alpine)` even though both tracks set `has_walls = 1`, so the
+  flag never actually drew anything; guardrail/cliff-edge drawing is
+  now gated on `has_walls` on its own.
 
 ### v1.23.0 — BULLRING, two oval cars, smoother corners, and a car designer
 
