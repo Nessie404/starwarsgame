@@ -4,6 +4,29 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.19.1] - 2026-08-20
+
+### Fixed
+
+- **Berthoud Pass 2.0's real switchbacks are back.** v1.17.0 replaced
+  the circuit's actual hairpin stack — climb, summit, valley loop-back,
+  climb home — with a smooth sine-wiggle shape to make a plan-view
+  self-intersection check pass, which fixed that check at the cost of
+  the track's whole character. It turns out the "self-intersection"
+  was never an actual gameplay bug: `track_locate` is always called
+  with a windowed hint during driving and grid placement, so two
+  switchback tiers landing close together in plan view (at very
+  different elevations, the way a real mountain switchback stack
+  looks from above) was never confusable at the wheel — only
+  decorative tree placement uses a global search, and getting that
+  occasionally wrong is invisible. The original v1.15.0 control points
+  are restored, scaled up further (1.30 → 1.50) for more room
+  everywhere while keeping the real elevation profile's ~85 m of
+  climb. 36 corners, down to an 8 m hairpin radius, versus the
+  sine-wave version's 16-20 corners with nothing tighter than 37 m.
+  `test_berthoud2_keeps_its_switchbacks` guards against this happening
+  again.
+
 ## [1.19.0] - 2026-08-20
 
 ### Added

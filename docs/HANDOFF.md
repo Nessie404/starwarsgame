@@ -156,6 +156,12 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   open out their tightest corners; and the data-only bones of a
   difficulty preset (`DifficultyPreset` in `game.h`) that nothing reads
   yet.
+- **v1.19.1**: Berthoud Pass 2.0's real hairpin switchbacks are back,
+  replacing the sine-wiggle shape v1.17.0 rebuilt it into. The
+  "self-intersection" that rebuild fixed was never an actual gameplay
+  bug — see §6 below — so the original v1.15.0 layout is restored and
+  scaled up further (1.30 → 1.50) for room without smoothing anything
+  out: 36 corners, an 8 m tightest radius, 85 m of climb.
 
 ---
 
@@ -225,6 +231,29 @@ it's the safe lever, not a position filter. v1.19.0's corner-softening
 pass tried the filter first and threw it out once
 `test_pavement_reaches_guardrail`-style manual measurement showed it
 making Guanella worse.
+
+**Two pieces of road passing close together in plan view is not
+automatically a gameplay bug — check how `track_locate` is actually
+called before reshaping anything to avoid it.** `track_locate` takes a
+`hint` segment and, when given one (`hint >= 0`), only searches a
+±8-segment window around it — it does not do a global nearest-point
+search. The two call sites that matter for a car's actual position
+(`kart_step`'s per-frame track relation, and grid placement at race
+start) both pass a hint for exactly this reason; grid placement's
+comment even names the risk directly. So a real switchback stack where
+an upper and lower tier land within a meter of each other in (x, z) at
+very different elevations — which is what a genuine mountain
+switchback looks like from above — is harmless: the car can never snap
+between tiers, because the search never looks that far from where it
+already was. The only `hint = -1` (global) call is `main.c`'s
+decorative tree scatter, where an occasional wrong answer is invisible.
+v1.17.0 rebuilt Berthoud Pass 2.0's real hairpins into a smooth
+sine-wiggle shape to make exactly this kind of plan-view proximity
+check pass, and lost what made the track fun in the process, for a
+problem that was never reachable in play. v1.19.1 put the hairpins
+back. If a future "the geometry looks tangled" instinct shows up
+again: check whether it is actually reachable through `track_locate`'s
+windowed hint before reshaping anything.
 
 **An AI strategy tuned too far can strand a driver in a fall/respawn
 loop forever, not just make it a bit crashier.** Respawn puts a kart

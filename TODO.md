@@ -75,12 +75,20 @@ Left for later, now that the camera has somewhere to live:
   profile — a stack of switchbacks up, a summit, a stack down, a flat
   loop-back through the valley floor, and a gentle climb back to a
   start/finish at the lap's own middle elevation. *(v1.15.0: 3263 m, 86 m
-  of climb, 33 corners, tightest radius 7 m. Rebuilt in v1.17.0: the
-  original layout let its own loop-back run within 1-2 m of the climb
-  and had hairpin apexes turning up to 161° at a single point; now
-  every piece of road stays 90+ m clear of every other piece and
-  nothing on the lap turns sharper than a 37 m radius. 1411 m, 67 m of
-  climb, 20 corners.)*
+  of climb, 33 corners, tightest radius 7 m. Rebuilt in v1.17.0 to a
+  smooth sine-wiggle shape after a plan-view check found the original
+  layout's loop-back passing within 1-2 m of the climb — which fixed
+  that check but flattened the track's whole character in the
+  process (1411 m, 67 m of climb, 20 corners, nothing tighter than
+  37 m) and turned out not to have been an actual gameplay bug:
+  `track_locate` always uses a windowed hint during driving and grid
+  placement, so two switchback tiers close in plan view but far apart
+  in elevation were never confusable at the wheel. v1.19.1 restored
+  the original v1.15.0 hairpin layout and scaled it up further (1.30
+  → 1.50) for more room everywhere — 3704 m, 85 m of climb, 36
+  corners, tightest radius 8 m — with
+  `test_berthoud2_keeps_its_switchbacks` guarding against smoothing it
+  away a third time.)*
 - [ ] Add winter variants of the mountain passes. The weather system below
   covers CLASSIC only by design; extending zones to the seven passes is
   its own pass over each circuit's own geometry.

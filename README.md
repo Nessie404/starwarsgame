@@ -120,6 +120,12 @@ driving model that expects you to brake for the hairpins.
   wide competitiveness bump, and every barriered track's shoulder
   brought in to the guardrail with the tightest corners on the roster
   opened out.
+- **v1.19.1** — Berthoud Pass 2.0's real hairpin switchbacks are back.
+  A v1.17.0 rebuild had smoothed them into a gentle sine-wiggle shape
+  to satisfy a plan-view self-intersection check that, it turns out,
+  was never reachable during actual driving — the real switchback
+  stack, summit, and valley loop-back are restored and spread out
+  further for room without losing the hairpins themselves.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game

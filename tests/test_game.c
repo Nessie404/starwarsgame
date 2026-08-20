@@ -742,6 +742,47 @@ static void test_corner_segmentation(void)
     }
 }
 
+/*
+ * Berthoud Pass 2.0 is a real switchback stack (climb, summit, descent,
+ * valley loop-back, climb home) — that character is the whole point of
+ * the circuit and it has been smoothed away by well-meaning "fix the
+ * geometry" passes before: v1.17.0 replaced the actual hairpins with a
+ * gentle sine-wiggle shape to make a self-intersection check pass,
+ * which incidentally made the track boring. v1.19.1 brought the real
+ * hairpins back (see track.c) once it turned out the "self-intersection"
+ * was never a gameplay bug in the first place — track_locate is always
+ * called with a windowed hint during driving and grid placement (the
+ * only place it isn't, decorative tree scatter in main.c, doesn't
+ * matter if it's occasionally wrong) so two switchback tiers landing
+ * close together in plan view, at very different elevations, was never
+ * actually confusable at the wheel. This test is the tripwire: if a
+ * future pass flattens the corner count or radius back down chasing a
+ * diagram-flat minimap, this fails.
+ */
+static void test_berthoud2_keeps_its_switchbacks(void)
+{
+    Track t;
+    float peak = 0.0f;
+    int i;
+
+    track_init(&t, TRACK_BERTHOUD2);
+    for (i = 0; i < t.n_corners; i++)
+        if (t.corner_peak[i] > peak)
+            peak = t.corner_peak[i];
+    printf("Berthoud 2.0: %d corners, tightest R %.0f m, %.0f m climb\n",
+           t.n_corners, peak > 0.0f ? 1.0f / peak : 0.0f,
+           t.max_y - t.min_y);
+    CHECK(t.n_corners >= 25,
+          "Berthoud 2.0 has only %d corners — the switchback stack got "
+          "smoothed away again", t.n_corners);
+    CHECK(peak > 0.0f && 1.0f / peak < 20.0f,
+          "Berthoud 2.0's tightest corner is a %.0f m radius — that is "
+          "not a real hairpin any more", 1.0f / peak);
+    CHECK(t.max_y - t.min_y > 60.0f,
+          "Berthoud 2.0 lost most of its climb (%.0f m)",
+          t.max_y - t.min_y);
+}
+
 /* A twelve-car grid has to fit on the road, including the back row that
  * sits ~40 m behind the line and often round a bend. */
 static void test_full_grid_fits(void)
@@ -3811,6 +3852,7 @@ int main(void)
     test_finished_human_coasts();
     test_nan_hardening();
     test_corner_segmentation();
+    test_berthoud2_keeps_its_switchbacks();
     test_full_grid_fits();
     test_ai_races_all_tracks();
     test_full_race_classic();
