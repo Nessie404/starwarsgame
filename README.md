@@ -149,7 +149,9 @@ driving model that expects you to brake for the hairpins.
   drivers, KESSLER and DUARTE. Some AI drivers now hunt the real
   racing line, reading past the corner they're in to set up for the
   next one, each by a different distance — and backing off that
-  anticipation the tighter the corner they're actually in gets.
+  anticipation the tighter the corner they're actually in gets. A
+  follow-up patch added a session-best lap per circuit, a HUD readout
+  of the weather ahead, and a chase camera that leans into corners.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game

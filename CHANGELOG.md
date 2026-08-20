@@ -47,6 +47,20 @@ artifacts and their longer descriptions remain available on the
   anticipation fades on its own the tighter the near corner already
   is: a driver mid-hairpin is committed to that corner, not still
   weighing what comes after it.
+- **Session-best lap per circuit.** Not saved to disk — it lives only
+  as long as the game stays open — but every human's best lap on each
+  circuit now survives from one race to the next within that session,
+  shown next to the current race's own best on the HUD.
+- **A HUD readout for the weather ahead.** On the approach to a snow,
+  ice, or puddle patch, the HUD now names the condition coming up, not
+  just the color change on the road surface itself.
+- **The chase camera leads into corners.** The aim point now leans
+  toward the signed curvature of the road at the look-ahead point
+  instead of only ever pointing along the car's nose, so a corner
+  starts framing itself before you turn in. Eases off the tighter the
+  swing is already round for a reverse, and hard-clamped so a hairpin
+  can't send the aim point somewhere absurd. Tunable via the new
+  `corner_lean` key in the `camera` block of `settings.json`.
 
 ### Fixed
 

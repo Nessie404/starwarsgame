@@ -412,6 +412,13 @@ struct GameSettings {
     float cam_pitch_smoothing;
     float cam_pitch_min_deg;         /* negative = allowed to look up    */
     float cam_pitch_max_deg;
+    float cam_corner_lean;           /* 0 = aim stays on the car's nose,
+                                       * more leans the aim point toward
+                                       * the signed curvature of the road
+                                       * at the look-ahead point, so the
+                                       * camera previews an upcoming bend
+                                       * instead of only ever pointing
+                                       * straight ahead of the car        */
 
     /* hills. The gravity component along a road at angle theta is
      * g*sin(theta) and the load pressing the tires down is m*g*cos(theta);
@@ -803,6 +810,14 @@ typedef struct {
 
 void game_init(Game *g, const GameConfig *cfg);
 void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt);
+
+/* Session-best lap per circuit, per human — survives game_init on
+ * purpose (a new race would otherwise reset it with everything else in
+ * Game); lives only as long as the process does. See the comment above
+ * its definition in game.c. */
+float session_best_lap_get(int track_id, int human);
+void  session_best_lap_record(int track_id, int human, float lap_time);
+void  session_best_lap_reset_all(void);
 
 /* helpers shared with rendering / tests */
 float game_angle_wrap(float a);

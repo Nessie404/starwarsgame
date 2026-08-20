@@ -234,6 +234,7 @@ void game_settings_defaults(GameSettings *s)
     s->cam_pitch_smoothing = 0.05f;
     s->cam_pitch_min_deg = -20.0f;
     s->cam_pitch_max_deg = 20.0f;
+    s->cam_corner_lean = 4.5f;
     s->grade_gravity_mult = 1.0f;
     s->grade_load_effect = 1.0f;
     s->tacho_idle_rpm = 1200.0f;
@@ -358,6 +359,7 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
     FINITE_RANGE(s->cam_pitch_smoothing, 0.0f, 0.99f, "BAD CAM PITCH SMOOTH");
     FINITE_RANGE(s->cam_pitch_min_deg, -60.0f, 0.0f, "BAD CAM PITCH FLOOR");
     FINITE_RANGE(s->cam_pitch_max_deg, 0.0f, 60.0f, "BAD CAM PITCH CEILING");
+    FINITE_RANGE(s->cam_corner_lean, 0.0f, 20.0f, "BAD CAM CORNER LEAN");
     FINITE_RANGE(s->ai_skill_mult, 0.50f, 1.30f, "BAD AI SKILL");
     FINITE_RANGE(s->ai_brake_mult, 0.30f, 1.50f, "BAD AI BRAKES");
     FINITE_RANGE(s->ai_unguarded_line_room, 0.20f, 1.40f,
@@ -917,6 +919,40 @@ static void kart_place_on_grid(Game *g, Kart *k, int grid_slot)
                             ? k->prog_raw - (float)t->n
                             : k->prog_raw;
     k->lap = (int)floorf(k->total_progress / (float)t->n);
+}
+
+/*
+ * Session-best lap per circuit, per human — deliberately outside `Game`,
+ * because `game_init` below unconditionally `memset`s the whole struct
+ * to zero for every new race, and the entire point of this is to
+ * survive that. Lives only as long as the process does: no save/load,
+ * no disk I/O, just a number that keeps improving as long as the game
+ * stays open across however many races get run. Full persistence
+ * across sessions is a separate, bigger item — see TODO.md.
+ */
+static float session_best_lap_s[TRACK_COUNT][MAX_HUMANS];
+
+float session_best_lap_get(int track_id, int human)
+{
+    if (track_id < 0 || track_id >= TRACK_COUNT ||
+        human < 0 || human >= MAX_HUMANS)
+        return 0.0f;
+    return session_best_lap_s[track_id][human];
+}
+
+void session_best_lap_record(int track_id, int human, float lap_time)
+{
+    if (track_id < 0 || track_id >= TRACK_COUNT ||
+        human < 0 || human >= MAX_HUMANS || !(lap_time > 0.0f))
+        return;
+    if (session_best_lap_s[track_id][human] <= 0.0f ||
+        lap_time < session_best_lap_s[track_id][human])
+        session_best_lap_s[track_id][human] = lap_time;
+}
+
+void session_best_lap_reset_all(void)
+{
+    memset(session_best_lap_s, 0, sizeof(session_best_lap_s));
 }
 
 void game_init(Game *g, const GameConfig *cfg)
@@ -2294,6 +2330,9 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
                         k->best_lap_time = t_lap;
                         k->lap_best_event = 1;
                     }
+                    if (k->human >= 0)
+                        session_best_lap_record(g->cfg.track_id,
+                                                k->human, t_lap);
                     k->laps_done++;
                     k->lap_event = 1;
                 }

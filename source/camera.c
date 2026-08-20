@@ -72,13 +72,31 @@ static float reverse_fraction(const GameSettings *s, float speed)
     return cam_clampf((back - dead) / (full - dead), 0.0f, 1.0f);
 }
 
+/* signed curvature of the road at the look-ahead point, 0 if there is no
+ * track to read (camera_reset/camera_update are always called with one,
+ * but a NULL stays harmless rather than a crash for any future caller
+ * that is not) */
+static float curvature_ahead(const Track *t, int seg, float look_m)
+{
+    float dist = 0.0f;
+    int j;
+
+    if (!t || t->n <= 0)
+        return 0.0f;
+    for (j = 0; j < t->n && dist < look_m; j++) {
+        dist += t->seg_len[seg];
+        seg = (seg + 1) % t->n;
+    }
+    return t->curv_signed[seg];
+}
+
 /*
  * The pose the camera wants this frame: eye and look-at, both derived
  * from one swung axis so the two can never disagree about which way the
  * car is travelling.
  */
 static void desired_pose(const CameraState *c, const GameSettings *s,
-                         const Kart *k, float pitch,
+                         const Kart *k, const Track *t, float pitch,
                          float *ex, float *ey, float *ez,
                          float *lx, float *ly, float *lz)
 {
@@ -89,7 +107,7 @@ static void desired_pose(const CameraState *c, const GameSettings *s,
     float sp = fabsf(k->speed);
     float look = s->cam_look_ahead_m + s->cam_look_ahead_per_mps * sp;
     float cp = cosf(pitch), sn = sinf(pitch);
-    float back, up;
+    float back, up, lean;
 
     if (look > s->cam_look_ahead_max_m)
         look = s->cam_look_ahead_max_m;
@@ -110,6 +128,24 @@ static void desired_pose(const CameraState *c, const GameSettings *s,
     *lx = k->x + ax * look * cp;
     *lz = k->z + az * look * cp;
     *ly = k->y + s->cam_look_height_m + look * sn;
+
+    /*
+     * Corner lead-in: nudge the aim point sideways, toward the signed
+     * curvature of the road right at the look-ahead point (the same
+     * Track.curv_signed the AI's own racing line reads), so the camera
+     * previews an upcoming bend rather than only ever pointing straight
+     * along the car's nose. A reversed swing (c->orbit past 90 degrees,
+     * looking back down the road) flips the lean with it, since "right"
+     * from that view is the opposite way. Clamped to a fixed, generous
+     * distance regardless of how tight the corner reads, so a hairpin
+     * cannot swing the aim point somewhere absurd.
+     */
+    lean = curvature_ahead(t, k->seg, look) * s->cam_corner_lean * look;
+    if (c->orbit > CAM_PI * 0.5f)
+        lean = -lean;
+    lean = cam_clampf(lean, -6.0f, 6.0f);
+    *lx += -az * lean;
+    *lz +=  ax * lean;
 }
 
 void camera_reset(CameraState *c, const GameSettings *s,
@@ -120,7 +156,7 @@ void camera_reset(CameraState *c, const GameSettings *s,
 
     c->orbit = 0.0f;
     c->pitch = 0.0f;
-    desired_pose(c, s, k, 0.0f, &ex, &ey, &ez, &lx, &ly, &lz);
+    desired_pose(c, s, k, t, 0.0f, &ex, &ey, &ez, &lx, &ly, &lz);
 
     ground = ground_at(t, ex, ez, k->seg);
     if (ey < ground + s->cam_min_height_m)
@@ -187,7 +223,7 @@ void camera_update(CameraState *c, const GameSettings *s,
                        pitch_limit_lo, pitch_limit_hi);
 
     /* --- the easing ------------------------------------------------ */
-    desired_pose(c, s, k, pitch, &ex, &ey, &ez, &lx, &ly, &lz);
+    desired_pose(c, s, k, t, pitch, &ex, &ey, &ez, &lx, &ly, &lz);
 
     blend = cam_blend(s->cam_follow_smoothing, dt);
     c->x += (ex - c->x) * blend;

@@ -3782,6 +3782,82 @@ static void test_lap_times_survive_respawn(void)
 }
 
 /*
+ * Session-best lap lives outside Game on purpose: game_init memsets the
+ * whole struct for every new race, and the entire point here is to
+ * survive that. It only ever improves, never regresses, and it only
+ * ever tracks humans — an AI kart lapping all day must never touch it.
+ */
+static void test_session_best_lap_survives_a_new_race(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    int f;
+    float first_race_best;
+
+    session_best_lap_reset_all();
+    CHECK(session_best_lap_get(TRACK_CLASSIC, 0) <= 0.0f,
+          "a freshly reset session already has a best lap");
+
+    /* --- a human actually lapping records it --- */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    in[0].accel = 1;
+    /* a human holding the throttle with no steering runs off CLASSIC's
+     * corners rather than actually completing a lap (same reason
+     * test_lap_times drives the AI field instead) — teleport onto the
+     * last sliver of road before the line so crossing it needs no
+     * steering at all, and set the lap clock as though this lap had
+     * genuinely been under way for a while (a crossing under 1 s after
+     * the last one is rejected as bogus, which a bare teleport would
+     * otherwise trip) */
+    teleport(&g, &g.karts[0], g.track.n - 1, 20.0f);
+    g.karts[0].lap = 0;
+    g.karts[0].lap_start_t = g.race_t - 20.0f;
+    for (f = 0; f < 60 * 10; f++)
+        game_update(&g, in, 1.0f / 60.0f);
+
+    CHECK(g.karts[0].laps_done > 0, "the human never completed a lap");
+    first_race_best = session_best_lap_get(TRACK_CLASSIC, 0);
+    CHECK(first_race_best > 5.0f,
+          "no session best (%.2f) was recorded from a real lap",
+          first_race_best);
+    CHECK(fabsf(first_race_best - g.karts[0].best_lap_time) < 0.01f,
+          "session best (%.2f) does not match the kart's own best "
+          "(%.2f) from the same race",
+          first_race_best, g.karts[0].best_lap_time);
+
+    /* --- a brand new race (a fresh game_init) must not reset it --- */
+    game_init(&g, &cfg);
+    CHECK(fabsf(session_best_lap_get(TRACK_CLASSIC, 0) - first_race_best) <
+              0.001f,
+          "a new game_init reset the session best (%.2f -> %.2f)",
+          first_race_best, session_best_lap_get(TRACK_CLASSIC, 0));
+
+    /* --- only improves, never regresses --- */
+    session_best_lap_record(TRACK_CLASSIC, 0, first_race_best + 5.0f);
+    CHECK(fabsf(session_best_lap_get(TRACK_CLASSIC, 0) - first_race_best) <
+              0.001f,
+          "a slower lap (%.2f) overwrote the faster session best (%.2f)",
+          first_race_best + 5.0f, first_race_best);
+    session_best_lap_record(TRACK_CLASSIC, 0, first_race_best - 1.0f);
+    CHECK(fabsf(session_best_lap_get(TRACK_CLASSIC, 0) -
+                (first_race_best - 1.0f)) < 0.001f,
+          "a genuinely faster lap did not improve the session best");
+
+    /* --- another track and another human's slot are untouched --- */
+    CHECK(session_best_lap_get(TRACK_BERTHOUD, 0) <= 0.0f,
+          "recording CLASSIC's session best leaked into Berthoud's");
+    CHECK(session_best_lap_get(TRACK_CLASSIC, 1) <= 0.0f,
+          "recording human 0's session best leaked into human 1's slot");
+
+    session_best_lap_reset_all();
+    CHECK(session_best_lap_get(TRACK_CLASSIC, 0) <= 0.0f,
+          "session_best_lap_reset_all did not actually reset it");
+}
+
+/*
  * The rivals have names, and those names have to survive being drawn by a
  * HUD font with a limited alphabet and a narrow column.
  */
@@ -4286,6 +4362,105 @@ static void test_camera_look_ahead_scales(void)
           s.cam_look_ahead_max_m, flat_out);
 }
 
+/* how far the aim point sits to the right of the car's nose (same right
+ * = (-sin h, cos h) convention as everywhere else in the sim) */
+static float camera_aim_right_of(const CameraState *c, const Kart *k)
+{
+    return (c->look_x - k->x) * (-sinf(k->heading)) +
+           (c->look_z - k->z) * ( cosf(k->heading));
+}
+
+/*
+ * Corner lead-in: the aim point should lean toward the signed curvature
+ * of the road at the look-ahead point (positive = bends right, same
+ * convention ai_tactical_line reads), stay put on a straight, and turn
+ * off entirely at corner_lean = 0.
+ */
+static void test_camera_corner_lean(void)
+{
+    GameSettings s;
+    Track t;
+    Kart k;
+    CameraState c;
+    int seg, straight_seg = -1, corner_seg = -1, approach_seg;
+    float tightest = 0.0f, look, back;
+    float lateral_straight, lateral_corner, lateral_disabled;
+
+    game_settings_defaults(&s);
+    track_init_with_settings(&t, TRACK_BERTHOUD2, &s);
+    look = s.cam_look_ahead_m + s.cam_look_ahead_per_mps * 20.0f;
+    if (look > s.cam_look_ahead_max_m) look = s.cam_look_ahead_max_m;
+
+    /* find the tightest corner on the lap, and a genuinely straight
+     * stretch, rather than assuming specific segment numbers */
+    for (seg = 0; seg < t.n; seg++) {
+        if (fabsf(t.curv_signed[seg]) > tightest) {
+            tightest = fabsf(t.curv_signed[seg]);
+            corner_seg = seg;
+        }
+        if (straight_seg < 0 && fabsf(t.curv_signed[seg]) < 0.002f)
+            straight_seg = seg;
+    }
+    CHECK(corner_seg >= 0 && straight_seg >= 0,
+          "could not find both a corner and a straight to test on");
+
+    /* the camera reads curvature `look` meters ahead of the CAR, not at
+     * the car's own position — so to land the look-ahead point on the
+     * tightest corner, place the car that far back up the road from it */
+    approach_seg = corner_seg;
+    back = 0.0f;
+    while (back < look) {
+        approach_seg = (approach_seg - 1 + t.n) % t.n;
+        back += t.seg_len[approach_seg];
+    }
+
+    memset(&k, 0, sizeof(k));
+    k.x = t.px[straight_seg]; k.z = t.pz[straight_seg];
+    k.y = t.py[straight_seg];
+    k.heading = atan2f(t.dz[straight_seg], t.dx[straight_seg]);
+    k.seg = straight_seg;
+    k.speed = 20.0f;
+    camera_reset(&c, &s, &k, &t);
+    camera_settle(&c, &s, &k, &t, 2.0f);
+    lateral_straight = camera_aim_right_of(&c, &k);
+
+    memset(&k, 0, sizeof(k));
+    k.x = t.px[approach_seg]; k.z = t.pz[approach_seg];
+    k.y = t.py[approach_seg];
+    k.heading = atan2f(t.dz[approach_seg], t.dx[approach_seg]);
+    k.seg = approach_seg;
+    k.speed = 20.0f;
+    camera_reset(&c, &s, &k, &t);
+    camera_settle(&c, &s, &k, &t, 2.0f);
+    lateral_corner = camera_aim_right_of(&c, &k);
+
+    printf("camera corner lean: %.2f m right of the nose on a straight, "
+           "%.2f m on the approach to the tightest corner (curvature "
+           "%.4f 1/m)\n", lateral_straight, lateral_corner,
+           t.curv_signed[corner_seg]);
+    CHECK(fabsf(lateral_straight) < 0.3f,
+          "the aim point leaned %.2f m on a straight", lateral_straight);
+    if (t.curv_signed[corner_seg] > 0.0f)
+        CHECK(lateral_corner > 0.5f,
+              "a right-hand corner (curvature %.4f) did not lean the aim "
+              "point right (%.2f m)", t.curv_signed[corner_seg],
+              lateral_corner);
+    else
+        CHECK(lateral_corner < -0.5f,
+              "a left-hand corner (curvature %.4f) did not lean the aim "
+              "point left (%.2f m)", t.curv_signed[corner_seg],
+              lateral_corner);
+
+    /* corner_lean = 0 turns it off entirely */
+    s.cam_corner_lean = 0.0f;
+    camera_reset(&c, &s, &k, &t);
+    camera_settle(&c, &s, &k, &t, 2.0f);
+    lateral_disabled = camera_aim_right_of(&c, &k);
+    CHECK(fabsf(lateral_disabled) < 0.05f,
+          "corner_lean = 0 still leaned the aim point %.2f m",
+          lateral_disabled);
+}
+
 /* The camera block in settings.json is real, and bad values are refused. */
 static void test_camera_settings_json(void)
 {
@@ -4402,6 +4577,7 @@ int main(void)
     test_narrow_sections_bite();
     test_lap_times();
     test_lap_times_survive_respawn();
+    test_session_best_lap_survives_a_new_race();
     test_lap_count_override();
     test_difficulty_presets_scaffolding();
     test_team_mode_scaffolding();
@@ -4412,6 +4588,7 @@ int main(void)
     test_camera_no_snap_or_hunt();
     test_camera_follows_road_pitch();
     test_camera_look_ahead_scales();
+    test_camera_corner_lean();
     test_camera_snaps_after_respawn();
     test_camera_stays_sane_everywhere();
     test_camera_settings_json();

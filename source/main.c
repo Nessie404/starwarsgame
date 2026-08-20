@@ -1910,6 +1910,16 @@ static void draw_player_hud(int p)
                      190, 175, 90, 195);
             hud_text(vx + 52.0f, vy + 70.0f, 8.0f, 14.0f, t,
                      245, 225, 120, 215);
+
+            /* the best this circuit has seen all session, not just this
+             * race — stays blank until either this race or an earlier
+             * one this session actually beats it */
+            format_lap_time(t, sizeof(t),
+                            session_best_lap_get(game.cfg.track_id, p));
+            hud_text(vx + 14.0f, vy + 86.0f, 8.0f, 14.0f, "SESS",
+                     140, 175, 190, 195);
+            hud_text(vx + 52.0f, vy + 86.0f, 8.0f, 14.0f, t,
+                     170, 220, 235, 215);
         }
     }
     /* position */
@@ -1936,6 +1946,37 @@ static void draw_player_hud(int p)
                      170, 175, 190, 210);
             hud_text(vx + 176.0f, vy + 14.0f, 8.0f, 14.0f,
                      kart_label(ahead), c[0], c[1], c[2], 235);
+        }
+    }
+
+    /* what's coming up: only ever true on CLASSIC (every other track's
+     * weather_zone is all -1, so this never finds anything), and only
+     * worth a line where there's room for the rest of the lap detail
+     * too. Reads the same track_weather_at the road-surface tint and
+     * the AI's own cornering speed already use — no new mechanic. */
+    if (game.cfg.n_humans <= 2 && game.state == STATE_RACING) {
+        const Track *t = &game.track;
+        int seg = k->seg, j, weather = WEATHER_CLEAR;
+        float dist = 0.0f;
+        u8 wr = 255, wg = 255, wb = 255;
+
+        for (j = 0; j < 40 && dist < 150.0f; j++) {
+            weather = track_weather_at(t, seg, game.race_t, &game.settings);
+            if (weather != WEATHER_CLEAR)
+                break;
+            dist += t->seg_len[seg];
+            seg = (seg + 1) % t->n;
+        }
+        if (weather != WEATHER_CLEAR) {
+            switch (weather) {
+            case WEATHER_SNOW:   wr = 235; wg = 235; wb = 240; break;
+            case WEATHER_ICE:    wr = 175; wg = 205; wb = 220; break;
+            case WEATHER_PUDDLE: wr = 130; wg = 165; wb = 200; break;
+            }
+            hud_text(vx + 100.0f, vy + 34.0f, 8.0f, 14.0f, "AHEAD",
+                     170, 175, 190, 210);
+            hud_text(vx + 152.0f, vy + 34.0f, 8.0f, 14.0f,
+                     weather_name(weather), wr, wg, wb, 235);
         }
     }
 

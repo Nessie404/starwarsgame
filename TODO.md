@@ -45,29 +45,10 @@ batching unrelated work to make a bigger changelog.
 
 ### Small releases — ship alone, batch two or three before pushing
 
-Roughly in the order they're worth doing (cheapest/most self-contained
-first):
-
-- [ ] **Session-best lap per circuit, in-memory only.** Not full persistent
-  standings (that's a big-release item below, and needs real save/load
-  I/O) — just remembering, for the life of the running process, each
-  circuit's best lap across however many races get run before the game is
-  closed, and showing it next to the current best on the results screen.
-  No new subsystem: `best_lap_time` already exists per kart per race, this
-  only needs one array of "best ever seen this session" indexed by
-  `track_id` that survives a `game_init` instead of resetting with it.
-- [ ] **HUD readout of the upcoming weather zone's condition**, not just the
-  color change on the road surface itself. `track_weather_at` already
-  answers "what condition is segment N in" for any segment and any time;
-  this is a look-ahead call against the player's own position plus a
-  `weather_name()` HUD line, no new mechanic and no rendering work beyond
-  one more `hud_text` call.
-- [ ] **Let the camera lead into corners slightly** rather than only aiming
-  along the car's nose. A small extension of the existing speed-scaled
-  look-ahead in `source/camera.c` — bias the aim point toward the signed
-  curvature of the road a little further up, the same `Track.curv_signed`
-  the AI's own racing line already reads. Self-contained to the camera
-  module and its existing tests.
+Nothing queued right now — the three that were here (session-best lap,
+the weather-ahead HUD readout, camera corner lead-in) shipped together in
+v1.21.1; see the shipped-history section below. Roughly the order to work
+through whatever lands here next: cheapest/most self-contained first.
 
 ### Big releases — bundle before shipping, roughly in priority order
 
@@ -159,7 +140,7 @@ Any patch release that followed a minor release is folded into that
 release's entry rather than getting its own. For anything older,
 `CHANGELOG.md` and `docs/release-notes/` have the full record back to v1.0.
 
-### v1.21.0 — automatic turbo, two more challenging drivers, AI racing lines
+### v1.21.0 — automatic turbo, two more challenging drivers, AI racing lines, and a follow-up patch
 
 - [x] Reworked boost into a fully automatic turbo. `Kart.turbo_spool`
   builds and bleeds off on its own from real throttle and revs — no
@@ -181,6 +162,16 @@ release's entry rather than getting its own. For anything older,
   the near corner already is — both realistic and needed, since an
   early, untapered cut of this briefly broke the same fragile
   TRUCK/AI_YOLO pairing noted below on Monarch and Berthoud Pass 2.0.
+- [x] *(v1.21.1 patch)* Three small, self-contained additions landed
+  together: a session-best lap per circuit that survives a `game_init`
+  (in-memory only, not persisted between process runs —
+  `session_best_lap_get`/`_record` in `game.c`, shown next to the
+  in-race best on the HUD); a HUD readout of the next weather zone's
+  condition on the approach to it, reusing `track_weather_at` with no
+  new mechanic; and the chase camera leaning its aim point toward the
+  signed curvature of an upcoming bend (new `cam_corner_lean` setting),
+  fading out the more the view has swung round for a reverse and
+  hard-clamped so a hairpin can't send it somewhere absurd.
 
 ### v1.20.0 — punishing oversteer/understeer, sharper AI, deeper weather
 

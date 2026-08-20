@@ -92,7 +92,7 @@
     "tacho_redline_rpm": 7800
   },
   "camera": {
-    "_comment": "Distances in meters, rates per second. Each smoothing value is the fraction of the remaining error still left one second later: smaller is quicker, 0 snaps.",
+    "_comment": "Distances in meters, rates per second. Each smoothing value is the fraction of the remaining error still left one second later: smaller is quicker, 0 snaps. corner_lean nudges the aim point toward the signed curvature of an upcoming bend (0 = aim stays on the car's nose); it eases off on its own the more the view has swung round for a reverse.",
     "distance_m": 9.0,
     "height_m": 3.6,
     "min_height_above_road_m": 1.6,
@@ -110,7 +110,8 @@
     "pitch_influence": 0.65,
     "pitch_smoothing": 0.05,
     "pitch_min_deg": -20.0,
-    "pitch_max_deg": 20.0
+    "pitch_max_deg": 20.0,
+    "corner_lean": 4.5
   },
   "respawn": {
     "_comment": "Invincibility is visible driving time after the black hold and fade have completed.",

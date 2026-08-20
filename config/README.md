@@ -211,6 +211,7 @@ frame-rate independent: smaller is quicker, and `0` snaps.
 | `pitch_smoothing` | 0.05 | How much a bump is allowed to nod the camera |
 | `pitch_min_deg` | -20 | Furthest it may tilt up |
 | `pitch_max_deg` | 20 | Furthest it may tilt down |
+| `corner_lean` | 4.5 | How far the aim point leans toward an upcoming bend's curvature (0 = stays on the car's nose) |
 
 Reversing swings the camera round to the nose so the view faces the way the
 car is actually going, and driving forward brings it back. The dead zone and

@@ -199,7 +199,13 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   down the tighter the near corner already is. Both the turbo's grip
   taper and the racing line's corner-tightness taper exist because an
   early cut of each briefly broke the same fragile TRUCK/AI_YOLO
-  pairing on Monarch and Berthoud Pass 2.0 — see §6 below.
+  pairing on Monarch and Berthoud Pass 2.0 — see §6 below. A v1.21.1
+  follow-up patch added three self-contained pieces: an in-memory
+  session-best lap per circuit (`session_best_lap_get`/`_record` in
+  `game.c`, deliberately outside `Game` so it survives `game_init`), a
+  HUD readout of the next weather zone's condition on the approach to
+  it, and the chase camera leaning its aim point toward an upcoming
+  bend's curvature (new `cam_corner_lean` setting, `camera.c`).
 
 ---
 

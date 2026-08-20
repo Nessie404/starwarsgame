@@ -1028,7 +1028,9 @@ int config_load_settings_text(GameSettings *settings, const char *json,
          !optional_float(json, tokens, count, obj, "pitch_min_deg",
                          &s.cam_pitch_min_deg, error, error_cap) ||
          !optional_float(json, tokens, count, obj, "pitch_max_deg",
-                         &s.cam_pitch_max_deg, error, error_cap))) goto fail;
+                         &s.cam_pitch_max_deg, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "corner_lean",
+                         &s.cam_corner_lean, error, error_cap))) goto fail;
 
     obj = object_get(json, tokens, count, 0, "respawn");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
