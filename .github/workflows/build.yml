@@ -74,17 +74,21 @@ jobs:
 
           Controls
             Wii Remote (sideways): tilt = steer, 2 = gas, 1 = brake,
-              B = handbrake, - = item, + = menu, HOME = quit. In manual
+              B = handbrake, - = boost, + = menu, HOME = quit. In manual
               gearbox mode, D-pad up/down = shift and left/right = steer.
             GameCube input: stick = steer, A or X = gas, B = brake,
-              Z = handbrake, Y = item, R/L = shift, START = menu.
+              Z = handbrake, Y = boost, R/L = shift, START = menu.
             Recommended Xbox-to-GameCube map in Dolphin: left stick =
-              stick, RT = A, LT = B, A = Z, X = Y, RB = R, LB = L,
-              START = START. The live input panel shows this translation.
+              stick, RT = A, LT = B, A = Z (handbrake), X = Y (boost),
+              RB = R (shift up), LB = L (shift down), START = START.
+              The live input panel shows this translation.
             Keyboard player 1: WASD = drive, E = shift up, Q = shift down,
-              X = power-up, Space = handbrake.
+              F = boost, Space = handbrake.
             Keyboard player 2: IJKL = drive, O = shift up, U = shift down,
-              M = power-up, P = handbrake.
+              H = boost, P = handbrake.
+            Boost: a meter that charges with revs and spends in one shot
+              for an instant speed bump. Any gear change resets it to
+              zero.
             Menus: up/down picks a row, left/right changes its value.
               Keyboard Enter confirms and Esc backs out. With the map
               above, Xbox A or RT confirms and LT backs out.

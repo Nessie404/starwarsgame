@@ -447,6 +447,7 @@ static void read_player_input(int p, Input *in, float dt)
     in->accel = (wheld[p] & (WPAD_BUTTON_2 | WPAD_BUTTON_A)) != 0;
     in->brake = (wheld[p] & WPAD_BUTTON_1) != 0;
     in->hop   = (wheld[p] & WPAD_BUTTON_B) != 0;
+    in->boost = (wheld[p] & WPAD_BUTTON_MINUS) != 0;
     if (wiimote_manual) {
         /* Mario Kart Wii has no transmission shift buttons, so WiiKart's
          * optional manual gearbox uses the otherwise-free D-pad vertical
@@ -482,6 +483,7 @@ static void read_player_input(int p, Input *in, float dt)
                                       WPAD_CLASSIC_BUTTON_Y)) != 0;
             in->hop   |= (wheld[p] & (WPAD_CLASSIC_BUTTON_FULL_R |
                                       WPAD_CLASSIC_BUTTON_FULL_L)) != 0;
+            in->boost |= (wheld[p] & WPAD_CLASSIC_BUTTON_MINUS) != 0;
             tilt_ok = 0;
         }
         if (tilt_ok) {
@@ -522,6 +524,7 @@ static void read_player_input(int p, Input *in, float dt)
         in->gear_up |= (gc & control_config.gamecube[CONTROL_GEAR_UP]) != 0;
         in->gear_down |=
             (gc & control_config.gamecube[CONTROL_GEAR_DOWN]) != 0;
+        in->boost |= (gc & control_config.gamecube[CONTROL_BOOST]) != 0;
     }
 
     /* USB keyboard bindings come from the same file. */
@@ -533,6 +536,7 @@ static void read_player_input(int p, Input *in, float dt)
         in->hop |= key_actions[p][CONTROL_HANDBRAKE];
         in->gear_up |= key_actions[p][CONTROL_GEAR_UP];
         in->gear_down |= key_actions[p][CONTROL_GEAR_DOWN];
+        in->boost |= key_actions[p][CONTROL_BOOST];
     }
 
     /* Classic Controller keeps the familiar shoulder-button shifts. */
@@ -963,7 +967,7 @@ static int seg_in_window(const Track *t, int viewer_seg, int seg,
     return (rel >= -behind && rel <= ahead);
 }
 
-static void draw_track(const Track *t, int viewer_seg)
+static void draw_track(const Track *t, int viewer_seg, float race_t)
 {
     int win_ahead, win_behind;
     int i;
@@ -1000,6 +1004,15 @@ static void draw_track(const Track *t, int viewer_seg)
             r = 95; g = 95; b = 100;
         } else {
             r = 85; g = 85; b = 90;
+        }
+        /* weather (CLASSIC only): a patch reads as bright fresh snow,
+         * pale blue-grey ice once it has melted, and a dark wet puddle
+         * once that has melted too — see track_weather_at */
+        switch (track_weather_at(t, i, race_t, &game.settings)) {
+        case WEATHER_SNOW:   r = 235; g = 235; b = 240; break;
+        case WEATHER_ICE:    r = 175; g = 205; b = 220; break;
+        case WEATHER_PUDDLE: r = 40;  g = 55;  b = 70;  break;
+        default: break;
         }
 
         /* road surface */
@@ -1306,7 +1319,7 @@ static void draw_scene_for_player(int p, float dt)
 
     GX_SetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
 
-    draw_track(t, k->seg);
+    draw_track(t, k->seg, game.race_t);
     for (i = 0; i < NUM_KARTS; i++) {
         const Kart *o = &game.karts[i];
         float ddx = o->x - cam[p].x;
@@ -1974,6 +1987,20 @@ static void draw_player_hud(int p)
                      150, 200, 240, 220);
     }
 
+    /* Boost: the meter fills near the rev limiter and empties the
+     * instant it is spent — a full bar means the use button is worth
+     * hitting right now. */
+    {
+        float meter = game_clampf(k->boost_meter, 0.0f, 1.0f);
+        u8 br = 90, bg = 170, bb = 255;
+        if (meter > 0.95f) { br = 255; bg = 220; bb = 90; }
+        hud_text(vx + 112.0f, vy + vh - 72.0f, 8.0f, 14.0f, "BOOST",
+                 160, 165, 180, 190);
+        hud_rect(vx + 112.0f, vy + vh - 60.0f, 62.0f, 7.0f, 15, 15, 20, 170);
+        hud_rect(vx + 113.0f, vy + vh - 59.0f, 60.0f * meter, 5.0f,
+                 br, bg, bb, 240);
+    }
+
     /*
      * Tires: how hot and how worn, because both now decide what the car
      * will do. The bar is the life left in them; it goes amber and then
@@ -2024,6 +2051,7 @@ static int displayed_action_on(int p, int action)
     case CONTROL_HANDBRAKE: return in->hop;
     case CONTROL_GEAR_UP:   return in->gear_up;
     case CONTROL_GEAR_DOWN: return in->gear_down;
+    case CONTROL_BOOST:     return in->boost;
     case CONTROL_RACE_MENU:
         return (shown_gc[p] &
                 control_config.gamecube[CONTROL_RACE_MENU]) != 0 ||
@@ -2112,6 +2140,7 @@ static void draw_input_translator(int p)
     draw_binding_line(p, x, y, "HAND", CONTROL_HANDBRAKE); y += 14.0f;
     draw_binding_line(p, x, y, "UP", CONTROL_GEAR_UP); y += 14.0f;
     draw_binding_line(p, x, y, "DOWN", CONTROL_GEAR_DOWN); y += 14.0f;
+    draw_binding_line(p, x, y, "BOOST", CONTROL_BOOST); y += 14.0f;
     draw_binding_line(p, x, y, "MENU", CONTROL_RACE_MENU); y += 14.0f;
 
     snprintf(buf, sizeof(buf), "SEEN KEY %s  GC %s  WII %s",

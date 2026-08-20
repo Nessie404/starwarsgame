@@ -4,6 +4,59 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.19.0] - 2026-08-20
+
+### Added
+
+- **Weather (CLASSIC only).** Three patches of road each start as snow
+  at the green flag, melt into ice, and melt again into a puddle —
+  independently staggered so the whole track is never in lockstep.
+  Soft tires are the ones to have in snow or ice and the worst choice
+  once it's a puddle; hard tires are exactly the reverse; medium is
+  deliberately never the best or worst pick either way. Tunable in the
+  new `weather` block of `settings.json`; rendered as a road-surface
+  color change. `track_weather_at` (`track.c`) resolves a segment and
+  race clock into the current condition.
+- **Boost.** A universal meter that charges while the engine is
+  turning real revs, on a curve (quadratic in `rev_frac`, so time near
+  the limiter counts for far more than the same time low in the band),
+  spent all at once on a new `boost` input for an instant speed bump,
+  and wiped by the next gear change of any kind — working it means
+  holding a gear on purpose. New default bindings: F/H on the two
+  keyboard players, GameCube/Xbox Y, Minus on a bare Wii Remote or
+  Classic Controller. The AI uses it too, gated on real headroom
+  before the next corner. Tunable in the `boost` block of
+  `settings.json`. (WiiKart shipped an engine-trait boost system
+  through v1.14–v1.15 and retired it in v1.16; this is an unrelated,
+  simpler mechanic built from scratch.)
+- **AI_YOLO**, a "no guts, no glory" strategy sheet — the highest
+  overconfidence and attack rating and the lowest defend rating in the
+  roster, riding every gear to the limiter. Assigned to TANAKA and
+  CROSS. The AI field's overall skill multiplier is up (0.97 → 1.02),
+  and the weakest couple of drivers got a modest skill bump so they're
+  no longer plain slow, while HOLT and PETRAN keep the roster's real
+  top and bottom.
+- **Difficulty preset scaffolding.** `DifficultyPreset`,
+  `difficulty_presets[]` and `GameConfig.difficulty` describe what an
+  Easy/Normal/Hard menu choice would eventually set — lap count, AI
+  aggressiveness, AI car choice, guardrails — as one step instead of
+  by hand. Deliberately not wired into `game_init` or anywhere else
+  yet; see `TODO.md` for exactly what real wiring needs.
+
+### Changed
+
+- **Corners softened, pavement brought to the guardrail.** Every
+  barriered track's shoulder — the gap between the paved edge and the
+  guardrail, previously up to 8 m of only lightly-penalized dirt —
+  shrunk to about a 1.4 m curb, closing off the "run wide and cut the
+  corner" line. Berthoud, Loveland, Monarch, and Guanella are scaled
+  up 8–30% to open out their tightest turns without hand-editing their
+  authored shape; Berthoud's summit switchbacks — its tightest corners
+  and the closest the road comes to itself anywhere on the lap —
+  specifically benefit. (A position-smoothing filter was tried first
+  and discarded: it shrank every track and made Guanella's chained
+  switchbacks tighter, not gentler.)
+
 ## [1.18.0] - 2026-08-20
 
 ### Added

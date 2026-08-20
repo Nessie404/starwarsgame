@@ -81,9 +81,31 @@ Left for later, now that the camera has somewhere to live:
   every piece of road stays 90+ m clear of every other piece and
   nothing on the lap turns sharper than a 37 m radius. 1411 m, 67 m of
   climb, 20 corners.)*
-- [ ] Add winter variants of the mountain passes.
-- [ ] Add localized snow and ice hazards with visible boundaries and distinct
-  grip behavior.
+- [ ] Add winter variants of the mountain passes. The weather system below
+  covers CLASSIC only by design; extending zones to the seven passes is
+  its own pass over each circuit's own geometry.
+- [x] Add localized snow and ice hazards with visible boundaries and distinct
+  grip behavior. *(v1.19.0: three zones on CLASSIC only, each independently
+  aging from snow to ice to a puddle over the settings-tunable
+  `snow_to_ice_seconds`/`ice_to_puddle_seconds`; `track_weather_at` in
+  `track.c`, tire-compound grip multipliers in the `weather` block of
+  `settings.json`. Soft is the tire for snow/ice, hard for a puddle,
+  medium is deliberately never the best or worst choice. Rendered as a
+  surface color change in `draw_track`. See `config/README.md`.)*
+- [ ] Give weather zones a visible boundary/texture beyond the flat color
+  tint `draw_track` uses today, and consider a HUD readout of the
+  upcoming zone's condition, not just its color on the road itself.
+- [x] Bring paved edges out to the guardrail on every barriered circuit and
+  widen the tightest turns across the roster, closing off the "run onto
+  the shoulder to cut a corner" line. *(v1.19.0: barriered tracks'
+  shoulder shrunk to ~1.4 m everywhere (`test_pavement_reaches_guardrail`);
+  Berthoud, Loveland, Monarch and Guanella scaled up 8-30% to open out
+  their tightest turns without touching their hand-authored shape — a
+  uniform scale keeps grade% and clearance both correct automatically,
+  unlike the position-smoothing filter tried and discarded first (it
+  shrank the whole track and made Guanella's chained switchbacks worse,
+  not better). Berthoud's summit switchbacks, the tightest corners and
+  closest self-approach on that circuit, specifically benefit.)*
 
 ## Powertrain, boost, and instruments
 
@@ -109,6 +131,15 @@ Left for later, now that the camera has somewhere to live:
   race, with no mid-lap refresh. `TURBO` and `BLOWER`, which existed
   solely to demonstrate the removed engine mechanic, are gone from the
   garage; `RUBY` stays as a plain naturally-aspirated car.
+- [x] Bring boost back as its own, simpler mechanic instead of a per-car
+  engine trait. *(v1.19.0: a universal meter (`Kart.boost_meter`) that
+  charges with revs on a curve — quadratic in `rev_frac`, so redline
+  time counts far more than the same time low in the band — spent all
+  at once on a dedicated `boost` button/input for an instant speed
+  bump, and zeroed by the next shift of any kind so working it means
+  holding a gear on purpose. Tunable in the `boost` block of
+  `settings.json`; the AI fires it too, gated on real headroom before
+  the next corner so it doesn't launch itself into a turn too hot.)*
 - [x] Add per-car and optionally per-gear automatic shift ranges to `cars.json`,
   including configurable upshift/downshift points rather than only limiter
   speeds. *(v1.7.0.)*
@@ -120,6 +151,20 @@ Left for later, now that the camera has somewhere to live:
 
 ## Drivers, AI, and persistent competition
 
+- [x] Raise the AI field's overall competitiveness and add a "no guts, no
+  glory" strategy for drivers who commit to everything. *(v1.19.0: a new
+  `AI_YOLO` sheet — the highest `conf_start`/`attack` and lowest `defend`
+  in the roster, and it rides every gear to the limiter, which also
+  charges its boost meter fastest — assigned to TANAKA and CROSS.
+  `ai_skill_mult` up from 0.97 to 1.02 for the whole field. The weakest
+  couple of drivers (DELGADO, CROSS) got a modest skill bump so they are
+  no longer plain slow, while HOLT and PETRAN stay the field's real top
+  and bottom so the roster keeps a genuine spread
+  (`test_driver_field_has_characters`). An earlier, more extreme YOLO
+  tuning (`conf_start` 1.20) could strand a driver in a permanent
+  fall/respawn loop on one of Monarch's tighter corners — see
+  `test_yolo_can_finish_the_hardest_track`, which exists specifically to
+  catch that again.)*
 - [x] Separate driver skill from personality. Build a field containing elite
   aggressive drivers, poor drivers who overcommit, overly passive drivers,
   and dependable safe drivers rather than eleven variations of "quite good."
@@ -154,6 +199,25 @@ Left for later, now that the camera has somewhere to live:
 - [ ] Record exceptional player laps and use their racing-line/braking data to
   improve selected NPC behavior on later runs. Include reset/export controls
   so a heroic accident does not become mandatory curriculum forever.
+- [ ] Wire up a difficulty preset (Easy/Normal/Hard) that sets lap count, AI
+  aggressiveness, AI car choice, and guardrails together as one menu
+  choice, instead of a player tuning each one by hand. *(v1.19.0 added
+  only the data shape — `DifficultyPreset`, `difficulty_presets[]` and
+  `GameConfig.difficulty` in `game.h`/`game.c`, `test_difficulty_presets_
+  scaffolding` checking the table itself — deliberately not read by
+  `game_init` or anywhere else yet, so choosing a preset today has no
+  effect on a race.)* Real wiring needs, at minimum:
+  - a garage/setup menu control to pick a preset (currently none exists);
+  - `game_init` reading `cfg.difficulty` to set `laps_override` and scale
+    each AI driver's effective aggression/skill;
+  - a way for `ai_no % kart_spec_count` car assignment to instead lean
+    toward `DIFFICULTY_CARS_MATCHED`/`UNDERDOG` relative to the human's
+    chosen car;
+  - `track_init`'s `has_walls` becoming overridable per race rather than
+    fixed per circuit, for `DIFFICULTY_GUARDRAILS_ON`/`OFF`;
+  - a decision on what a zero-initialized `GameConfig` should mean for
+    `difficulty` (today that's `DIFFICULTY_EASY`, likely not the intent —
+    see the comment on the field).
 
 ## Laps and timing — done in v1.5.0
 

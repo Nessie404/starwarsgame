@@ -41,9 +41,22 @@
       "heat_rate": 17.0, "cool_rate": 0.065, "off_window_grip": 0.88
     }
   },
+  "weather": {
+    "_comment": "CLASSIC only. A patch starts as snow, melts into ice, then into a puddle, and stays a puddle. Soft is the tire to have while it's snow or ice; hard is the tire to have once it's a puddle; medium never wins or loses that trade.",
+    "snow_to_ice_seconds": 40,
+    "ice_to_puddle_seconds": 90,
+    "medium": { "snow_grip": 0.80, "ice_grip": 0.72, "puddle_grip": 0.80 },
+    "soft":   { "snow_grip": 0.92, "ice_grip": 0.85, "puddle_grip": 0.55 },
+    "hard":   { "snow_grip": 0.55, "ice_grip": 0.50, "puddle_grip": 0.92 }
+  },
+  "boost": {
+    "_comment": "The meter fills while the car is turning real revs, along a curve (build_rate applies at redline; it falls off toward zero low in the band), and the use button spends whatever is charged for an instant speed bump. Any gear change wipes it.",
+    "build_rate_per_second": 0.55,
+    "max_speed_bonus_mps": 9.0
+  },
   "ai": {
     "_comment": "Lower skill slows the field. Overcommit chance is tested once per sufficiently tight unguarded corner and scaled by driver aggression.",
-    "skill_multiplier": 0.97,
+    "skill_multiplier": 1.02,
     "braking_multiplier": 0.72,
     "unguarded_line_room": 0.72,
     "overcommit_chance_per_corner": 0.055,

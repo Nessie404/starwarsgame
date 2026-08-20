@@ -57,7 +57,11 @@ static const float CP_BERTHOUD[][3] = {
     { 140,  98, 24 },  { 104, 112, 28 },  {  66, 106, 31 },/* double apex  */
     {  30, 118, 34 },  {  10, 140, 37 },  {  34, 160, 40 },/* switchback 2 */
     {  92, 164, 45 },  { 138, 180, 49 },  { 176, 172, 52 },/* fast kink    */
-    { 208, 190, 56 },  { 224, 212, 59 },  { 198, 228, 62 },/* switchback 3 */
+    { 208, 190, 56 },  { 224, 212, 59 },  { 198, 228, 62 },/* switchback 3,
+      the loop back near the summit: the tightest turn on the mountain and
+      the closest the road comes to itself anywhere on the lap. Left as
+      drawn — see the track's scale factor below, which is what actually
+      opens this (and every other corner) out */
     { 148, 226, 66 },  { 108, 244, 70 },  {  56, 240, 74 },/* esses        */
     {  14, 258, 78 },                                      /* summit       */
     { -36, 284, 75 },  { -86, 262, 66 },  { -112, 222, 56 },
@@ -268,31 +272,42 @@ static const float CP_BERTHOUD2[][3] = {
     {     5.3,   -26.8,  111.2},
 };
 
+/*
+ * Pavement-to-guardrail gap: a car that runs wide past the paved edge
+ * used to have 4-8 m of only lightly-penalized shoulder before it
+ * actually hit anything, which is enough room to straight-line a corner
+ * by cutting across it. Barriered tracks now keep the rail close enough
+ * to the road surface (about a 1.2-1.4 m curb) that there's nowhere
+ * meaningful left to cut through. Unguarded tracks (the edge is a real
+ * drop, not a rail) were already this tight and are unchanged.
+ */
 static const TrackDef track_defs[TRACK_COUNT] = {
     { "CLASSIC",
       CP_CLASSIC,  (int)(sizeof(CP_CLASSIC)  / sizeof(CP_CLASSIC[0])),
-      5.6f, 13.6f, NULL, 0, 1, 1.00f, 1.00f },
+      5.6f, 7.0f, NULL, 0, 1, 1.00f, 1.00f },
     { "BERTHOUD",
       CP_BERTHOUD, (int)(sizeof(CP_BERTHOUD) / sizeof(CP_BERTHOUD[0])),
-      4.8f,  9.1f, W_BERTHOUD, 1, 1, 1.00f, 0.62f /* grades stay ~15%  */ },
+      4.8f,  6.2f, W_BERTHOUD, 1, 1, 1.30f, 0.62f /* grades stay ~15%;
+        scaled up 30% so every corner (the summit switchbacks especially)
+        opens out into a wider, longer sweep instead of a tight kink   */ },
     { "LOVELAND",
       CP_LOVELAND, (int)(sizeof(CP_LOVELAND) / sizeof(CP_LOVELAND[0])),
-      6.0f,  7.2f, W_LOVELAND, 1, 0, 1.00f, 0.78f /* unguarded, ~14%   */ },
+      6.0f,  7.2f, W_LOVELAND, 1, 0, 1.15f, 0.78f /* unguarded, ~14%   */ },
     { "KENOSHA",
       CP_KENOSHA,  (int)(sizeof(CP_KENOSHA)  / sizeof(CP_KENOSHA[0])),
-      6.6f, 11.6f, NULL, 1, 1, 0.72f, 1.55f /* longest, barriered      */ },
+      6.6f,  8.0f, NULL, 1, 1, 0.72f, 1.55f /* longest, barriered      */ },
     { "MONARCH",
       CP_MONARCH,  (int)(sizeof(CP_MONARCH)  / sizeof(CP_MONARCH[0])),
-      4.3f,  5.3f, W_MONARCH, 1, 0, 0.94f, 1.16f /* high, unguarded    */ },
+      4.3f,  5.3f, W_MONARCH, 1, 0, 1.08f, 1.16f /* high, unguarded    */ },
     { "BREAKNECK",
       CP_BREAKNECK, (int)(sizeof(CP_BREAKNECK) / sizeof(CP_BREAKNECK[0])),
       3.7f,  4.5f, W_BREAKNECK, 1, 0, 1.15f, 0.32f /* steep, unguarded */ },
     { "GUANELLA",
       CP_GUANELLA,  (int)(sizeof(CP_GUANELLA)  / sizeof(CP_GUANELLA[0])),
-      3.9f,  4.8f, W_GUANELLA, 1, 0, 1.00f, 1.00f /* switchbacks       */ },
+      3.9f,  4.8f, W_GUANELLA, 1, 0, 1.20f, 1.00f /* switchbacks       */ },
     { "BERTHOUD 2.0",
       CP_BERTHOUD2, (int)(sizeof(CP_BERTHOUD2) / sizeof(CP_BERTHOUD2[0])),
-      6.6f, 13.0f, NULL, 1, 1, 1.30f, 0.22f /* big, guarded, real profile */ },
+      6.6f,  8.0f, NULL, 1, 1, 1.30f, 0.22f /* big, guarded, real profile */ },
 };
 
 const char *track_name(int track_id)
@@ -390,6 +405,35 @@ void track_init_with_settings(Track *t, int track_id,
             t->px[k] = pt[0] * scale;
             t->pz[k] = pt[1] * scale;
             t->py[k] = pt[2] * scale * elevation_scale;
+        }
+    }
+
+    /*
+     * Soften tight turns. The hand-placed control points give every
+     * circuit its character, but a few corners — Berthoud's summit
+     * switchbacks especially — come out sharp enough that hugging the
+     * inside and running out onto the shoulder is a faster line than the
+     * actual apex. Relax each point toward its neighbors' average,
+     * weighted by how sharp the turn there is (so straights and gentle
+     * sweepers barely move while hairpins open up), for a few passes —
+     * the same trick already used below for the elevation profile.
+     */
+    {
+        float tx[TRACK_MAX_POINTS], tz[TRACK_MAX_POINTS];
+        int pass;
+        for (pass = 0; pass < 3; pass++) {
+            for (i = 0; i < t->n; i++) {
+                int ip = (i - 1 + t->n) % t->n;
+                int in2 = (i + 1) % t->n;
+                tx[i] = 0.25f * t->px[ip] + 0.5f * t->px[i] +
+                        0.25f * t->px[in2];
+                tz[i] = 0.25f * t->pz[ip] + 0.5f * t->pz[i] +
+                        0.25f * t->pz[in2];
+            }
+            for (i = 0; i < t->n; i++) {
+                t->px[i] = tx[i];
+                t->pz[i] = tz[i];
+            }
         }
     }
 
@@ -571,6 +615,32 @@ void track_init_with_settings(Track *t, int track_id,
     for (i = 0; i < t->n && t->n_checkpoints < TRACK_MAX_CHECKPOINTS;
          i += CHECKPOINT_SPACING)
         t->checkpoint_seg[t->n_checkpoints++] = i;
+
+    /*
+     * Weather: three patches spread evenly around CLASSIC's lap, each on
+     * its own melt schedule (see the offsets below) so the whole track
+     * is never in lockstep — snow in one zone, ice in the next, already
+     * a puddle in the third. No other circuit gets any.
+     */
+    for (i = 0; i < t->n; i++)
+        t->weather_zone[i] = -1;
+    t->n_weather_zones = 0;
+    if (track_id == TRACK_CLASSIC) {
+        int zone_start[3];
+        int zone_len = t->n / 9;
+        int z;
+        zone_start[0] = t->n * 1 / 12;
+        zone_start[1] = t->n * 5 / 12;
+        zone_start[2] = t->n * 9 / 12;
+        for (z = 0; z < 3; z++) {
+            /* zone 0 starts fresh at the green flag; each zone after it
+             * is already further along its own melt clock */
+            t->weather_zone_offset[z] = -18.0f * (float)z;
+            for (i = 0; i < zone_len; i++)
+                t->weather_zone[(zone_start[z] + i) % t->n] = z;
+        }
+        t->n_weather_zones = 3;
+    }
 }
 
 float track_road_half(const Track *t, int seg)
@@ -585,6 +655,33 @@ float track_wall_half(const Track *t, int seg)
     if (seg < 0 || seg >= t->n)
         return t->wall_half;
     return t->wall_half_seg[seg];
+}
+
+int track_weather_at(const Track *t, int seg, float race_t,
+                     const GameSettings *settings)
+{
+    GameSettings defaults;
+    int zone;
+    float age, snow_to_ice, ice_to_puddle;
+
+    if (seg < 0 || seg >= t->n)
+        return WEATHER_CLEAR;
+    zone = t->weather_zone[seg];
+    if (zone < 0 || zone >= t->n_weather_zones)
+        return WEATHER_CLEAR;
+
+    if (!settings) {
+        game_settings_defaults(&defaults);
+        settings = &defaults;
+    }
+    snow_to_ice = settings->weather_snow_to_ice_s;
+    ice_to_puddle = settings->weather_ice_to_puddle_s;
+
+    age = race_t + t->weather_zone_offset[zone];
+    if (age < 0.0f) age = 0.0f;
+    if (age < snow_to_ice) return WEATHER_SNOW;
+    if (age < ice_to_puddle) return WEATHER_ICE;
+    return WEATHER_PUDDLE;
 }
 
 /* index of the last checkpoint at or before `seg` */

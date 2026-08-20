@@ -145,6 +145,17 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   original four (see §6 below — this is why cars added in v1.15–v1.17
   were invisible without an SD card), and RUBY's broken gear ladder
   that could strand it in first gear is fixed.
+- **v1.19**: weather on CLASSIC only (three zones, snow → ice → puddle
+  on their own staggered clocks, tire-compound grip multipliers in the
+  new `weather` settings block); a from-scratch boost meter (charges
+  with revs on a curve, spends in one shot on a new `boost` input,
+  wiped by any gear change — unrelated to the aspiration-era boost
+  retired in v1.16); a new `AI_YOLO` strategy on TANAKA and CROSS plus
+  a field-wide skill bump; every barriered track's shoulder brought in
+  to the guardrail, and Berthoud/Loveland/Monarch/Guanella scaled up to
+  open out their tightest corners; and the data-only bones of a
+  difficulty preset (`DifficultyPreset` in `game.h`) that nothing reads
+  yet.
 
 ---
 
@@ -200,6 +211,32 @@ caught it. If a new car's own dedicated tests all pass but an AI race
 test times out or a CHARGER/LATE-strategy kart racks up zero mistakes,
 check whether that new car is now actually being driven by the AI for
 the first time.
+
+**Smoothing a track's plan view is not the same as widening a corner.**
+A relaxation filter that pulls each sample toward its neighbors'
+average does the opposite of what it looks like it should for a track
+with many corners close together (Guanella's chained switchbacks): it
+pulls everything toward a smaller, shared centroid, so peak curvature
+gets *worse* and the whole lap shrinks. What actually opens a corner
+out without hand-editing its control points is a uniform `scale`
+increase on that track's `TrackDef` entry (`track.c`) — grade% is
+invariant under it since elevation is scaled by the same factor, so
+it's the safe lever, not a position filter. v1.19.0's corner-softening
+pass tried the filter first and threw it out once
+`test_pavement_reaches_guardrail`-style manual measurement showed it
+making Guanella worse.
+
+**An AI strategy tuned too far can strand a driver in a fall/respawn
+loop forever, not just make it a bit crashier.** Respawn puts a kart
+back at the same checkpoint it left, so if a corner's grip-limited
+speed is genuinely below what the AI's confidence tells it to carry
+into that exact corner, it fails the same way every single time it
+gets back up to speed — there is no randomness left to eventually get
+it through. `test_yolo_can_finish_the_hardest_track` on Monarch (the
+narrowest, least forgiving circuit) exists because an early `AI_YOLO`
+tuning (`conf_start` 1.20) did exactly this. If a new/more aggressive
+AI strategy passes on every other track but times out specifically on
+Monarch, suspect this before anything else.
 
 ---
 

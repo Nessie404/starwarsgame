@@ -29,6 +29,7 @@ typedef struct GameSettings GameSettings;
 
 #define TRACK_MAX_POINTS 440
 #define TRACK_MAX_CORNERS 72
+#define TRACK_MAX_WEATHER_ZONES 8
 #define TRACK_MAX_CHECKPOINTS 40
 #define CHECKPOINT_SPACING 12      /* samples between checkpoints      */
 
@@ -94,6 +95,16 @@ typedef struct {
     int   corner_entry[TRACK_MAX_CORNERS];
 
     float min_x, max_x, min_z, max_z, min_y, max_y;
+
+    /* Weather zones (CLASSIC only — see track_init). weather_zone[i] is
+     * which zone sample i sits in, or -1 for bare pavement. Each zone
+     * starts as snow at the green flag and melts through ice into a
+     * puddle at its own pace, offset by weather_zone_offset so patches
+     * don't all turn over in lockstep; track_weather_at resolves a
+     * segment + race clock into the weather actually under the car. */
+    int   weather_zone[TRACK_MAX_POINTS];
+    int   n_weather_zones;
+    float weather_zone_offset[TRACK_MAX_WEATHER_ZONES];
 } Track;
 
 void track_init(Track *t, int track_id);
@@ -111,6 +122,12 @@ void track_locate(const Track *t, float x, float z, int hint,
 /* half-width of the road, and of the barrier line, at one segment */
 float track_road_half(const Track *t, int seg);
 float track_wall_half(const Track *t, int seg);
+
+/* current weather (WEATHER_CLEAR..WEATHER_PUDDLE) at one segment, given
+ * how long the race clock has been running. settings may be NULL, which
+ * uses the same snow/ice/puddle timings as game_settings_defaults(). */
+int track_weather_at(const Track *t, int seg, float race_t,
+                     const GameSettings *settings);
 
 /* ------------------------------------------------------------------ */
 /* Vehicle specs (real-world performance parameters)                  */
@@ -191,6 +208,19 @@ const char *gearbox_name(int mode);
 const char *tire_name(int compound);
 float tire_grip_mult(int compound);
 float tire_drag_mult(int compound);
+
+/*
+ * Weather: patches of the road surface that start as snow, melt into
+ * ice, and finally melt again into a puddle, each stage handing a
+ * different tire compound the advantage — see track_weather_at and
+ * weather_tire_grip_mult in game.c. Only CLASSIC carries any zones;
+ * every other track's weather_zone entries stay -1 (clear) forever.
+ */
+enum { WEATHER_CLEAR = 0, WEATHER_SNOW = 1, WEATHER_ICE = 2,
+       WEATHER_PUDDLE = 3 };
+const char *weather_name(int weather);
+float weather_tire_grip_mult(const GameSettings *settings, int weather,
+                             int compound);
 
 extern KartSpec kart_specs[MAX_KART_SPECS];
 extern int kart_spec_count;
@@ -282,6 +312,28 @@ struct GameSettings {
     float tire_off_window_grip[TIRE_COMPOUNDS];/* grip well outside it    */
     float tire_ambient_c;
 
+    /*
+     * Weather (CLASSIC only). A snow patch is fresh footing for the soft
+     * compound and treacherous for the hard one; by the time it has
+     * melted into a puddle that relationship has flipped. The medium
+     * compound is never the best or the worst tire for any of it.
+     */
+    float weather_snow_to_ice_s;
+    float weather_ice_to_puddle_s;
+    float weather_snow_grip[TIRE_COMPOUNDS];
+    float weather_ice_grip[TIRE_COMPOUNDS];
+    float weather_puddle_grip[TIRE_COMPOUNDS];
+
+    /*
+     * Boost: a meter that fills while the engine is turning fast, along
+     * a curve rather than a flat rate, spent all at once on the use
+     * button for an instant speed bump, and wiped out by the next shift
+     * — so working it means holding a gear near the limiter on purpose
+     * instead of just driving normally.
+     */
+    float boost_build_rate;        /* meter/second at redline (curve=1) */
+    float boost_max_speed_bonus_mps; /* bonus speed at a full meter     */
+
     /* AI. overcommit_chance is checked once on each sufficiently tight,
      * unguarded corner and is scaled by the strategy's attack rating. */
     float ai_skill_mult;
@@ -365,6 +417,7 @@ typedef struct {
     int   hop;       /* handbrake                                       */
     int   gear_up;   /* upshift  (edge-detected by the sim)             */
     int   gear_down; /* downshift                                       */
+    int   boost;     /* "use": spend the boost meter (edge-detected)    */
 } Input;
 
 /* ------------------------------------------------------------------ */
@@ -419,7 +472,10 @@ enum {
     AI_CHARGER  = 4,   /* dives for every gap, brakes late               */
     AI_DRAFTER  = 5,   /* sits in your mirrors, waits to pounce          */
     AI_CRUISER  = 6,   /* cautious, smooth, wide lines                  */
-    AI_STRATEGY_COUNT  = 7
+    AI_YOLO     = 7,   /* no guts, no glory — commits to everything,
+                        * rarely defends, and rides every gear to the
+                        * limiter regardless of the cost               */
+    AI_STRATEGY_COUNT  = 8
 };
 
 typedef struct {
@@ -481,6 +537,11 @@ typedef struct {
     int   tire;           /* TIRE_* compound                            */
     float rev_frac;       /* 0..1+ position in the current gear band    */
     int   prev_up_btn, prev_down_btn;
+
+    /* boost: builds with revs, spent all at once on the use button,
+     * wiped by the next shift — see kart_step */
+    float boost_meter;    /* 0..1                                       */
+    int   prev_boost_btn;
 
     /* going over the edge, and getting put back on the road           */
     int   last_checkpoint;
@@ -558,6 +619,52 @@ enum {
 
 #define PAINT_COUNT 8
 
+/*
+ * Difficulty preset — SCAFFOLDING ONLY. This is the data shape a future
+ * "Easy / Normal / Hard" menu choice would set in one step instead of
+ * tuning lap count, AI aggression, AI car choice and guardrails one at
+ * a time; nothing reads GameConfig.difficulty or difficulty_presets[]
+ * yet, so picking a preset today has no effect on a race. See TODO.md
+ * for what actually wiring it up needs to touch (game_init's lap and
+ * AI setup, and — for guardrails — track_init's has_walls, which is
+ * currently fixed per circuit rather than overridable per race).
+ */
+enum {
+    DIFFICULTY_EASY   = 0,
+    DIFFICULTY_NORMAL = 1,
+    DIFFICULTY_HARD   = 2,
+    DIFFICULTY_PRESET_COUNT = 3
+};
+
+/* which cars the AI is allowed onto the grid, once ai_car_choice means
+ * something: ANY = today's behavior (ai_no % kart_spec_count), MATCHED
+ * = only cars in the same performance class as the human's, UNDERDOG =
+ * biased toward slower cars than the human's */
+enum {
+    DIFFICULTY_CARS_ANY     = 0,
+    DIFFICULTY_CARS_MATCHED = 1,
+    DIFFICULTY_CARS_UNDERDOG = 2
+};
+
+/* whether a race overrides a circuit's own has_walls; TRACK_DEFAULT
+ * leaves it alone */
+enum {
+    DIFFICULTY_GUARDRAILS_TRACK_DEFAULT = 0,
+    DIFFICULTY_GUARDRAILS_ON            = 1,
+    DIFFICULTY_GUARDRAILS_OFF           = 2
+};
+
+typedef struct {
+    const char *name;
+    int   laps;               /* 0 = use the circuit's automatic count */
+    float ai_aggressiveness;  /* multiplier on top of driver aggression */
+    int   ai_car_choice;      /* DIFFICULTY_CARS_*                      */
+    int   guardrails;         /* DIFFICULTY_GUARDRAILS_*                */
+} DifficultyPreset;
+
+extern const DifficultyPreset difficulty_presets[DIFFICULTY_PRESET_COUNT];
+const char *difficulty_preset_name(int preset);
+
 typedef struct {
     int track_id;
     int n_humans;                 /* 1..MAX_HUMANS                     */
@@ -567,6 +674,13 @@ typedef struct {
     int tire[MAX_HUMANS];         /* TIRE_* compound                    */
     const GameSettings *settings; /* NULL = compiled defaults           */
     int laps_override;            /* 0 = use the circuit's own count    */
+    /* Selected difficulty preset (DIFFICULTY_*). Not yet read by
+     * game_init or anything downstream of it — see DifficultyPreset
+     * above. Note for whoever wires this up: zero-initializing a
+     * GameConfig (the usual pattern everywhere it's built) leaves this
+     * at DIFFICULTY_EASY, not DIFFICULTY_NORMAL — decide the intended
+     * default explicitly rather than relying on the zero value. */
+    int difficulty;
 } GameConfig;
 
 typedef struct {

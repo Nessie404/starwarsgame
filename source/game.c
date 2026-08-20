@@ -182,7 +182,23 @@ void game_settings_defaults(GameSettings *s)
     s->tire_off_window_grip[TIRE_SOFT]   = 0.80f;
     s->tire_off_window_grip[TIRE_HARD]   = 0.88f;
     s->tire_ambient_c = 18.0f;
-    s->ai_skill_mult = 0.97f;
+    s->weather_snow_to_ice_s = 40.0f;
+    s->weather_ice_to_puddle_s = 90.0f;
+    /* soft: best rubber for snow and ice, worst for standing water */
+    s->weather_snow_grip[TIRE_SOFT]   = 0.92f;
+    s->weather_ice_grip[TIRE_SOFT]    = 0.85f;
+    s->weather_puddle_grip[TIRE_SOFT] = 0.55f;
+    /* medium: never the best or the worst tire on the lot */
+    s->weather_snow_grip[TIRE_MEDIUM]   = 0.80f;
+    s->weather_ice_grip[TIRE_MEDIUM]    = 0.72f;
+    s->weather_puddle_grip[TIRE_MEDIUM] = 0.80f;
+    /* hard: the puddle tire, and the wrong choice for snow and ice */
+    s->weather_snow_grip[TIRE_HARD]   = 0.55f;
+    s->weather_ice_grip[TIRE_HARD]    = 0.50f;
+    s->weather_puddle_grip[TIRE_HARD] = 0.92f;
+    s->boost_build_rate = 0.55f;
+    s->boost_max_speed_bonus_mps = 9.0f;
+    s->ai_skill_mult = 1.02f;
     s->ai_brake_mult = 0.72f;
     s->ai_unguarded_line_room = 0.72f;
     s->ai_overcommit_chance = 0.055f;
@@ -277,6 +293,18 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
                      "BAD COLD TIRE GRIP");
     }
     FINITE_RANGE(s->tire_ambient_c, -40.0f, 60.0f, "BAD AIR TEMP");
+    FINITE_RANGE(s->weather_snow_to_ice_s, 1.0f, 600.0f, "BAD SNOW TIMER");
+    FINITE_RANGE(s->weather_ice_to_puddle_s, 1.0f, 600.0f, "BAD ICE TIMER");
+    if (s->weather_ice_to_puddle_s <= s->weather_snow_to_ice_s)
+        return settings_error(error, error_cap, "ICE MELTS BEFORE SNOW DOES");
+    for (i = 0; i < TIRE_COMPOUNDS; i++) {
+        FINITE_RANGE(s->weather_snow_grip[i], 0.10f, 1.20f, "BAD SNOW GRIP");
+        FINITE_RANGE(s->weather_ice_grip[i], 0.10f, 1.20f, "BAD ICE GRIP");
+        FINITE_RANGE(s->weather_puddle_grip[i], 0.10f, 1.20f,
+                     "BAD PUDDLE GRIP");
+    }
+    FINITE_RANGE(s->boost_build_rate, 0.02f, 20.0f, "BAD BOOST BUILD RATE");
+    FINITE_RANGE(s->boost_max_speed_bonus_mps, 0.0f, 40.0f, "BAD BOOST BONUS");
     FINITE_RANGE(s->grade_gravity_mult, 0.0f, 3.0f, "BAD GRADE GRAUITY");
     FINITE_RANGE(s->grade_load_effect, 0.0f, 1.0f, "BAD GRADE LOAD");
     FINITE_RANGE(s->tacho_idle_rpm, 0.0f, 20000.0f, "BAD IDLE RPM");
@@ -375,6 +403,36 @@ const char *tire_name(int compound)
     case TIRE_SOFT: return "SOFT";
     case TIRE_HARD: return "HARD";
     default:        return "STD";
+    }
+}
+
+const char *weather_name(int weather)
+{
+    switch (weather) {
+    case WEATHER_SNOW:   return "SNOW";
+    case WEATHER_ICE:    return "ICE";
+    case WEATHER_PUDDLE: return "PUDDLE";
+    default:             return "CLEAR";
+    }
+}
+
+/* How much of a tire's grip survives the surface underneath it. Clear
+ * pavement never touches this (always 1.0) — everything else is a
+ * settings-driven trade-off: soft rubber is the one to have in snow and
+ * ice, hard rubber is the one to have once it has all melted into a
+ * puddle, and the medium compound never wins or loses that trade. */
+float weather_tire_grip_mult(const GameSettings *settings, int weather,
+                             int compound)
+{
+    if (compound < 0 || compound >= TIRE_COMPOUNDS)
+        compound = TIRE_MEDIUM;
+    if (!settings)
+        return 1.0f;
+    switch (weather) {
+    case WEATHER_SNOW:   return settings->weather_snow_grip[compound];
+    case WEATHER_ICE:    return settings->weather_ice_grip[compound];
+    case WEATHER_PUDDLE: return settings->weather_puddle_grip[compound];
+    default:             return 1.0f;
     }
 }
 
@@ -497,6 +555,12 @@ const AIStrategy ai_strategies[AI_STRATEGY_COUNT] = {
                                                              0.92f, 0.45f, 0.06f },
   { "CRUISER",    0.88f,   1.08f,   0.018f,  0.07f,   0.30f,  0.20f, 0.30f, 1.000f,
                                                              0.82f, 0.36f, 0.12f },
+  /* No guts, no glory: the most overconfident sheet in the field by a
+   * wide margin, clips every apex it can reach, never bothers covering
+   * a line, and rides every gear to the limiter — which also means it
+   * charges the boost meter faster than anyone else on the grid. */
+  { "YOLO",       1.14f,   1.08f,   0.008f,  0.20f,   0.80f,  0.10f, 1.00f, 1.000f,
+                                                             0.99f, 0.44f, 0.01f },
 };
 
 const char *ai_strategy_name(int strategy)
@@ -504,6 +568,26 @@ const char *ai_strategy_name(int strategy)
     if (strategy < 0 || strategy >= AI_STRATEGY_COUNT)
         return "BALANCED";
     return ai_strategies[strategy].name;
+}
+
+/*
+ * Difficulty presets — SCAFFOLDING ONLY, see the DifficultyPreset comment
+ * in game.h. These values are a plausible starting point for what each
+ * preset would eventually mean, not a tuned design: nothing in game_init,
+ * ai_control or track_init reads GameConfig.difficulty or this table yet.
+ */
+const DifficultyPreset difficulty_presets[DIFFICULTY_PRESET_COUNT] = {
+    { "EASY",   0, 0.85f, DIFFICULTY_CARS_UNDERDOG, DIFFICULTY_GUARDRAILS_ON },
+    { "NORMAL", 0, 1.00f, DIFFICULTY_CARS_ANY,
+                          DIFFICULTY_GUARDRAILS_TRACK_DEFAULT },
+    { "HARD",   0, 1.15f, DIFFICULTY_CARS_MATCHED, DIFFICULTY_GUARDRAILS_OFF },
+};
+
+const char *difficulty_preset_name(int preset)
+{
+    if (preset < 0 || preset >= DIFFICULTY_PRESET_COUNT)
+        return "NORMAL";
+    return difficulty_presets[preset].name;
 }
 
 /*
@@ -530,10 +614,13 @@ static const AIDriver ai_drivers[] = {
     { "OSEI",    AI_INSIDE,    0.98f, 0.92f, 0.50f, 0.90f, 3, "TIDY" },
     { "NORDLI",  AI_CRUISER,   0.96f, 0.97f, 0.25f, 0.72f, 6, "SMOOTH" },
     { "SOLANO",  AI_DRAFTER,   0.95f, 0.88f, 0.65f, 1.00f, 4, "PATIENT" },
-    /* the back: one who overdrives, one who under-drives, two learners */
-    { "TANAKA",  AI_CHARGER,   0.92f, 0.48f, 0.95f, 1.35f, 7, "RAGGED" },
-    { "DELGADO", AI_CRUISER,   0.90f, 0.95f, 0.15f, 0.75f, 2, "TIMID" },
-    { "CROSS",   AI_LATE,      0.89f, 0.60f, 0.80f, 1.20f, 5, "OVERDRIVES" },
+    /* the back: one who overdrives, one who under-drives, two learners —
+     * still the tail of the field, but no longer plain slow */
+    /* no guts, no glory: committed to every apex, defends nothing, rides
+     * every gear to the limiter — see the YOLO sheet */
+    { "TANAKA",  AI_YOLO,      0.95f, 0.48f, 0.95f, 1.35f, 7, "RAGGED" },
+    { "DELGADO", AI_CRUISER,   0.93f, 0.95f, 0.15f, 0.75f, 2, "TIMID" },
+    { "CROSS",   AI_YOLO,      0.92f, 0.60f, 0.80f, 1.20f, 5, "OVERDRIVES" },
     { "PETRAN",  AI_BALANCED,  0.87f, 0.82f, 0.40f, 0.98f, 4, "STEADY" }
 };
 
@@ -1181,6 +1268,14 @@ static void ai_control(const Game *g, Kart *k, Input *in, float dt)
         }
     }
 
+    /* fire the boost the instant it is usefully charged and there is
+     * real headroom before whatever corner is coming — same as a human
+     * mashing the button on the straight, not mid-turn-in. Without the
+     * headroom check an AI launches itself into the next corner faster
+     * than its own line was ever computed for and spends the rest of
+     * the lap paying for it. */
+    in->boost = (k->boost_meter > 0.95f) && in->accel && !in->brake &&
+                vmax_allow > v * 1.15f;
 }
 
 /*
@@ -1428,7 +1523,12 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     const KartSpec *s = &kart_specs[k->spec];
     int offroad = fabsf(k->lat) > track_road_half(t, k->seg) + 0.3f;
     float grip = offroad ? s->offroad_grip : 1.0f;
-    float mu_a = s->lat_g * GRAVITY * grip * k->tire_grip_now;
+    /* CLASSIC only; every other track's weather_zone is all -1 and this
+     * is always WEATHER_CLEAR, multiplier 1.0 */
+    int weather = track_weather_at(t, k->seg, g->race_t, &g->settings);
+    float weather_grip = weather_tire_grip_mult(&g->settings, weather,
+                                                k->tire);
+    float mu_a = s->lat_g * GRAVITY * grip * weather_grip * k->tire_grip_now;
     float cd_a = s->cd_a *
                  tire_drag_mult_with_settings(&g->settings, k->tire);
     float P = s->power_hp * HP_TO_W * g->settings.drivetrain_efficiency *
@@ -1546,15 +1646,37 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
             k->gear++;
             k->shift_t = g->settings.shift_seconds +
                          ((k->gearbox == GEARBOX_AUTO) ? 0.06f : 0.0f);
+            k->boost_meter = 0.0f;   /* new gear, start the charge over */
         } else if (want_down && k->gear > 0) {
             k->gear--;
             k->shift_t = g->settings.shift_seconds +
                          ((k->gearbox == GEARBOX_AUTO) ? 0.06f : 0.0f);
+            k->boost_meter = 0.0f;
         }
         k->rev_frac = fabsf(v) / s->gear_top[k->gear];
     }
     k->prev_up_btn = in->gear_up;
     k->prev_down_btn = in->gear_down;
+
+    /*
+     * Boost: the meter fills while the car is turning real revs in a
+     * gear it isn't mid-shift through, along a curve so time spent near
+     * the limiter counts for far more than the same time low in the
+     * band — working it means holding a gear on purpose, not just
+     * driving. The use button spends whatever is charged in one shot;
+     * a half-full meter is half the bonus, not the full bonus sooner.
+     */
+    if (k->shift_t <= 0.0f) {
+        float curve = k->rev_frac * k->rev_frac;
+        if (curve > 1.0f) curve = 1.0f;
+        k->boost_meter += g->settings.boost_build_rate * curve * dt;
+        if (k->boost_meter > 1.0f) k->boost_meter = 1.0f;
+    }
+    if (in->boost && !k->prev_boost_btn && k->boost_meter > 0.0f) {
+        v += k->boost_meter * g->settings.boost_max_speed_bonus_mps;
+        k->boost_meter = 0.0f;
+    }
+    k->prev_boost_btn = in->boost;
 
     /* drive is cut mid-shift, and where you are in the gear decides how
      * much of the engine you actually have */
@@ -1777,6 +1899,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->speed = 0.0f;
         k->gear = 0;
         k->shift_t = 0.0f;
+        k->boost_meter = 0.0f;
         k->drifting = 0;
         k->slip = 0.0f;
         k->fall_t = 0.0f;

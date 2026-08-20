@@ -129,6 +129,29 @@ static void test_tracks_geometry(void)
     }
 }
 
+/* A guardrail set well back from the pavement leaves a shoulder wide
+ * enough to straight-line a corner across — reduced grip out there, but
+ * often still a faster line than the actual apex. Every barriered track
+ * now keeps the rail within a curb's width of the road surface so there
+ * is nowhere meaningful left to cut through. */
+static void test_pavement_reaches_guardrail(void)
+{
+    int id;
+    for (id = 0; id < TRACK_COUNT; id++) {
+        Track t;
+        float gap;
+        track_init(&t, id);
+        if (!t.has_walls)
+            continue;
+        gap = t.wall_half - t.road_half;
+        printf("track %-8s: road %.1f m, rail %.1f m, %.1f m shoulder\n",
+               t.name, t.road_half * 2.0f, t.wall_half * 2.0f, gap);
+        CHECK(gap >= 0.0f && gap < 2.0f,
+              "%s has a %.1f m shoulder — wide enough to cut a corner",
+              t.name, gap);
+    }
+}
+
 static void test_spec_stats(void)
 {
     int i;
@@ -471,8 +494,12 @@ static void test_ai_races_all_tracks(void)
         CHECK(finished == NUM_KARTS - 1,
               "only %d of %d AI finished on track %d", finished,
               NUM_KARTS - 1, id);
-        /* a plausible pace for the distance: 8..32 m/s average */
-        CHECK(best_lap > g.track.total_len / 32.0f &&
+        /* a plausible pace for the distance: 8..36 m/s average. (Corners
+         * were widened across the roster to close off shoulder-cutting
+         * and the AI's skill multiplier went up, so the fastest,
+         * gentlest circuits run quicker than the 32 m/s this cap used
+         * to allow.) */
+        CHECK(best_lap > g.track.total_len / 36.0f &&
               best_lap < g.track.total_len / 8.0f,
               "best lap %.1f s implausible for %.0f m on track %d",
               best_lap, g.track.total_len, id);
@@ -769,7 +796,63 @@ static void race_for(Game *g, int track_id, float seconds,
     }
 }
 
-/* Eleven AI on seven strategy sheets must actually drive differently:
+/* YOLO is the "no guts, no glory" sheet: on paper it has to out-commit
+ * every other strategy in the roster, and at least a couple of drivers
+ * have to actually be racing on it rather than it sitting unused. */
+static void test_yolo_strategy_is_the_wildest(void)
+{
+    int i, yolo_drivers = 0;
+    const AIStrategy *yolo = &ai_strategies[AI_YOLO];
+
+    for (i = 0; i < AI_STRATEGY_COUNT; i++) {
+        if (i == AI_YOLO) continue;
+        CHECK(yolo->conf_start >= ai_strategies[i].conf_start,
+              "%s is more overconfident than YOLO", ai_strategies[i].name);
+        CHECK(yolo->attack >= ai_strategies[i].attack,
+              "%s attacks more than YOLO", ai_strategies[i].name);
+        CHECK(yolo->defend <= ai_strategies[i].defend,
+              "%s defends less than YOLO", ai_strategies[i].name);
+    }
+
+    for (i = 0; i < ai_driver_count(); i++)
+        if (ai_driver(i)->strategy == AI_YOLO)
+            yolo_drivers++;
+    printf("YOLO drivers in the field: %d\n", yolo_drivers);
+    CHECK(yolo_drivers >= 2, "fewer than two drivers actually race YOLO");
+}
+
+/*
+ * A wild strategy still has to actually finish races rather than get
+ * stuck falling off the same unguarded corner forever — this is the
+ * regression test for exactly that bug: an early YOLO tuning was
+ * overconfident enough that one driver could respawn straight back
+ * into failing the same corner on Monarch, over and over, without ever
+ * completing a lap.
+ */
+static void test_yolo_can_finish_the_hardest_track(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_MONARCH);
+    Input in[MAX_HUMANS];
+    int f, i, done = 0, yolo_kart = -1;
+
+    game_init(&g, &cfg);
+    idle_inputs(in);
+    for (i = 1; i < NUM_KARTS; i++)
+        if (g.karts[i].strategy == AI_YOLO) { yolo_kart = i; break; }
+    CHECK(yolo_kart >= 0, "no YOLO driver in the default field");
+
+    for (f = 0; f < 60 * 400 && !done; f++) {
+        game_update(&g, in, 1.0f / 60.0f);
+        done = g.karts[yolo_kart].finished;
+    }
+    printf("YOLO driver on MONARCH: finished=%d after %.0f s, %d falls\n",
+           g.karts[yolo_kart].finished, (float)f / 60.0f,
+           g.karts[yolo_kart].falls);
+    CHECK(done, "the YOLO driver never finished MONARCH in 400 s");
+}
+
+/* Eleven AI on eight strategy sheets must actually drive differently:
  * different lines, different error counts, different pace. */
 static void test_ai_strategies_differ(void)
 {
@@ -844,7 +927,8 @@ static void test_ai_learns_from_mistakes(void)
               "%s ended with nerve %.3f outside [0.70, %.3f]",
               st->name, mean, st->conf_max);
 
-        if (k->strategy == AI_LATE || k->strategy == AI_CHARGER) {
+        if (k->strategy == AI_LATE || k->strategy == AI_CHARGER ||
+            k->strategy == AI_YOLO) {
             /* started believing it could beat the grip limit */
             CHECK(mean < st->conf_start - 0.02f,
                   "%s never learned to brake earlier (%.3f from %.3f)",
@@ -1134,6 +1218,92 @@ static void test_shifting(void)
     }
 }
 
+/*
+ * Boost has to actually be driven by revs, not just by whether the
+ * throttle is down — the same throttle input at low revs and at high
+ * revs in the same gear must charge the meter at very different rates,
+ * following a curve rather than a flat rate. Any shift has to wipe
+ * whatever is charged, and the use button has to spend it all at once
+ * for an immediate speed bump rather than a rate change over time.
+ */
+static void test_boost_system(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    float top, delta_high, delta_low, before, after;
+
+    cfg.gearbox[0] = GEARBOX_MANUAL;
+
+    /* --- builds with revs, on a curve, not with the throttle alone --- */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].gear = 2;
+    top = kart_specs[g.karts[0].spec].gear_top[2];
+    teleport(&g, &g.karts[0], 2, top * 0.92f);   /* deep in the band */
+    in[0].accel = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    delta_high = g.karts[0].boost_meter;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].gear = 2;
+    teleport(&g, &g.karts[0], 2, top * 0.10f);   /* same gear, low revs */
+    in[0].accel = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    delta_low = g.karts[0].boost_meter;
+
+    printf("boost build: %.4f/frame near redline, %.4f/frame low in the "
+           "band (same gear, same throttle)\n", delta_high, delta_low);
+    CHECK(delta_high > 0.0f, "boost never builds at all");
+    CHECK(delta_high > delta_low * 4.0f,
+          "boost does not build on a curve with revs (%.4f near redline "
+          "vs %.4f low in the band)", delta_high, delta_low);
+
+    /* --- any shift wipes the meter --- */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].gear = 1;
+    teleport(&g, &g.karts[0], 2,
+             kart_specs[g.karts[0].spec].gear_top[1] * 0.95f);
+    in[0].accel = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    CHECK(g.karts[0].boost_meter > 0.0f, "boost never built up to shift away");
+    in[0].gear_up = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    CHECK(g.karts[0].gear == 2, "did not actually shift");
+    CHECK(g.karts[0].boost_meter == 0.0f,
+          "boost survived a shift (%.3f left)", g.karts[0].boost_meter);
+
+    /* --- the use button spends the meter for an instant speed bump --- */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 25.0f);
+    g.karts[0].boost_meter = 0.6f;
+    before = g.karts[0].speed;
+    in[0].boost = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    after = g.karts[0].speed;
+    printf("boost use: %.1f -> %.1f m/s spending a 0.6 meter (max bonus "
+           "%.1f m/s)\n", before, after, g.settings.boost_max_speed_bonus_mps);
+    CHECK(after - before > 0.6f * g.settings.boost_max_speed_bonus_mps * 0.8f,
+          "the use button did not give an instant speed bump (%.1f -> "
+          "%.1f)", before, after);
+    CHECK(g.karts[0].boost_meter == 0.0f,
+          "the use button did not spend the meter");
+
+    /* holding the button after the meter is empty does nothing more */
+    before = g.karts[0].speed;
+    game_update(&g, in, 1.0f / 60.0f);
+    after = g.karts[0].speed;
+    CHECK(after - before < 1.0f,
+          "an empty meter still gave a boost (%.1f -> %.1f)", before, after);
+}
+
 /* A gear caps speed: in first, with a manual box, the car cannot pull
  * past the limiter no matter how long you hold the throttle. */
 static void test_gear_limits_speed(void)
@@ -1220,6 +1390,146 @@ static void test_tire_compounds(void)
           tire_condition_grip(&st, TIRE_MEDIUM,
                               st.tire_temp_optimal[TIRE_MEDIUM], 1.0f),
           "a worn-out soft is not worse than a worn-out medium");
+}
+
+/* Weather is CLASSIC-only: every other circuit's zones stay empty no
+ * matter what. */
+static void test_weather_only_on_classic(void)
+{
+    int id;
+    for (id = 0; id < TRACK_COUNT; id++) {
+        Track t;
+        int i, any = 0;
+        track_init(&t, id);
+        for (i = 0; i < t.n; i++)
+            if (t.weather_zone[i] >= 0)
+                any = 1;
+        if (id == TRACK_CLASSIC) {
+            CHECK(t.n_weather_zones > 0 && any,
+                  "CLASSIC has no weather zones");
+        } else {
+            CHECK(t.n_weather_zones == 0 && !any,
+                  "%s has weather zones of its own", t.name);
+        }
+    }
+}
+
+/* A patch starts as snow, melts into ice, then a puddle, and stays a
+ * puddle — it does not thaw back into anything drier. */
+static void test_weather_melts_over_time(void)
+{
+    Track t;
+    GameSettings st;
+    int seg = -1, i;
+
+    track_init(&t, TRACK_CLASSIC);
+    game_settings_defaults(&st);
+    for (i = 0; i < t.n; i++)
+        if (t.weather_zone[i] == 0) { seg = i; break; }
+    CHECK(seg >= 0, "could not find weather zone 0 on CLASSIC");
+
+    CHECK(track_weather_at(&t, seg, 0.0f, &st) == WEATHER_SNOW,
+          "zone 0 is not snow at the green flag");
+    CHECK(track_weather_at(&t, seg, st.weather_snow_to_ice_s + 1.0f, &st) ==
+              WEATHER_ICE,
+          "zone 0 did not melt from snow into ice");
+    CHECK(track_weather_at(&t, seg, st.weather_ice_to_puddle_s + 1.0f,
+                           &st) == WEATHER_PUDDLE,
+          "zone 0 did not melt from ice into a puddle");
+    CHECK(track_weather_at(&t, seg, st.weather_ice_to_puddle_s + 5000.0f,
+                           &st) == WEATHER_PUDDLE,
+          "a puddle dried back into something else");
+
+    /* off the zone entirely, pavement is always clear regardless of
+     * the race clock */
+    {
+        int clear_seg = -1;
+        for (i = 0; i < t.n; i++)
+            if (t.weather_zone[i] < 0) { clear_seg = i; break; }
+        CHECK(clear_seg >= 0, "CLASSIC has no clear pavement left");
+        CHECK(track_weather_at(&t, clear_seg, 500.0f, &st) == WEATHER_CLEAR,
+              "bare pavement reported weather");
+    }
+}
+
+/* Soft rubber is the tire to have in snow and ice and the worst choice
+ * once it is a puddle; hard rubber is exactly the other way round; the
+ * medium compound never wins or loses that trade. Clear pavement never
+ * touches any of this. */
+static void test_weather_tire_grip_ordering(void)
+{
+    GameSettings st;
+    int w;
+
+    game_settings_defaults(&st);
+    CHECK(weather_tire_grip_mult(&st, WEATHER_SNOW, TIRE_SOFT) >
+              weather_tire_grip_mult(&st, WEATHER_SNOW, TIRE_MEDIUM) &&
+          weather_tire_grip_mult(&st, WEATHER_SNOW, TIRE_MEDIUM) >
+              weather_tire_grip_mult(&st, WEATHER_SNOW, TIRE_HARD),
+          "soft is not the best tire in snow");
+    CHECK(weather_tire_grip_mult(&st, WEATHER_ICE, TIRE_SOFT) >
+              weather_tire_grip_mult(&st, WEATHER_ICE, TIRE_MEDIUM) &&
+          weather_tire_grip_mult(&st, WEATHER_ICE, TIRE_MEDIUM) >
+              weather_tire_grip_mult(&st, WEATHER_ICE, TIRE_HARD),
+          "soft is not the best tire on ice");
+    CHECK(weather_tire_grip_mult(&st, WEATHER_PUDDLE, TIRE_HARD) >
+              weather_tire_grip_mult(&st, WEATHER_PUDDLE, TIRE_MEDIUM) &&
+          weather_tire_grip_mult(&st, WEATHER_PUDDLE, TIRE_MEDIUM) >
+              weather_tire_grip_mult(&st, WEATHER_PUDDLE, TIRE_SOFT),
+          "hard is not the best tire in a puddle");
+    for (w = WEATHER_SNOW; w <= WEATHER_PUDDLE; w++)
+        CHECK(weather_tire_grip_mult(&st, w, TIRE_SOFT) < 1.0f &&
+              weather_tire_grip_mult(&st, w, TIRE_MEDIUM) < 1.0f &&
+              weather_tire_grip_mult(&st, w, TIRE_HARD) < 1.0f,
+              "%s gives some tire a bonus over clean, dry pavement",
+              weather_name(w));
+    CHECK(weather_tire_grip_mult(&st, WEATHER_CLEAR, TIRE_SOFT) == 1.0f &&
+          weather_tire_grip_mult(&st, WEATHER_CLEAR, TIRE_HARD) == 1.0f,
+          "clear pavement is not neutral");
+}
+
+/* The point of the whole system is that it reaches the physics: a hard
+ * tire on a snowed-over corner has to actually understeer more than a
+ * soft tire does, not just carry a settings value nobody reads. */
+static void test_weather_reaches_the_physics(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    int seg = -1, i;
+    float h0, yaw_soft, yaw_hard;
+
+    game_init(&g, &cfg);
+    for (i = 0; i < g.track.n; i++)
+        if (g.track.weather_zone[i] == 0) { seg = i; break; }
+    CHECK(seg >= 0, "could not find a weather zone to test on");
+    g.race_t = 0.0f;               /* zone 0 is fresh snow at t=0 */
+
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].tire = TIRE_SOFT;
+    teleport(&g, &g.karts[0], seg, 20.0f);
+    h0 = g.karts[0].heading;
+    in[0].steer = 1.0f;
+    game_update(&g, in, 1.0f / 60.0f);
+    yaw_soft = fabsf(game_angle_wrap(g.karts[0].heading - h0)) * 60.0f;
+
+    game_init(&g, &cfg);
+    g.race_t = 0.0f;
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].tire = TIRE_HARD;
+    teleport(&g, &g.karts[0], seg, 20.0f);
+    h0 = g.karts[0].heading;
+    in[0].steer = 1.0f;
+    game_update(&g, in, 1.0f / 60.0f);
+    yaw_hard = fabsf(game_angle_wrap(g.karts[0].heading - h0)) * 60.0f;
+
+    printf("snow at the wheels: soft tire yaw %.3f, hard tire yaw %.3f\n",
+           yaw_soft, yaw_hard);
+    CHECK(yaw_soft > yaw_hard * 1.05f,
+          "a soft tire (%.3f) is not meaningfully better than a hard "
+          "one (%.3f) in fresh snow", yaw_soft, yaw_hard);
 }
 
 /*
@@ -1936,8 +2246,11 @@ static void test_json_configuration(void)
     CHECK(config_load_settings_file(&settings, "config/settings.json",
                                     error, (int)sizeof(error)),
           "shipped settings.json did not load: %s", error);
-    CHECK(fabsf(settings.ai_skill_mult - 0.97f) < 0.001f,
+    CHECK(fabsf(settings.ai_skill_mult - 1.02f) < 0.001f,
           "AI skill setting did not load");
+    CHECK(fabsf(settings.weather_snow_to_ice_s - 40.0f) < 0.001f &&
+          fabsf(settings.weather_puddle_grip[TIRE_HARD] - 0.92f) < 0.001f,
+          "weather settings did not load");
     CHECK(config_load_settings_text(&settings, partial_settings, error,
                                     (int)sizeof(error)),
           "partial settings did not load: %s", error);
@@ -1991,7 +2304,8 @@ static void test_ai_can_fall(void)
         falls += g.karts[i].falls;
         if (g.karts[i].strategy == AI_LATE ||
             g.karts[i].strategy == AI_CHARGER ||
-            g.karts[i].strategy == AI_DRAFTER)
+            g.karts[i].strategy == AI_DRAFTER ||
+            g.karts[i].strategy == AI_YOLO)
             aggressive_falls += g.karts[i].falls;
     }
     printf("fallible AI: %d cliff falls, %d by aggressive strategies\n",
@@ -2972,6 +3286,39 @@ static void test_lap_times_survive_respawn(void)
  * The rivals have names, and those names have to survive being drawn by a
  * HUD font with a limited alphabet and a narrow column.
  */
+/*
+ * Difficulty presets are scaffolding (see the DifficultyPreset comment
+ * in game.h): the data shape has to be sound even though nothing wires
+ * it into an actual race yet. This is a data-model test, not a
+ * gameplay one — there is no gameplay effect to test.
+ */
+static void test_difficulty_presets_scaffolding(void)
+{
+    int i;
+
+    CHECK(strcmp(difficulty_preset_name(DIFFICULTY_EASY), "EASY") == 0 &&
+          strcmp(difficulty_preset_name(DIFFICULTY_NORMAL), "NORMAL") == 0 &&
+          strcmp(difficulty_preset_name(DIFFICULTY_HARD), "HARD") == 0,
+          "difficulty preset names are wired up wrong");
+    CHECK(strcmp(difficulty_preset_name(99), "NORMAL") == 0,
+          "an out-of-range preset should fall back to NORMAL");
+
+    for (i = 0; i < DIFFICULTY_PRESET_COUNT; i++)
+        CHECK(difficulty_presets[i].name && difficulty_presets[i].name[0],
+              "preset %d has no name", i);
+
+    CHECK(difficulty_presets[DIFFICULTY_EASY].ai_aggressiveness <
+              difficulty_presets[DIFFICULTY_NORMAL].ai_aggressiveness &&
+          difficulty_presets[DIFFICULTY_NORMAL].ai_aggressiveness <
+              difficulty_presets[DIFFICULTY_HARD].ai_aggressiveness,
+          "difficulty presets do not get more aggressive from easy to hard");
+    CHECK(difficulty_presets[DIFFICULTY_EASY].guardrails ==
+              DIFFICULTY_GUARDRAILS_ON &&
+          difficulty_presets[DIFFICULTY_HARD].guardrails ==
+              DIFFICULTY_GUARDRAILS_OFF,
+          "easy/hard do not lean the expected way on guardrails");
+}
+
 static void test_driver_names(void)
 {
     Game g;
@@ -3433,6 +3780,7 @@ int main(void)
     test_steering_filter();
     test_steer_sign();
     test_tracks_geometry();
+    test_pavement_reaches_guardrail();
     test_spec_stats();
     test_countdown_holds();
     test_braking_distance();
@@ -3444,8 +3792,13 @@ int main(void)
     test_gear_power_curve();
     test_gearboxes_sane();
     test_shifting();
+    test_boost_system();
     test_gear_limits_speed();
     test_tire_compounds();
+    test_weather_only_on_classic();
+    test_weather_melts_over_time();
+    test_weather_tire_grip_ordering();
+    test_weather_reaches_the_physics();
     test_tire_strategy_crossover();
     test_tires_need_work();
     test_track_roster();
@@ -3461,6 +3814,8 @@ int main(void)
     test_full_grid_fits();
     test_ai_races_all_tracks();
     test_full_race_classic();
+    test_yolo_strategy_is_the_wildest();
+    test_yolo_can_finish_the_hardest_track();
     test_ai_strategies_differ();
     test_ai_learns_from_mistakes();
     test_ai_adapts_to_player();
@@ -3486,6 +3841,7 @@ int main(void)
     test_lap_times();
     test_lap_times_survive_respawn();
     test_lap_count_override();
+    test_difficulty_presets_scaffolding();
     test_driver_names();
     test_tacho_settings();
     test_camera_reverse_swing();

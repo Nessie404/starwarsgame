@@ -855,6 +855,51 @@ int config_load_settings_text(GameSettings *settings, const char *json,
         !optional_float(json, tokens, count, obj, "ambient_c",
                         &s.tire_ambient_c, error, error_cap)) goto fail;
 
+    obj = object_get(json, tokens, count, 0, "weather");
+    if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
+        set_error(error, error_cap, "WEATHER NEEDS OBJECT");
+        goto fail;
+    }
+    if (obj >= 0 &&
+        (!optional_float(json, tokens, count, obj, "snow_to_ice_seconds",
+                         &s.weather_snow_to_ice_s, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "ice_to_puddle_seconds",
+                         &s.weather_ice_to_puddle_s, error,
+                         error_cap))) goto fail;
+    if (obj >= 0) {
+        static const char *names[TIRE_COMPOUNDS] = { "medium", "soft", "hard" };
+        int i;
+        for (i = 0; i < TIRE_COMPOUNDS; i++) {
+            int tire = object_get(json, tokens, count, obj, names[i]);
+            if (tire >= 0 && tokens[tire].type != JT_OBJECT) {
+                set_error(error, error_cap, "WEATHER TIRE NEEDS OBJECT");
+                goto fail;
+            }
+            if (tire >= 0 &&
+                (!optional_float(json, tokens, count, tire, "snow_grip",
+                                 &s.weather_snow_grip[i], error,
+                                 error_cap) ||
+                 !optional_float(json, tokens, count, tire, "ice_grip",
+                                 &s.weather_ice_grip[i], error,
+                                 error_cap) ||
+                 !optional_float(json, tokens, count, tire, "puddle_grip",
+                                 &s.weather_puddle_grip[i], error,
+                                 error_cap))) goto fail;
+        }
+    }
+
+    obj = object_get(json, tokens, count, 0, "boost");
+    if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
+        set_error(error, error_cap, "BOOST NEEDS OBJECT");
+        goto fail;
+    }
+    if (obj >= 0 &&
+        (!optional_float(json, tokens, count, obj, "build_rate_per_second",
+                         &s.boost_build_rate, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "max_speed_bonus_mps",
+                         &s.boost_max_speed_bonus_mps, error,
+                         error_cap))) goto fail;
+
     obj = object_get(json, tokens, count, 0, "ai");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
         set_error(error, error_cap, "AI NEEDS OBJECT");
@@ -1025,13 +1070,13 @@ int config_load_settings_file(GameSettings *settings, const char *path,
 
 static const char *action_keys[CONTROL_ACTION_COUNT] = {
     "steer_left", "steer_right", "accelerate", "brake", "handbrake",
-    "shift_up", "shift_down", "race_menu", "menu_confirm",
+    "shift_up", "shift_down", "boost", "race_menu", "menu_confirm",
     "menu_back"
 };
 
 static const char *action_labels[CONTROL_ACTION_COUNT] = {
     "LEFT", "RIGHT", "GAS", "BRAKE", "HANDBRAKE",
-    "SHIFT UP", "SHIFT DOWN", "MENU", "CONFIRM", "BACK"
+    "SHIFT UP", "SHIFT DOWN", "BOOST", "MENU", "CONFIRM", "BACK"
 };
 
 const char *control_action_name(int action)
@@ -1121,6 +1166,7 @@ void control_config_defaults(ControlConfig *c)
     bind_key(c, 0, CONTROL_HANDBRAKE, 0, GAME_KEY_SPACE);
     bind_key(c, 0, CONTROL_GEAR_UP, 0, 'E');
     bind_key(c, 0, CONTROL_GEAR_DOWN, 0, 'Q');
+    bind_key(c, 0, CONTROL_BOOST, 0, 'F');
     bind_key(c, 0, CONTROL_RACE_MENU, 0, 'R');
     bind_key(c, 0, CONTROL_MENU_CONFIRM, 0, GAME_KEY_ENTER);
     bind_key(c, 0, CONTROL_MENU_BACK, 0, GAME_KEY_ESCAPE);
@@ -1132,6 +1178,7 @@ void control_config_defaults(ControlConfig *c)
     bind_key(c, 1, CONTROL_HANDBRAKE, 0, 'P');
     bind_key(c, 1, CONTROL_GEAR_UP, 0, 'O');
     bind_key(c, 1, CONTROL_GEAR_DOWN, 0, 'U');
+    bind_key(c, 1, CONTROL_BOOST, 0, 'H');
     bind_key(c, 1, CONTROL_RACE_MENU, 0, 'R');
 
     c->gamecube[CONTROL_STEER_LEFT] = GC_INPUT_STICK_LEFT |
@@ -1143,6 +1190,7 @@ void control_config_defaults(ControlConfig *c)
     c->gamecube[CONTROL_HANDBRAKE] = GC_INPUT_Z;
     c->gamecube[CONTROL_GEAR_UP] = GC_INPUT_R;
     c->gamecube[CONTROL_GEAR_DOWN] = GC_INPUT_L;
+    c->gamecube[CONTROL_BOOST] = GC_INPUT_Y;
     c->gamecube[CONTROL_RACE_MENU] = GC_INPUT_START;
     c->gamecube[CONTROL_MENU_CONFIRM] = GC_INPUT_A | GC_INPUT_Z;
     c->gamecube[CONTROL_MENU_BACK] = GC_INPUT_B;
@@ -1154,6 +1202,7 @@ void control_config_defaults(ControlConfig *c)
     snprintf(c->xbox_label[CONTROL_HANDBRAKE], CONTROL_LABEL_LEN, "A");
     snprintf(c->xbox_label[CONTROL_GEAR_UP], CONTROL_LABEL_LEN, "RB");
     snprintf(c->xbox_label[CONTROL_GEAR_DOWN], CONTROL_LABEL_LEN, "LB");
+    snprintf(c->xbox_label[CONTROL_BOOST], CONTROL_LABEL_LEN, "Y");
     snprintf(c->xbox_label[CONTROL_RACE_MENU], CONTROL_LABEL_LEN, "START");
     snprintf(c->xbox_label[CONTROL_MENU_CONFIRM], CONTROL_LABEL_LEN, "A/RT");
     snprintf(c->xbox_label[CONTROL_MENU_BACK], CONTROL_LABEL_LEN, "LT");

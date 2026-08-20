@@ -103,6 +103,7 @@ This file exposes the main tuning surfaces:
   grip that wear costs, the temperature each wants and how wide its window
   is, how fast it heats and cools, and how much grip is left outside the
   window — plus the ambient air temperature they cool towards;
+- weather: how a snow patch melts (see below);
 - AI pace, braking, safe-road use, and overcommit behavior;
 - cliff fall, blackout, fade, invincibility, and flash timing;
 - how long a human can drive the wrong way before the marshal helicopter
@@ -128,6 +129,31 @@ also, slightly, grip. `gravity_multiplier` (default 1.0) scales the first:
 raise it to make every pass feel more mountainous than it is.
 `load_effect` (0 to 1, default 1.0) scales the second: drop it to zero if
 you would rather steep ground did not cost grip at all.
+
+### The `weather` block
+
+CLASSIC carries three weather patches around its lap; no other circuit
+gets any. Each patch starts as snow at the green flag, melts into ice
+after `snow_to_ice_seconds` (default 40), and melts again into a puddle
+after `ice_to_puddle_seconds` (default 90, measured from the start of the
+race, not from when it turned to ice) — and stays a puddle from there.
+
+```json
+"weather": {
+  "snow_to_ice_seconds": 40,
+  "ice_to_puddle_seconds": 90,
+  "medium": { "snow_grip": 0.80, "ice_grip": 0.72, "puddle_grip": 0.80 },
+  "soft":   { "snow_grip": 0.92, "ice_grip": 0.85, "puddle_grip": 0.55 },
+  "hard":   { "snow_grip": 0.55, "ice_grip": 0.50, "puddle_grip": 0.92 }
+}
+```
+
+Each of `medium`/`soft`/`hard` sets that compound's grip multiplier
+(applied on top of its usual temperature/wear grip) for each of the three
+conditions. The shipped values make soft the tire to have while a patch
+is snow or ice and the worst choice once it has become a puddle, hard the
+exact opposite, and medium a car that is never the best or the worst
+choice either way.
 
 ### The `instruments` block
 
@@ -215,6 +241,11 @@ Wii Remote inputs are native rather than a Dolphin host translation. AUTO
 gearbox mode keeps the existing tilt/D-pad steering. In SHIFT mode, a
 sideways Remote uses D-pad Up/Down for gears and Left/Right for optional
 digital steering; a Classic Controller uses ZR/ZL.
+
+`boost` spends the boost meter (see the `boost` block in `settings.json`)
+for an instant speed bump. It defaults to F/H on the two keyboard players,
+GameCube/Xbox Y, and Minus on a bare Wii Remote or Classic Controller —
+editable here the same way as every other action.
 
 Keyboard actions accept a single name or up to three alternatives. Valid
 names are `A`–`Z`, `SPACE`, `ENTER`, `ESC`, `LEFT`, `RIGHT`, `UP`, and

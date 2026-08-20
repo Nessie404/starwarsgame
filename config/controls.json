@@ -11,6 +11,7 @@
       "handbrake": "SPACE",
       "shift_up": "E",
       "shift_down": "Q",
+      "boost": "F",
       "race_menu": "R",
       "menu_confirm": "ENTER",
       "menu_back": "ESC"
@@ -23,6 +24,7 @@
       "handbrake": "P",
       "shift_up": "O",
       "shift_down": "U",
+      "boost": "H",
       "race_menu": "R"
     }
   },
@@ -34,6 +36,7 @@
     "handbrake": "Z",
     "shift_up": "R",
     "shift_down": "L",
+    "boost": "Y",
     "race_menu": "START",
     "menu_confirm": ["A", "Z"],
     "menu_back": "B"
@@ -46,6 +49,7 @@
     "handbrake": "A",
     "shift_up": "RB",
     "shift_down": "LB",
+    "boost": "Y",
     "race_menu": "START",
     "menu_confirm": "A/RT",
     "menu_back": "LT"

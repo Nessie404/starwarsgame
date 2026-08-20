@@ -113,6 +113,13 @@ driving model that expects you to brake for the hairpins.
   board with a later, more progressive breakaway, and a compiled-roster
   bug that had been keeping every car added since v1.15.0 out of the
   garage whenever the game runs without an SD card is fixed.
+- **v1.19.0** — weather on CLASSIC (snow melts into ice, then a
+  puddle, with soft/medium/hard tires each suited to a different
+  stage), a new boost meter that charges with revs and spends on a
+  button, a no-guts-no-glory AI strategy for two drivers and a field-
+  wide competitiveness bump, and every barriered track's shoulder
+  brought in to the guardrail with the tightest corners on the roster
+  opened out.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -218,11 +225,12 @@ driving model that expects you to brake for the hairpins.
 - **Split-screen multiplayer** for up to 4 players (horizontal split for
   2, quadrants for 3-4), with view culling so a full field still runs at
   frame rate in four-way split.
-- **No power-ups, no boost button, at all.** A car's power comes from its
-  plain horsepower figure and nothing else — no push-to-pass, no
-  turbo or supercharger multiplier, no roadside panel to collect. Tires
-  only ever wear over a race, with no mid-lap refresh; picking a compound
-  is a bet on the whole distance, not a resource to manage lap to lap.
+- **No collectible power-ups, ever** — no roadside panel, no random
+  pickup. A car's boost is its own: a meter that charges with revs on
+  a curve, spent all at once on the boost button for an instant speed
+  bump, and wiped out by the next gear change. Tires only ever wear
+  over a race, with no mid-lap refresh; picking a compound is a bet on
+  the whole distance, not a resource to manage lap to lap.
 - **No arcade cheats.** There is no rubber-banding (a test proves an AI
   left behind gets exactly the same power: 17.05 m/s either way), no
   floor boost pads, and no mini-turbo reward for sliding — the handbrake
