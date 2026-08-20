@@ -12,21 +12,26 @@ patch versus what waits to go out bundled with related work in a real
 feature release.
 
 The shipped-history section further down is a rolling window of the last
-five releases only, by version rather than by system — engineering context
-for what just landed and why, not a full project history (`CHANGELOG.md`
-and the `docs/release-notes/` files are the permanent record of everything
-back to v1.0). When a new release ships, add it to the top of that section
-and drop the now-sixth-oldest release off the bottom, so it stays exactly
-five deep.
+five **minor** releases (x.Y.0) only, by version rather than by system —
+engineering context for what just landed and why, not a full project
+history (`CHANGELOG.md` and the `docs/release-notes/` files are the
+permanent record of everything back to v1.0). A patch release (x.y.Z) does
+not get its own entry there — it folds into the entry for whichever minor
+release it followed, same as it folds into that release's bundle of
+changes below. When a new minor release ships, add it to the top of that
+section and drop the now-sixth-oldest minor release off the bottom, so it
+stays exactly five deep; a patch release just adds to the current top
+entry in place.
 
 **Small (patch, x.y.Z) releases** are for a single narrow, low-risk,
 self-contained change — the kind v1.19.1 (Berthoud's switchbacks) and
 v1.19.2 (a roster-drift bug fix) already were. Even so, don't cut a release
 for just one of these the moment it's done: let two or three land on `TODO.md`
 as finished, cumulative changes, and ship them together. A version bump is
-not free — it's a changelog entry, a release-notes doc, a version/date bump
-in three files, and a reader's attention — so it should carry more than one
-line of value.
+not free — it's a changelog entry, a version/date bump in three files, and
+a reader's attention — so it should carry more than one line of value. It
+also doesn't get its own release-notes doc or shipped-history entry (see
+above) — its changes just get folded into the most recent minor release's.
 
 **Big (minor, x.Y.0) releases** are for a handful of related items landed
 together on purpose, the way v1.19.0 bundled weather + boost + a wilder AI +
@@ -147,11 +152,12 @@ switch across two:
 
 ---
 
-## Shipped in the last five releases
+## Shipped in the last five minor releases
 
 A rolling window, newest first — see "How this list is organized" above.
-For anything older, `CHANGELOG.md` and `docs/release-notes/` have the full
-record back to v1.0.
+Any patch release that followed a minor release is folded into that
+release's entry rather than getting its own. For anything older,
+`CHANGELOG.md` and `docs/release-notes/` have the full record back to v1.0.
 
 ### v1.21.0 — automatic turbo, two more challenging drivers, AI racing lines
 
@@ -193,35 +199,14 @@ record back to v1.0.
   discounts grip for whatever weather patch is ahead instead of
   assuming dry pavement everywhere.
 
-### v1.19.2 — compiled-roster drift fix
-
-- [x] Fixed a real (if inert) drift bug: the compiled fallback roster
-  hardcoded `awd_front_bias = 0.0` for FWD/RWD cars while the JSON
-  parser's own default is `0.5`. New `test_compiled_roster_matches_
-  cars_json` diffs every field of every car between the two rosters,
-  not just the count, so this class of drift fails loudly next time.
-- [x] Clarified (no code change): there is no turbocharger/supercharger
-  system — retired in v1.16.0 — and v1.19.0's `boost` (now v1.21.0's
-  `turbo`) is an unrelated, universal mechanic tuned in `settings.json`,
-  not `cars.json`.
-
-### v1.19.1 — Berthoud Pass 2.0's real switchbacks restored
-
-- [x] Restored the original v1.15.0 hairpin layout (v1.17.0 had smoothed
-  it into a sine-wiggle shape to satisfy a plan-view self-intersection
-  check that turned out to be unreachable during actual driving — see
-  `docs/HANDOFF.md` §6), scaled up further for room without losing the
-  hairpins: 3704 m, 85 m of climb, 36 corners, tightest radius 8 m.
-  `test_berthoud2_keeps_its_switchbacks` guards against losing it again.
-
-### v1.19.0 — weather, boost, a wilder AI, wider corners
+### v1.19.0 — weather, boost, a wilder AI, wider corners, and two follow-up patches
 
 - [x] Weather on CLASSIC only: three zones age independently from snow
   to ice to a puddle, each tire compound suited to a different stage.
   `track_weather_at` (`track.c`), tunable in the `weather` block of
   `settings.json`.
 - [x] Boost as a universal meter (`Kart.boost_meter` at the time —
-  reworked into the automatic turbo above in v1.21.0): charged with revs
+  reworked into the automatic turbo in v1.21.0): charged with revs
   on a curve, spent all at once on a button for an instant speed bump.
 - [x] A new `AI_YOLO` "no guts, no glory" strategy sheet, assigned to
   TANAKA and CROSS; field-wide `ai_skill_mult` up from 0.97 to 1.02; the
@@ -234,6 +219,47 @@ record back to v1.0.
 - [x] Data-only scaffolding for a difficulty preset (`DifficultyPreset`,
   `GameConfig.difficulty`) — not wired into a race yet; see Release
   planning above for what finishing it needs.
+- [x] *(v1.19.1 patch)* Restored Berthoud Pass 2.0's original v1.15.0
+  hairpin layout — v1.17.0 had smoothed it into a sine-wiggle shape to
+  satisfy a plan-view self-intersection check that turned out to be
+  unreachable during actual driving (see `docs/HANDOFF.md` §6) — and
+  scaled it up further for room without losing the hairpins: 3704 m,
+  85 m of climb, 36 corners, tightest radius 8 m.
+  `test_berthoud2_keeps_its_switchbacks` guards against losing it again.
+- [x] *(v1.19.2 patch)* Fixed a real (if inert) drift bug between the
+  compiled fallback roster and `cars.json` (`awd_front_bias` defaulting
+  to `0.0` instead of the JSON parser's `0.5`); `test_compiled_roster_
+  matches_cars_json` now diffs every field of every car between the two
+  rosters, not just the count. Also clarified (no code change): there
+  is no turbocharger/supercharger system — retired in v1.16.0 — and
+  `boost` (now v1.21.0's `turbo`) is an unrelated, universal mechanic
+  tuned in `settings.json`, not `cars.json`.
+
+### v1.18.0 — real drivetrains, more grip, a roster-visibility fix
+
+- [x] Every car now has a real drivetrain — FWD, RWD, or full-time AWD
+  with a tunable `front_bias` — from an optional `"drivetrain"` block
+  in `cars.json`. AWD gets off the line faster (traction demand split
+  across two axles), FWD understeers a little more under power, RWD
+  gets looser and easier to rotate.
+- [x] Lateral grip up ~25% across the board, with a gentler, later
+  understeer scrub once a corner is driven past the limit.
+- [x] Fixed every car added since v1.15.0 being invisible without an SD
+  card: the compiled fallback roster only had the original four cars
+  while `cars.json` had eleven; the fallback now mirrors `cars.json`
+  exactly. Also fixed RUBY's gear ladder, which could strand an AI
+  driver in first gear for an entire race once it was finally in play.
+
+### v1.17.0 — six new cars, Berthoud Pass 2.0 rebuilt
+
+- [x] Six new cars (BUGGY, WAGON, FORMULA, TRUCK, HERITAGE, MUSCLE) for
+  eleven in the garage.
+- [x] Berthoud Pass 2.0 rebuilt to stop several pieces of road passing
+  within 1-2 m of each other in plan view. Later found not to have been
+  an actual gameplay bug — `track_locate`'s windowed hint never
+  confuses two switchback tiers close in plan view but far apart in
+  elevation — and the original hairpin layout was restored by the
+  v1.19.1 follow-up patch under v1.19.0, above.
 
 ## Overall direction
 
