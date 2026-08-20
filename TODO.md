@@ -75,7 +75,12 @@ Left for later, now that the camera has somewhere to live:
   profile — a stack of switchbacks up, a summit, a stack down, a flat
   loop-back through the valley floor, and a gentle climb back to a
   start/finish at the lap's own middle elevation. *(v1.15.0: 3263 m, 86 m
-  of climb, 33 corners, tightest radius 7 m.)*
+  of climb, 33 corners, tightest radius 7 m. Rebuilt in v1.17.0: the
+  original layout let its own loop-back run within 1-2 m of the climb
+  and had hairpin apexes turning up to 161° at a single point; now
+  every piece of road stays 90+ m clear of every other piece and
+  nothing on the lap turns sharper than a 37 m radius. 1411 m, 67 m of
+  climb, 20 corners.)*
 - [ ] Add winter variants of the mountain passes.
 - [ ] Add localized snow and ice hazards with visible boundaries and distinct
   grip behavior.

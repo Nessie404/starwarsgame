@@ -4,6 +4,43 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.17.0] - 2026-08-20
+
+### Added
+
+- **Six new cars**: BUGGY (620 kg dune buggy, 0.85 dirt grip — the best
+  off-road of the roster), WAGON (1550 kg practical all-rounder),
+  FORMULA (720 kg open-wheel track car, 1.45 g lateral grip and 28 m
+  brakes — both the best in the garage — but only 0.10 dirt grip),
+  TRUCK (2100 kg pickup, 0.78 dirt grip, 48 m brakes), HERITAGE (890 kg
+  vintage roadster, 85 hp and drum-brake-slow 45 m stops), and MUSCLE
+  (1620 kg, 420 hp, modest 0.80 g grip to go with it). Eleven cars in
+  `cars.json` now, still comfortably inside the 16-car cap. Validated
+  against the same real-unit ranges every other car uses, so a bad edit
+  is rejected before it reaches the garage.
+
+### Changed
+
+- **Berthoud Pass 2.0 rebuilt.** The v1.15.0 layout packed three
+  ramp-and-hairpin switchbacks up one side and four down the other into
+  a tight footprint, and it turned out several of those pieces of road
+  passed within 1-2 m of each other in plan view — including the
+  valley loop-back, which clipped both the climb and the base of the
+  descent — and its hairpin apexes turned as sharp as 97-161° at a
+  single control point, well past a right angle. The new layout uses
+  two clearly separated corridors (a climbing side and a descending
+  side, offset far enough apart that even their widest wiggle never
+  gets close) joined by two wide, gradual turns — one at the summit,
+  one at the valley floor doing the loop-back and the climb back up to
+  the start together. Every corner on the new lap is a gentle 37-83 m
+  radius (previously as tight as 7 m), and the closest any two
+  non-adjacent pieces of road come to each other is 96 m — comfortably
+  clear of the guardrails' ~26 m of combined clearance. The lap is
+  shorter as a direct result of easing out the switchbacks (1411 m,
+  down from 3263 m) and climbs less (67 m vs 86 m), which is the
+  honest trade for a lap with nothing sharper than a highway curve on
+  it anywhere.
+
 ## [1.16.0] - 2026-08-19
 
 ### Removed

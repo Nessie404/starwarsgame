@@ -1739,13 +1739,25 @@ static void test_json_configuration(void)
     CHECK(config_load_cars_file("config/cars.json", error,
                                 (int)sizeof(error)),
           "shipped cars.json did not load: %s", error);
-    CHECK(kart_spec_count == DEFAULT_SPEC_COUNT + 1,
+    CHECK(kart_spec_count == DEFAULT_SPEC_COUNT + 7,
           "shipped car count is %d", kart_spec_count);
     CHECK(strcmp(kart_specs[1].name, "SPORT") == 0,
           "shipped SPORT car disappeared");
     CHECK(strcmp(kart_specs[DEFAULT_SPEC_COUNT].name, "RUBY") == 0 &&
           kart_specs[DEFAULT_SPEC_COUNT].n_gears == 6,
           "shipped RUBY car did not parse");
+    CHECK(strcmp(kart_specs[DEFAULT_SPEC_COUNT + 1].name, "BUGGY") == 0 &&
+          kart_specs[DEFAULT_SPEC_COUNT + 1].offroad_grip > 0.7f,
+          "shipped BUGGY car did not parse");
+    CHECK(strcmp(kart_specs[DEFAULT_SPEC_COUNT + 3].name, "FORMULA") == 0 &&
+          kart_specs[DEFAULT_SPEC_COUNT + 3].lat_g > 1.3f,
+          "shipped FORMULA car did not parse");
+    CHECK(strcmp(kart_specs[DEFAULT_SPEC_COUNT + 4].name, "TRUCK") == 0 &&
+          kart_specs[DEFAULT_SPEC_COUNT + 4].mass_kg > 1900.0f,
+          "shipped TRUCK car did not parse");
+    CHECK(strcmp(kart_specs[DEFAULT_SPEC_COUNT + 6].name, "MUSCLE") == 0 &&
+          kart_specs[DEFAULT_SPEC_COUNT + 6].power_hp > 400.0f,
+          "shipped MUSCLE car did not parse");
 
     CHECK(config_load_cars_text(one_car, error, (int)sizeof(error)),
           "custom car did not load: %s", error);

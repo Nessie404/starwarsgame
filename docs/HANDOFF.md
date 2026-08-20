@@ -134,6 +134,10 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   `BLOWER` are gone from the garage; `RUBY` stays as a plain
   naturally-aspirated car. Tire wear rates retuned now that nothing
   ever refreshes them mid-race.
+- **v1.17**: six new cars (BUGGY, WAGON, FORMULA, TRUCK, HERITAGE,
+  MUSCLE) for eleven in the garage; Berthoud Pass 2.0 rebuilt so its own
+  loop-back can't clip another part of the lap and no corner is sharper
+  than a 37 m radius.
 
 ---
 
@@ -285,6 +289,60 @@ any future switchback-heavy track would hit again:
   8`, `track.c`) — silently truncated past that, which would break loop
   closure with no warning. A 5-point ramp+hairpin cycle burns points fast;
   budget cycles per section before hand-designing one.
+
+### 7b″. Berthoud Pass 2.0, rebuilt again — done in v1.17.0
+
+The v1.15.0 layout above raced fine (11/11 AI finished), but two things
+about it were wrong even though nothing in the test suite caught them:
+several of its pieces of road passed within 1-2 m of each other in plan
+view — including the valley loop-back clipping both the climb and the
+base of the descent — and several of its hairpin apexes turned 90° to
+161° at a single control point, sharper than a real switchback needs to
+be. Neither shows up as a test failure: the AI still drives the
+centerline fine even when two different laps'-worth of pavement
+physically overlap, since progress is tracked by arc length, not world
+position (the same reason `kart_place_on_grid` needed the hint fix in
+7b′) — this is exactly the kind of thing that only shows up by actually
+checking the geometry, not by racing it.
+
+The fix replaced the ramp+hairpin-cycle approach with two clearly
+separated "corridors": the climb follows `x = amp * sin(2*pi*z /
+wavelength)` from the start up to the summit, the descent follows the
+same shape mirrored and offset sideways by a fixed gap, and the two
+never need checking against each other because the gap is chosen wider
+than twice the wiggle amplitude plus road width — they're geometrically
+incapable of touching regardless of how the wiggle itself turns out. The
+amplitude is also tapered to zero over the last stretch before each end
+of a corridor (a smoothstep, not a hard cutoff), so the corridor arrives
+at the summit and valley turns already running dead straight — matching
+the turns' own tangent there — instead of arriving at some arbitrary
+angle and kinking into them. The summit and valley are each a single
+wide circular arc (radius = half the gap between corridors), which is
+plenty gentle on its own once the kink at the junction is gone.
+
+Two general lessons worth keeping for the next track like this:
+
+- **A self-intersection or a right-angle turn is invisible to game
+  logic and to the AI-completion test alike** — arc-length progress
+  doesn't care that the pavement crosses itself, and pure-pursuit
+  steering doesn't refuse a sharp corner, it just drives it badly. If a
+  track's shape matters (and it does, here), check the shape itself:
+  walk every pair of non-adjacent sampled centerline points and assert
+  a minimum separation (comfortably more than `2 * wall_half`, since
+  the spline can bulge past the control polygon near a turn), and walk
+  every control point's turn angle (deviation from straight) and assert
+  a maximum. Both are cheap, deterministic checks you can run from a
+  small throwaway harness against `track_init`'s actual output — do not
+  trust hand arithmetic on the raw control points, since Catmull-Rom
+  bulges past them, in both the ground plane and elevation, enough to
+  matter (measured grade came out noticeably steeper here than the raw
+  point-to-point arithmetic predicted).
+- **Two geometrically-separated corridors joined by wide, amplitude-
+  tapered turns is a much easier shape to reason about than a chain of
+  hand-placed hairpins**, and it composes: the same recipe (parallel
+  sine-wiggle corridors, gap sized off road width, taper into each
+  joining turn) would work for another out-and-back mountain pass
+  without repeating this debugging.
 
 ### 7c. Persistent standings between races *(start here)*
 

@@ -66,6 +66,82 @@
       "gear_top_speeds_kph": [15, 35, 67, 100, 150, 200],
       "automatic_upshift_fraction": 0.95,
       "automatic_downshift_fraction": 0.38
+    },
+    {
+      "_comment": "Open dune buggy — tiny and underpowered on tarmac, but almost nothing slows it down off it.",
+      "name": "BUGGY",
+      "mass_kg": 620,
+      "power_hp": 95,
+      "brake_distance_100_kph_m": 32,
+      "lateral_grip_g": 1.15,
+      "drag_area_m2": 0.55,
+      "wheelbase_m": 2.20,
+      "offroad_grip": 0.85,
+      "gear_top_speeds_kph": [40.0, 70.0, 105.0, 145.0]
+    },
+    {
+      "_comment": "A big practical wagon — heavy and unremarkable everywhere, which is its own kind of consistent.",
+      "name": "WAGON",
+      "mass_kg": 1550,
+      "power_hp": 190,
+      "brake_distance_100_kph_m": 42,
+      "lateral_grip_g": 0.85,
+      "drag_area_m2": 0.72,
+      "wheelbase_m": 2.75,
+      "offroad_grip": 0.40,
+      "gear_top_speeds_kph": [45.0, 78.0, 115.0, 155.0, 195.0]
+    },
+    {
+      "_comment": "Open-wheel track car — carbon brakes and the most grip in the garage, but it hates dirt.",
+      "name": "FORMULA",
+      "mass_kg": 720,
+      "power_hp": 260,
+      "brake_distance_100_kph_m": 28,
+      "lateral_grip_g": 1.45,
+      "drag_area_m2": 0.55,
+      "wheelbase_m": 2.90,
+      "offroad_grip": 0.10,
+      "gear_top_speeds_kph": [55.0, 95.0, 140.0, 185.0, 230.0, 270.0],
+      "automatic_upshift_fraction": 0.97,
+      "automatic_downshift_fraction": 0.45
+    },
+    {
+      "_comment": "A loaded pickup — huge and slow to stop, but the surest thing on the roster off the tarmac.",
+      "name": "TRUCK",
+      "mass_kg": 2100,
+      "power_hp": 280,
+      "brake_distance_100_kph_m": 48,
+      "lateral_grip_g": 0.70,
+      "drag_area_m2": 0.85,
+      "wheelbase_m": 3.10,
+      "offroad_grip": 0.78,
+      "gear_top_speeds_kph": [42.0, 70.0, 100.0, 130.0, 165.0],
+      "automatic_upshift_fraction": 0.85,
+      "automatic_downshift_fraction": 0.30
+    },
+    {
+      "_comment": "A vintage roadster — modest power and drum brakes, but light enough to still be thrown around.",
+      "name": "HERITAGE",
+      "mass_kg": 890,
+      "power_hp": 85,
+      "brake_distance_100_kph_m": 45,
+      "lateral_grip_g": 0.75,
+      "drag_area_m2": 0.58,
+      "wheelbase_m": 2.35,
+      "offroad_grip": 0.35,
+      "gear_top_speeds_kph": [38.0, 65.0, 95.0, 125.0]
+    },
+    {
+      "_comment": "A big V8 with more power than sense — great in a straight line, a handful everywhere else.",
+      "name": "MUSCLE",
+      "mass_kg": 1620,
+      "power_hp": 420,
+      "brake_distance_100_kph_m": 40,
+      "lateral_grip_g": 0.80,
+      "drag_area_m2": 0.68,
+      "wheelbase_m": 2.85,
+      "offroad_grip": 0.30,
+      "gear_top_speeds_kph": [58.0, 98.0, 145.0, 195.0, 250.0]
     }
   ]
 }

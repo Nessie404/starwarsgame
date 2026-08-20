@@ -101,6 +101,13 @@ driving model that expects you to brake for the hairpins.
   get worse over a race, never refreshed mid-lap. `TURBO` and `BLOWER`,
   which existed solely to demonstrate the removed engine mechanic, are
   gone from the garage; `RUBY` stays as a plain naturally-aspirated car.
+- **v1.17.0** — six new cars (BUGGY, WAGON, FORMULA, TRUCK, HERITAGE,
+  MUSCLE), for eleven in the garage covering everything from a 620 kg
+  dune buggy to a 2100 kg pickup. Berthoud Pass 2.0 rebuilt: the old
+  layout let its own valley loop-back run close enough to the climb to
+  clip it, and packed in hairpins sharp enough to bite; the new one
+  keeps every piece of pavement a comfortable 90+ m from every other
+  piece, and nothing on the whole lap is tighter than a 37 m radius.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -142,11 +149,17 @@ driving model that expects you to brake for the hairpins.
   cornering is limited by lateral grip (v²/r ≤ μg) — push past it and the
   car understeers wide, scrubbing speed. Gravity acts along the road
   grade: climbs cost speed, descents give it back.
-- **Car selection with real spec sheets.** The included RACER, SPORT,
-  RALLY, TOURER and RUBY are defined by horsepower, curb weight, stopping
+- **Eleven cars, and no two drive alike.** RACER (a 260 kg superkart) and
+  TRUCK (a 2100 kg pickup) sit at opposite ends of the roster; between
+  them are a hot hatch (RUBY), a rally car (RALLY) and a dune buggy
+  (BUGGY) that both actually use their dirt grip, a GT tourer (TOURER), a
+  wagon (WAGON), an open-wheel FORMULA car with the most grip and the
+  least dirt grip in the garage, a vintage roadster (HERITAGE) with drum
+  brakes to match, and a MUSCLE car with more horsepower than chassis to
+  match it. Every one is defined by horsepower, curb weight, stopping
   distance, lateral g, drag area, wheelbase, dirt grip and per-gear
-  limiter speeds. The menu derives 0-100 time and top speed from the same
-  equations the physics uses. The roster comes from `cars.json`, so
+  limiter speeds — the menu derives 0-100 time and top speed from the
+  same equations the physics uses. The roster comes from `cars.json`, so
   another car is an added JSON object, not a C surgery.
 - **Eight circuits**, all measured rather than guessed. Lap counts are set
   per circuit so every race covers a similar distance:
@@ -160,14 +173,17 @@ driving model that expects you to brake for the hairpins.
   | MONARCH (US-50) | 2167 m | 8.6 m | 33 | 9 m | 118 m | 19% | **no** | 2 |
   | BREAKNECK | 945 m | 7.4 m | 13 | 29 m | 44 m | 29% | **no** | 3 |
   | GUANELLA | 1986 m | 7.8 m | 15 | 6 m | 64 m | 19% | **no** | 2 |
-  | BERTHOUD 2.0 | 3263 m | 13.2 m | 33 | 7 m | 86 m | 21% | yes | 2 |
+  | BERTHOUD 2.0 | 1411 m | 13.2 m | 20 | 37 m | 67 m | 21% | yes | 2 |
 
   **Kenosha** ties Berthoud 2.0 as the widest and is still the longest of
-  the original five. **Monarch** climbs the most of that group and has no
-  rails. **Breakneck** is the steepest anywhere on the roster and the
-  shortest pass; **Guanella** has the tightest hairpin (6 m); **Berthoud
-  2.0** climbs the most overall and is built from the real pass's own
-  elevation profile rather than stylized from memory.
+  the original five. **Monarch** climbs the most and has no rails.
+  **Breakneck** is the steepest anywhere on the roster and the shortest
+  pass; **Guanella** has the tightest hairpin (6 m). **Berthoud 2.0** is
+  the opposite end of that: built from the real pass's own elevation
+  profile, but with every bend eased out so nothing on it is sharper than
+  a 37 m radius — no hairpins, no near-right-angle corners, just a fast,
+  flowing mountain road with no piece of pavement anywhere close enough
+  to another to clip it.
 - **Gearboxes.** Every car has a real gearbox — 4 to 6 gears, each with a
   road speed at the limiter. Where you are in the band decides your power:
   bog it below a third of the band and it pulls badly, sit on the limiter

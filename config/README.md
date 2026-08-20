@@ -9,7 +9,7 @@ leave the garage half-loaded.
 
 Open **JSON CONFIG** on the main menu. It shows where the game read from,
 whether each of the three files loaded, and the car roster it ended up
-with — for example `4 CARS  RACER 48 HP`. Edit `power_hp` for that car,
+with — for example `11 CARS  RACER 48 HP`. Edit `power_hp` for that car,
 restart, and if the screen shows the new number, your file is being used.
 If it says `BUILT IN CONFIG` or `NO SD CARD FOUND`, the game never saw a
 file, and the lines on that screen say where it looked.

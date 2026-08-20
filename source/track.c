@@ -234,33 +234,38 @@ static const float W_GUANELLA[] = {
 
 /* ---------------- BERTHOUD PASS 2.0 ----------------
  * Drawn from the real elevation profile rather than stylized from
- * memory: three ramp-and-hairpin switchbacks climbing one side of the
- * pass, a summit, four more descending the other side — each ramp a
- * real straight-ish run wide apart from the next before the road folds
- * back on itself, the way an actual switchback road is built rather
- * than reversing every few meters — down to a valley floor, a flat
- * loop-back through the valley that turns the road around, and a
- * gentle climb back up to the start. The start and finish sits at the
- * lap's own middle elevation: below the summit, above the valley floor
- * it drops to.
+ * memory: a climbing side and a descending side, each a gentle sideways
+ * wiggle (x = amp*sin(2*pi*z/wavelength), amplitude tapered to zero at
+ * both ends), kept in their own lane by a gap wider than twice the
+ * wiggle amplitude plus road width so the two can never touch each
+ * other regardless of how the wiggle itself turns out. A wide circular
+ * arc joins them at the summit; a matching arc at the valley floor does
+ * the loop-back and, at the same time, the gentle climb back up to the
+ * start. The start and finish sits at the lap's own middle elevation:
+ * below the summit, above the valley floor it drops to. Nothing on the
+ * lap turns sharper than a 37 m radius, and the closest any two
+ * non-adjacent pieces of road come to each other is about 96 m — see
+ * HANDOFF.md section 7b'' for the full story and why this shape
+ * (rather than hand-placed hairpins) is what makes both of those true
+ * by construction.
  */
 static const float CP_BERTHOUD2[][3] = {
-    {    0.0,    0.0,  126.0}, {  -70.0,   24.0,  137.1}, {    5.0,   24.0,  148.3},
-    {   80.0,   24.0,  159.5}, {  113.0,   55.9,  166.4}, {   80.0,   82.0,  172.7},
-    {    5.0,   82.0,  184.0}, {  -70.0,   82.0,  195.2}, { -103.0,  113.9,  202.1},
-    {  -70.0,  140.0,  208.4}, {    5.0,  140.0,  219.6}, {   80.0,  140.0,  230.8},
-    {  113.0,  171.9,  237.7}, {   80.0,  198.0,  244.0}, {  120.0,  228.0,  242.0},
-    {  162.0,  248.0,  244.0}, {  148.0,  214.0,  241.0}, {  142.0,  240.0,  232.2},
-    {  103.0,  240.0,  219.4}, {   64.0,  240.0,  206.6}, {   46.8,  275.2,  193.7},
-    {   64.0,  304.0,  182.7}, {  103.0,  304.0,  169.8}, {  142.0,  304.0,  157.0},
-    {  159.2,  339.2,  144.1}, {  142.0,  368.0,  133.1}, {  103.0,  368.0,  120.3},
-    {   64.0,  368.0,  107.4}, {   46.8,  403.2,   94.6}, {   64.0,  432.0,   83.5},
-    {  103.0,  432.0,   70.7}, {  142.0,  432.0,   57.9}, {  159.2,  467.2,   45.0},
-    {  142.0,  496.0,   34.0}, {  132.0,  530.0,   22.3}, {  120.0,  562.0,   13.2},
-    {  112.0,  592.0,    8.0}, {   82.0,  618.0,    8.0}, {   66.0,  586.0,    9.0},
-    {   88.0,  550.0,    8.0}, {  134.0,  546.0,    9.0}, {  164.0,  578.0,    8.0},
-    {  159.7,  495.4,   24.9}, {  151.5,  412.9,   41.7}, {  136.6,  330.3,   58.6},
-    {  113.2,  247.7,   75.4}, {   81.3,  165.1,   92.3}, {   42.5,   82.6,  109.1},
+    {     0.0,     0.0,  126.0}, {     2.5,    18.8,  132.9}, {    10.3,    37.5,  140.4},
+    {    10.5,    56.2,  147.2}, {     0.0,    75.0,  155.1}, {   -10.6,    93.8,  163.0},
+    {   -15.0,   112.5,  170.1}, {   -10.6,   131.2,  177.1}, {    -0.0,   150.0,  185.0},
+    {    10.6,   168.8,  192.9}, {    15.0,   187.5,  199.9}, {    10.6,   206.2,  207.0},
+    {     0.0,   225.0,  214.9}, {   -10.5,   243.8,  222.8}, {   -10.3,   262.5,  229.6},
+    {    -2.5,   281.2,  237.1}, {     0.0,   300.0,  244.0}, {     9.4,   335.0,  242.5},
+    {    35.0,   360.6,  241.4}, {    70.0,   370.0,  241.0}, {   105.0,   360.6,  241.4},
+    {   130.6,   335.0,  242.5}, {   140.0,   300.0,  244.0}, {   142.5,   281.2,  230.1},
+    {   150.3,   262.5,  215.3}, {   150.5,   243.8,  201.5}, {   140.0,   225.0,  185.8},
+    {   129.4,   206.2,  170.0}, {   125.0,   187.5,  155.9}, {   129.4,   168.8,  141.8},
+    {   140.0,   150.0,  126.0}, {   150.6,   131.2,  110.2}, {   155.0,   112.5,   96.1},
+    {   150.6,    93.8,   82.0}, {   140.0,    75.0,   66.2}, {   129.5,    56.2,   50.5},
+    {   129.7,    37.5,   36.7}, {   137.5,    18.8,   21.9}, {   140.0,     0.0,    8.0},
+    {   134.7,   -26.8,   22.8}, {   119.5,   -49.5,   37.5}, {    96.8,   -64.7,   52.2},
+    {    70.0,   -70.0,   67.0}, {    43.2,   -64.7,   81.8}, {    20.5,   -49.5,   96.5},
+    {     5.3,   -26.8,  111.2},
 };
 
 static const TrackDef track_defs[TRACK_COUNT] = {
@@ -287,7 +292,7 @@ static const TrackDef track_defs[TRACK_COUNT] = {
       3.9f,  4.8f, W_GUANELLA, 1, 0, 1.00f, 1.00f /* switchbacks       */ },
     { "BERTHOUD 2.0",
       CP_BERTHOUD2, (int)(sizeof(CP_BERTHOUD2) / sizeof(CP_BERTHOUD2[0])),
-      6.6f, 13.0f, NULL, 1, 1, 1.30f, 0.28f /* big, guarded, real profile */ },
+      6.6f, 13.0f, NULL, 1, 1, 1.30f, 0.22f /* big, guarded, real profile */ },
 };
 
 const char *track_name(int track_id)
