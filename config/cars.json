@@ -6,52 +6,56 @@
       "mass_kg": 260,
       "power_hp": 48,
       "brake_distance_100_kph_m": 30,
-      "lateral_grip_g": 1.30,
+      "lateral_grip_g": 1.62,
       "drag_area_m2": 0.45,
       "wheelbase_m": 1.05,
       "offroad_grip": 0.30,
       "gear_top_speeds_kph": [50.4, 86.4, 126.0, 169.2],
       "automatic_upshift_fraction": 0.95,
-      "automatic_downshift_fraction": 0.38
+      "automatic_downshift_fraction": 0.38,
+      "drivetrain": { "type": "rwd" }
     },
     {
       "name": "SPORT",
       "mass_kg": 950,
       "power_hp": 150,
       "brake_distance_100_kph_m": 37,
-      "lateral_grip_g": 0.95,
+      "lateral_grip_g": 1.19,
       "drag_area_m2": 0.66,
       "wheelbase_m": 2.45,
       "offroad_grip": 0.45,
       "gear_top_speeds_kph": [46.8, 79.2, 118.8, 162.0, 216.0],
       "automatic_upshift_fraction": 0.95,
-      "automatic_downshift_fraction": 0.38
+      "automatic_downshift_fraction": 0.38,
+      "drivetrain": { "type": "rwd" }
     },
     {
       "name": "RALLY",
       "mass_kg": 1180,
       "power_hp": 220,
       "brake_distance_100_kph_m": 40,
-      "lateral_grip_g": 0.88,
+      "lateral_grip_g": 1.10,
       "drag_area_m2": 0.70,
       "wheelbase_m": 2.60,
       "offroad_grip": 0.72,
       "gear_top_speeds_kph": [43.2, 72.0, 104.4, 144.0, 190.8, 241.2],
       "automatic_upshift_fraction": 0.95,
-      "automatic_downshift_fraction": 0.38
+      "automatic_downshift_fraction": 0.38,
+      "drivetrain": { "type": "awd", "front_bias": 0.40 }
     },
     {
       "name": "TOURER",
       "mass_kg": 1350,
       "power_hp": 310,
       "brake_distance_100_kph_m": 34,
-      "lateral_grip_g": 1.02,
+      "lateral_grip_g": 1.28,
       "drag_area_m2": 0.60,
       "wheelbase_m": 2.70,
       "offroad_grip": 0.35,
       "gear_top_speeds_kph": [54.0, 90.0, 133.2, 180.0, 230.4, 284.4],
       "automatic_upshift_fraction": 0.95,
-      "automatic_downshift_fraction": 0.38
+      "automatic_downshift_fraction": 0.38,
+      "drivetrain": { "type": "awd", "front_bias": 0.50 }
     },
     {
       "_comment": "Lightweight, high-revving four — a hot hatch built to be thrown at a mountain pass.",
@@ -59,13 +63,14 @@
       "mass_kg": 1080,
       "power_hp": 310,
       "brake_distance_100_kph_m": 33,
-      "lateral_grip_g": 1.00,
+      "lateral_grip_g": 1.25,
       "drag_area_m2": 0.58,
       "wheelbase_m": 2.55,
       "offroad_grip": 0.40,
-      "gear_top_speeds_kph": [15, 35, 67, 100, 150, 200],
+      "gear_top_speeds_kph": [38.0, 63.3, 93.7, 126.6, 162.0, 200.0],
       "automatic_upshift_fraction": 0.95,
-      "automatic_downshift_fraction": 0.38
+      "automatic_downshift_fraction": 0.38,
+      "drivetrain": { "type": "fwd" }
     },
     {
       "_comment": "Open dune buggy — tiny and underpowered on tarmac, but almost nothing slows it down off it.",
@@ -73,11 +78,12 @@
       "mass_kg": 620,
       "power_hp": 95,
       "brake_distance_100_kph_m": 32,
-      "lateral_grip_g": 1.15,
+      "lateral_grip_g": 1.44,
       "drag_area_m2": 0.55,
       "wheelbase_m": 2.20,
       "offroad_grip": 0.85,
-      "gear_top_speeds_kph": [40.0, 70.0, 105.0, 145.0]
+      "gear_top_speeds_kph": [40.0, 70.0, 105.0, 145.0],
+      "drivetrain": { "type": "awd", "front_bias": 0.45 }
     },
     {
       "_comment": "A big practical wagon — heavy and unremarkable everywhere, which is its own kind of consistent.",
@@ -85,11 +91,12 @@
       "mass_kg": 1550,
       "power_hp": 190,
       "brake_distance_100_kph_m": 42,
-      "lateral_grip_g": 0.85,
+      "lateral_grip_g": 1.06,
       "drag_area_m2": 0.72,
       "wheelbase_m": 2.75,
       "offroad_grip": 0.40,
-      "gear_top_speeds_kph": [45.0, 78.0, 115.0, 155.0, 195.0]
+      "gear_top_speeds_kph": [45.0, 78.0, 115.0, 155.0, 195.0],
+      "drivetrain": { "type": "fwd" }
     },
     {
       "_comment": "Open-wheel track car — carbon brakes and the most grip in the garage, but it hates dirt.",
@@ -97,13 +104,14 @@
       "mass_kg": 720,
       "power_hp": 260,
       "brake_distance_100_kph_m": 28,
-      "lateral_grip_g": 1.45,
+      "lateral_grip_g": 1.81,
       "drag_area_m2": 0.55,
       "wheelbase_m": 2.90,
       "offroad_grip": 0.10,
       "gear_top_speeds_kph": [55.0, 95.0, 140.0, 185.0, 230.0, 270.0],
       "automatic_upshift_fraction": 0.97,
-      "automatic_downshift_fraction": 0.45
+      "automatic_downshift_fraction": 0.45,
+      "drivetrain": { "type": "rwd" }
     },
     {
       "_comment": "A loaded pickup — huge and slow to stop, but the surest thing on the roster off the tarmac.",
@@ -111,13 +119,14 @@
       "mass_kg": 2100,
       "power_hp": 280,
       "brake_distance_100_kph_m": 48,
-      "lateral_grip_g": 0.70,
+      "lateral_grip_g": 0.88,
       "drag_area_m2": 0.85,
       "wheelbase_m": 3.10,
       "offroad_grip": 0.78,
       "gear_top_speeds_kph": [42.0, 70.0, 100.0, 130.0, 165.0],
       "automatic_upshift_fraction": 0.85,
-      "automatic_downshift_fraction": 0.30
+      "automatic_downshift_fraction": 0.30,
+      "drivetrain": { "type": "awd", "front_bias": 0.35 }
     },
     {
       "_comment": "A vintage roadster — modest power and drum brakes, but light enough to still be thrown around.",
@@ -125,11 +134,12 @@
       "mass_kg": 890,
       "power_hp": 85,
       "brake_distance_100_kph_m": 45,
-      "lateral_grip_g": 0.75,
+      "lateral_grip_g": 0.94,
       "drag_area_m2": 0.58,
       "wheelbase_m": 2.35,
       "offroad_grip": 0.35,
-      "gear_top_speeds_kph": [38.0, 65.0, 95.0, 125.0]
+      "gear_top_speeds_kph": [38.0, 65.0, 95.0, 125.0],
+      "drivetrain": { "type": "rwd" }
     },
     {
       "_comment": "A big V8 with more power than sense — great in a straight line, a handful everywhere else.",
@@ -137,11 +147,12 @@
       "mass_kg": 1620,
       "power_hp": 420,
       "brake_distance_100_kph_m": 40,
-      "lateral_grip_g": 0.80,
+      "lateral_grip_g": 1.00,
       "drag_area_m2": 0.68,
       "wheelbase_m": 2.85,
       "offroad_grip": 0.30,
-      "gear_top_speeds_kph": [58.0, 98.0, 145.0, 195.0, 250.0]
+      "gear_top_speeds_kph": [58.0, 98.0, 145.0, 195.0, 250.0],
+      "drivetrain": { "type": "rwd" }
     }
   ]
 }

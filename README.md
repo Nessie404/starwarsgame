@@ -108,6 +108,11 @@ driving model that expects you to brake for the hairpins.
   clip it, and packed in hairpins sharp enough to bite; the new one
   keeps every piece of pavement a comfortable 90+ m from every other
   piece, and nothing on the whole lap is tighter than a 37 m radius.
+- **v1.18.0** — every car now has a real drivetrain (front, rear, or
+  full-time all-wheel with a tunable bias), grip is up across the
+  board with a later, more progressive breakaway, and a compiled-roster
+  bug that had been keeping every car added since v1.15.0 out of the
+  garage whenever the game runs without an SD card is fixed.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game

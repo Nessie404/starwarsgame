@@ -31,28 +31,70 @@
 #define HP_TO_W    745.7f
 #define V100       27.78f      /* 100 km/h in m/s                      */
 
+/*
+ * The compiled-in roster mirrors config/cars.json exactly, so opening the
+ * DOL with no filesystem at all (no SD card, no cars.json to read) still
+ * shows the full eleven-car garage rather than only the first four — see
+ * HANDOFF.md for the bug this used to be. If you add a car to cars.json,
+ * add it here too, in the same order, or it silently vanishes for anyone
+ * without a virtual SD card set up.
+ */
 static const KartSpec default_kart_specs[DEFAULT_SPEC_COUNT] = {
-    /* name      mass    hp   brake  lat_g  CdA   wheelbase offroad
-     *   gears, and the road speed (m/s) at the limiter in each          */
-    { "RACER",   260.f,  48.f, 30.f, 1.30f, 0.45f, 1.05f,   0.30f,
-      4, { 14.f, 24.f, 35.f, 47.f } },
-    { "SPORT",   950.f, 150.f, 37.f, 0.95f, 0.66f, 2.45f,   0.45f,
-      5, { 13.f, 22.f, 33.f, 45.f, 60.f } },
-    { "RALLY",  1180.f, 220.f, 40.f, 0.88f, 0.70f, 2.60f,   0.72f,
-      6, { 12.f, 20.f, 29.f, 40.f, 53.f, 67.f } },
-    { "TOURER", 1350.f, 310.f, 34.f, 1.02f, 0.60f, 2.70f,   0.35f,
-      6, { 15.f, 25.f, 37.f, 50.f, 64.f, 79.f } },
+    /* name      mass    hp   brake  lat_g  CdA   wheelbase offroad  drivetrain          bias
+     *   gears, and the road speed (m/s) at the limiter in each                              */
+    { "RACER",   260.f,  48.f, 30.f, 1.62f, 0.45f, 1.05f,   0.30f, DRIVETRAIN_RWD, 0.0f,
+      4, { 14.000f, 24.000f, 35.000f, 47.000f } },
+    { "SPORT",   950.f, 150.f, 37.f, 1.19f, 0.66f, 2.45f,   0.45f, DRIVETRAIN_RWD, 0.0f,
+      5, { 13.000f, 22.000f, 33.000f, 45.000f, 60.000f } },
+    { "RALLY",  1180.f, 220.f, 40.f, 1.10f, 0.70f, 2.60f,   0.72f, DRIVETRAIN_AWD, 0.40f,
+      6, { 12.000f, 20.000f, 29.000f, 40.000f, 53.000f, 67.000f } },
+    { "TOURER", 1350.f, 310.f, 34.f, 1.28f, 0.60f, 2.70f,   0.35f, DRIVETRAIN_AWD, 0.50f,
+      6, { 15.000f, 25.000f, 37.000f, 50.000f, 64.000f, 79.000f } },
+    { "RUBY",   1080.f, 310.f, 33.f, 1.25f, 0.58f, 2.55f,   0.40f, DRIVETRAIN_FWD, 0.0f,
+      6, { 10.556f, 17.583f, 26.028f, 35.167f, 45.000f, 55.556f } },
+    { "BUGGY",   620.f,  95.f, 32.f, 1.44f, 0.55f, 2.20f,   0.85f, DRIVETRAIN_AWD, 0.45f,
+      4, { 11.111f, 19.444f, 29.167f, 40.278f } },
+    { "WAGON",  1550.f, 190.f, 42.f, 1.06f, 0.72f, 2.75f,   0.40f, DRIVETRAIN_FWD, 0.0f,
+      5, { 12.500f, 21.667f, 31.944f, 43.056f, 54.167f } },
+    { "FORMULA", 720.f, 260.f, 28.f, 1.81f, 0.55f, 2.90f,   0.10f, DRIVETRAIN_RWD, 0.0f,
+      6, { 15.278f, 26.389f, 38.889f, 51.389f, 63.889f, 75.000f } },
+    { "TRUCK",  2100.f, 280.f, 48.f, 0.88f, 0.85f, 3.10f,   0.78f, DRIVETRAIN_AWD, 0.35f,
+      5, { 11.667f, 19.444f, 27.778f, 36.111f, 45.833f } },
+    { "HERITAGE", 890.f, 85.f, 45.f, 0.94f, 0.58f, 2.35f,   0.35f, DRIVETRAIN_RWD, 0.0f,
+      4, { 10.556f, 18.056f, 26.389f, 34.722f } },
+    { "MUSCLE", 1620.f, 420.f, 40.f, 1.00f, 0.68f, 2.85f,   0.30f, DRIVETRAIN_RWD, 0.0f,
+      5, { 16.111f, 27.222f, 40.278f, 54.167f, 69.444f } },
 };
 
+/*
+ * Given a valid starting roster independent of kart_specs_reset_defaults()
+ * ever having been called — main.c's boot path always calls it before the
+ * garage is shown, but a belt-and-suspenders non-zero starting state is
+ * cheap insurance against some future caller that reads kart_specs first.
+ */
 KartSpec kart_specs[MAX_KART_SPECS] = {
-    { "RACER",   260.f,  48.f, 30.f, 1.30f, 0.45f, 1.05f, 0.30f,
-      4, { 14.f, 24.f, 35.f, 47.f } },
-    { "SPORT",   950.f, 150.f, 37.f, 0.95f, 0.66f, 2.45f, 0.45f,
-      5, { 13.f, 22.f, 33.f, 45.f, 60.f } },
-    { "RALLY",  1180.f, 220.f, 40.f, 0.88f, 0.70f, 2.60f, 0.72f,
-      6, { 12.f, 20.f, 29.f, 40.f, 53.f, 67.f } },
-    { "TOURER", 1350.f, 310.f, 34.f, 1.02f, 0.60f, 2.70f, 0.35f,
-      6, { 15.f, 25.f, 37.f, 50.f, 64.f, 79.f } },
+    { "RACER",   260.f,  48.f, 30.f, 1.62f, 0.45f, 1.05f,   0.30f, DRIVETRAIN_RWD, 0.0f,
+      4, { 14.000f, 24.000f, 35.000f, 47.000f } },
+    { "SPORT",   950.f, 150.f, 37.f, 1.19f, 0.66f, 2.45f,   0.45f, DRIVETRAIN_RWD, 0.0f,
+      5, { 13.000f, 22.000f, 33.000f, 45.000f, 60.000f } },
+    { "RALLY",  1180.f, 220.f, 40.f, 1.10f, 0.70f, 2.60f,   0.72f, DRIVETRAIN_AWD, 0.40f,
+      6, { 12.000f, 20.000f, 29.000f, 40.000f, 53.000f, 67.000f } },
+    { "TOURER", 1350.f, 310.f, 34.f, 1.28f, 0.60f, 2.70f,   0.35f, DRIVETRAIN_AWD, 0.50f,
+      6, { 15.000f, 25.000f, 37.000f, 50.000f, 64.000f, 79.000f } },
+    { "RUBY",   1080.f, 310.f, 33.f, 1.25f, 0.58f, 2.55f,   0.40f, DRIVETRAIN_FWD, 0.0f,
+      6, { 10.556f, 17.583f, 26.028f, 35.167f, 45.000f, 55.556f } },
+    { "BUGGY",   620.f,  95.f, 32.f, 1.44f, 0.55f, 2.20f,   0.85f, DRIVETRAIN_AWD, 0.45f,
+      4, { 11.111f, 19.444f, 29.167f, 40.278f } },
+    { "WAGON",  1550.f, 190.f, 42.f, 1.06f, 0.72f, 2.75f,   0.40f, DRIVETRAIN_FWD, 0.0f,
+      5, { 12.500f, 21.667f, 31.944f, 43.056f, 54.167f } },
+    { "FORMULA", 720.f, 260.f, 28.f, 1.81f, 0.55f, 2.90f,   0.10f, DRIVETRAIN_RWD, 0.0f,
+      6, { 15.278f, 26.389f, 38.889f, 51.389f, 63.889f, 75.000f } },
+    { "TRUCK",  2100.f, 280.f, 48.f, 0.88f, 0.85f, 3.10f,   0.78f, DRIVETRAIN_AWD, 0.35f,
+      5, { 11.667f, 19.444f, 27.778f, 36.111f, 45.833f } },
+    { "HERITAGE", 890.f, 85.f, 45.f, 0.94f, 0.58f, 2.35f,   0.35f, DRIVETRAIN_RWD, 0.0f,
+      4, { 10.556f, 18.056f, 26.389f, 34.722f } },
+    { "MUSCLE", 1620.f, 420.f, 40.f, 1.00f, 0.68f, 2.85f,   0.30f, DRIVETRAIN_RWD, 0.0f,
+      5, { 16.111f, 27.222f, 40.278f, 54.167f, 69.444f } },
 };
 
 int kart_spec_count = DEFAULT_SPEC_COUNT;
@@ -1392,6 +1434,12 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     float P = s->power_hp * HP_TO_W * g->settings.drivetrain_efficiency *
               grip * power_scale;
     float steer = game_clampf(in->steer, -1.0f, 1.0f);
+    /* 1 = all power to the front axle, 0 = all to the rear; FWD and RWD
+     * are just the ends of the same scale, AWD sits wherever its own
+     * front_bias says (see kart_specs / KartSpec.awd_front_bias). */
+    float dt_front = (s->drivetrain == DRIVETRAIN_FWD) ? 1.0f :
+                      (s->drivetrain == DRIVETRAIN_RWD) ? 0.0f :
+                      s->awd_front_bias;
 
     /* the marshal helicopter has arrived: hold most of the engine back
      * until the driver turns around */
@@ -1536,7 +1584,12 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     }
     if (in->accel && !in->brake) {
         float a_drive = P / (s->mass_kg * (fabsf(v) > 3.0f ? fabsf(v) : 3.0f));
-        float cap = 0.9f * mu_a;
+        /* two driven axles share the traction demand between them, so
+         * more of the grip circle is left for accelerating without
+         * either one individually breaking loose */
+        float traction_frac = (s->drivetrain == DRIVETRAIN_AWD) ? 1.00f
+                                                                 : 0.90f;
+        float cap = traction_frac * mu_a;
         if (a_drive > cap) a_drive = cap;
         a += a_drive;
     }
@@ -1580,21 +1633,29 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         float yaw_cap = mu_a / (fabsf(v) > 0.5f ? fabsf(v) : 0.5f);
         float yaw;
 
+        /* the driven axle spends some of its own grip on traction rather
+         * than cornering: a front-driven car understeers under power
+         * (the same tires steer and drive), a rear-driven one gets
+         * looser and easier to rotate instead. AWD leans whichever way
+         * awd_front_bias does, more gently than either extreme. */
+        if (in->accel && !in->brake)
+            yaw_cap *= 1.0f - 0.04f * (dt_front - 0.5f) * 2.0f;
+
         if (k->drifting) {
             yaw_cmd *= 1.35f;
             yaw_cap *= 1.5f;
-            v -= 0.55f * mu_a * dt;                  /* sliding is slow */
+            v -= 0.45f * mu_a * dt;                  /* sliding is slow */
             k->slip = fmaxf(k->slip, 0.7f);
         }
 
         if (yaw_cmd > yaw_cap) {
             yaw = yaw_cap;
             k->slip = game_clampf((yaw_cmd - yaw_cap) / yaw_cap, 0.0f, 1.0f);
-            v -= 0.25f * mu_a * k->slip * dt;        /* understeer scrub */
+            v -= 0.17f * mu_a * k->slip * dt;        /* understeer scrub */
         } else if (yaw_cmd < -yaw_cap) {
             yaw = -yaw_cap;
             k->slip = game_clampf((-yaw_cmd - yaw_cap) / yaw_cap, 0.0f, 1.0f);
-            v -= 0.25f * mu_a * k->slip * dt;
+            v -= 0.17f * mu_a * k->slip * dt;
         } else {
             yaw = yaw_cmd;
             k->slip *= (1.0f - 4.0f * dt);

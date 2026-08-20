@@ -4,6 +4,57 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.18.0] - 2026-08-20
+
+### Added
+
+- **Drivetrain**: every car is now front-wheel, rear-wheel, or full-time
+  all-wheel drive, set from an optional `"drivetrain"` block in
+  `cars.json` (`config/README.md` documents it; a car with no block is
+  RWD, matching every pre-1.18.0 car). AWD also takes a `front_bias`
+  (0–1) for how the drive splits between the axles. AWD cars get off
+  the line faster than an FWD or RWD car with otherwise identical
+  stats, because splitting the acceleration traction demand across two
+  axles leaves more of the grip circle free; a front-driven car
+  understeers a little more once back on the throttle, a rear-driven
+  one gets correspondingly looser and easier to rotate. RALLY, TOURER,
+  BUGGY, and TRUCK are AWD; RUBY and WAGON are FWD; the rest stay RWD.
+  Covered by `test_drivetrain_traction`, `test_drivetrain_cornering_balance`,
+  and `test_drivetrain_json_parsing` in `tests/test_game.c`.
+
+### Changed
+
+- **More grip, later breakaway.** Every car's `lateral_grip_g` is up
+  about 25% across the board, and the understeer scrub that follows
+  once a corner is driven past that limit is gentler (was pulling
+  0.55/0.25 g out of the car per second of overcooked corner, now
+  0.45/0.17), so grip loss reads as a progressive scrub deeper into a
+  turn rather than an abrupt wall right at the edge.
+
+### Fixed
+
+- **New cars actually reach the garage now.** `main.c` falls back to a
+  compiled-in roster (`default_kart_specs` in `game.c`) whenever there
+  is no SD card for `cars.json` to be read from — the common case when
+  a release DOL is opened directly in an emulator. That compiled
+  roster still only had the original four cars, so RUBY (v1.15.0) and
+  BUGGY/WAGON/FORMULA/TRUCK/HERITAGE/MUSCLE (v1.17.0) were invisible
+  outside a setup with a virtual SD card, even though `cars.json`
+  itself was correct and had been shipping in every release zip since
+  they were added. The compiled roster now mirrors `cars.json` exactly
+  (11 cars); `DEFAULT_SPEC_COUNT` moves from 4 to 11.
+- **RUBY's gearbox could strand it in first gear.** Its `cars.json`
+  gear ladder jumped from a 15 km/h first-gear limiter straight to 35
+  km/h — a 2.33x ratio, versus 1.65–1.75x for every other car — which
+  put RUBY right on the edge of the AI gearbox's anti-hunting margin
+  for any driver with a `shift_down_frac` of 0.37 or higher. Those
+  drivers could get stuck unable to satisfy the upshift condition and
+  crawl the entire race at the gear-1 limiter. Never seen before
+  because RUBY was never actually assigned to an AI driver until the
+  compiled-roster fix above put every car into play. Regeared to the
+  same decreasing-ratio ladder as TOURER (its 310 hp, 6-speed
+  equivalent), scaled to the same 200 km/h top speed.
+
 ## [1.17.0] - 2026-08-20
 
 ### Added

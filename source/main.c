@@ -2840,6 +2840,13 @@ static void draw_garage_overlay(int p)
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
     snprintf(buf, sizeof(buf), "DIRT  %d",
              (int)(sp->offroad_grip * 100.0f));
+    hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    if (sp->drivetrain == DRIVETRAIN_AWD)
+        snprintf(buf, sizeof(buf), "DRIVE AWD %dF",
+                 (int)(sp->awd_front_bias * 100.0f));
+    else
+        snprintf(buf, sizeof(buf), "DRIVE %s",
+                 sp->drivetrain == DRIVETRAIN_FWD ? "FWD" : "RWD");
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250);
 
     /* the gearing itself, as a row of bars: how tall each gear is */

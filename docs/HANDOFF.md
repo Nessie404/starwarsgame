@@ -138,6 +138,13 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   MUSCLE) for eleven in the garage; Berthoud Pass 2.0 rebuilt so its own
   loop-back can't clip another part of the lap and no corner is sharper
   than a 37 m radius.
+- **v1.18**: every car has a drivetrain (FWD, RWD, or AWD with a
+  `front_bias`), grip is up ~25% across the board with a gentler,
+  later-breaking understeer scrub, `default_kart_specs` in `game.c` now
+  mirrors `cars.json`'s full eleven-car roster instead of just the
+  original four (see §6 below — this is why cars added in v1.15–v1.17
+  were invisible without an SD card), and RUBY's broken gear ladder
+  that could strand it in first gear is fixed.
 
 ---
 
@@ -168,6 +175,31 @@ afterwards or it will poison later tests.
 **The AI must always finish.** `test_ai_races_all_tracks` drives all
 eleven AI round every circuit. If a change makes them slower, that test
 starts failing by timeout. It is the canary for physics changes.
+
+**The compiled roster (`default_kart_specs` in `game.c`) is not read
+from `cars.json` automatically — keep them in sync by hand.** `main.c`
+falls back to it whenever there is no SD card (opening a release DOL
+directly in an emulator, no virtual SD set up). Add a car to
+`cars.json` and forget to add the same car to `default_kart_specs`
+(and the duplicate `kart_specs[]` initializer right below it) and it
+will build, pass a host test that only reads `cars.json`, and still be
+invisible in the actual game for most players. `test_json_configuration`
+checks `kart_spec_count == DEFAULT_SPEC_COUNT` after loading the
+shipped file for exactly this reason — if that stops matching, one of
+the two rosters drifted from the other.
+
+**A gear ratio that never gets exercised can still be broken.** The AI
+gearbox only tries to upshift if the target gear would land above
+`bog_fraction + 0.04`; a gear-to-gear ratio much steeper than the rest
+of the roster's ~1.65–1.75x can put a car exactly on the wrong side of
+that margin and strand it in the lower gear for an entire race. This
+hid in RUBY's `cars.json` entry for three releases because it was never
+assigned to an AI driver until the roster-sync fix above put every car
+into play — `test_full_race_classic`'s 300 s AI-finish timeout is what
+caught it. If a new car's own dedicated tests all pass but an AI race
+test times out or a CHARGER/LATE-strategy kart racks up zero mistakes,
+check whether that new car is now actually being driven by the AI for
+the first time.
 
 ---
 

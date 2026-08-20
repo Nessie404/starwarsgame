@@ -67,11 +67,30 @@ Optional per-car keys, on top of the required ones:
 | `automatic_downshift_fraction` | 0.38 | Where it changes down |
 | `automatic_upshift_per_gear` | — | The same, one value per gear (the list length must match the gearbox) |
 | `automatic_downshift_per_gear` | — | As above |
+| `drivetrain` | `{"type": "rwd"}` | Which axle(s) put power down — see below |
 
 A car can short-shift out of first and hold second to the limiter by
 giving a per-gear list. The upshift and downshift points must stay at
 least 0.20 apart, otherwise the box would change up into its own
 downshift point and hunt; a file that asks for that is refused whole.
+
+### The `drivetrain` block
+
+`"type"` is `"fwd"`, `"rwd"`, or `"awd"`; a car with no `drivetrain` block
+at all is rear-wheel drive. `"front_bias"` (AWD only, 0–1, default 0.5)
+sets how much of the drive goes to the front axle — 0 leans on the rear,
+1 leans on the front.
+
+```json
+"drivetrain": { "type": "awd", "front_bias": 0.40 }
+```
+
+The driven axle spends some of its own grip on putting power down rather
+than cornering: a front-driven car understeers a little more once you're
+back on the throttle, a rear-driven one gets a little looser and easier
+to rotate instead. AWD splits the acceleration traction demand across
+both axles, which is also why it gets off the line quicker than an FWD
+or RWD car with otherwise identical stats.
 
 ## `settings.json`
 

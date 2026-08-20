@@ -116,9 +116,13 @@ float track_wall_half(const Track *t, int seg);
 /* Vehicle specs (real-world performance parameters)                  */
 /* ------------------------------------------------------------------ */
 
-#define DEFAULT_SPEC_COUNT 4
+#define DEFAULT_SPEC_COUNT 11
 /* Kept as the built-in roster size for old tests and source users. Runtime
- * code must use kart_spec_count: cars.json can grow the garage. */
+ * code must use kart_spec_count: cars.json can grow the garage. The
+ * compiled-in roster mirrors the shipped cars.json exactly, so the full
+ * garage is there even with no filesystem to read the JSON from (a DOL
+ * opened directly in Dolphin with no virtual SD card, for instance) —
+ * see HANDOFF.md for why that used to leave most of the garage empty. */
 #define SPEC_COUNT DEFAULT_SPEC_COUNT
 #define MAX_KART_SPECS 16
 #define KART_NAME_LEN   16
@@ -141,6 +145,20 @@ typedef struct {
     float cd_a;              /* drag area Cd*A, m^2                     */
     float wheelbase;         /* m, sets steering geometry               */
     float offroad_grip;      /* fraction of grip/power kept off road    */
+    /*
+     * Which axle(s) put power down, set from an optional "drivetrain"
+     * block in cars.json (config.c); a car with no block is RWD. The
+     * driven axle spends some of its own grip on traction rather than
+     * cornering: a front-driven car understeers under power (the same
+     * tires steer and drive), a rear-driven one gets looser and easier
+     * to rotate instead (kart_step). All-wheel drive splits the demand
+     * across both axles, which both softens that trade-off in whichever
+     * direction awd_front_bias leans and leaves more of the grip circle
+     * free for accelerating without breaking traction in the first
+     * place — see DRIVETRAIN_* below.
+     */
+    int   drivetrain;
+    float awd_front_bias;    /* AWD only: 0 = rear-biased .. 1 = front-biased */
     int   n_gears;
     float gear_top[MAX_GEARS];  /* m/s at the limiter in each gear      */
     /*
@@ -152,6 +170,8 @@ typedef struct {
     float auto_up[MAX_GEARS];
     float auto_down[MAX_GEARS];
 } KartSpec;
+
+enum { DRIVETRAIN_FWD = 0, DRIVETRAIN_RWD = 1, DRIVETRAIN_AWD = 2 };
 
 #define COOLDOWN_SECONDS 11.0f /* slowing-down lap: flag to a standstill */
 #define SHIFT_TIME    0.18f   /* seconds of cut drive while shifting    */

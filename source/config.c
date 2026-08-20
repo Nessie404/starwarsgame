@@ -494,6 +494,12 @@ static int valid_car(const KartSpec *s, char *error, int error_cap)
         return set_error(error, error_cap, "BAD WHEELBASE");
     if (s->offroad_grip < 0.05f || s->offroad_grip > 1.20f)
         return set_error(error, error_cap, "BAD DIRT GRIP");
+    if (s->drivetrain != DRIVETRAIN_FWD && s->drivetrain != DRIVETRAIN_RWD &&
+        s->drivetrain != DRIVETRAIN_AWD)
+        return set_error(error, error_cap, "BAD DRIVETRAIN");
+    if (s->drivetrain == DRIVETRAIN_AWD &&
+        (s->awd_front_bias < 0.0f || s->awd_front_bias > 1.0f))
+        return set_error(error, error_cap, "BAD AWD BIAS");
     if (s->n_gears < 1 || s->n_gears > MAX_GEARS)
         return set_error(error, error_cap, "BAD GEAR COUNT");
     for (g = 0; g < s->n_gears; g++) {
@@ -511,6 +517,46 @@ static int valid_car(const KartSpec *s, char *error, int error_cap)
         if (s->auto_up[g] - s->auto_down[g] < 0.20f)
             return set_error(error, error_cap, "SHIFT POINTS TOO CLOSE");
     }
+    return 1;
+}
+
+/*
+ * Optional per-car drivetrain: which axle(s) put power down. A car with
+ * no "drivetrain" block is rear-wheel drive. "type" is "fwd", "rwd" or
+ * "awd"; "front_bias" (0..1, AWD only) says how much of that drive goes
+ * to the front axle, 0.5 being an even split.
+ */
+static int read_drivetrain(const char *json, const JsonToken *tokens,
+                           int count, int obj, KartSpec *s,
+                           char *error, int error_cap)
+{
+    int at = object_get(json, tokens, count, obj, "drivetrain");
+    char type[8];
+    int type_at;
+
+    s->drivetrain = DRIVETRAIN_RWD;
+    s->awd_front_bias = 0.5f;
+    if (at < 0)
+        return 1;
+    if (tokens[at].type != JT_OBJECT)
+        return set_error(error, error_cap, "DRIVETRAIN NEEDS OBJECT");
+
+    type_at = object_get(json, tokens, count, at, "type");
+    if (type_at < 0 || !token_string(json, &tokens[type_at], type,
+                                     (int)sizeof(type)))
+        return set_error(error, error_cap, "DRIVETRAIN NEEDS A TYPE");
+    if (strcmp(type, "fwd") == 0)
+        s->drivetrain = DRIVETRAIN_FWD;
+    else if (strcmp(type, "rwd") == 0)
+        s->drivetrain = DRIVETRAIN_RWD;
+    else if (strcmp(type, "awd") == 0)
+        s->drivetrain = DRIVETRAIN_AWD;
+    else
+        return set_error(error, error_cap, "UNKNOWN DRIVETRAIN TYPE");
+
+    if (!optional_float(json, tokens, count, at, "front_bias",
+                        &s->awd_front_bias, error, error_cap))
+        return 0;
     return 1;
 }
 
@@ -633,6 +679,11 @@ int config_load_cars_text(const char *json, char *error, int error_cap)
         }
         if (!read_shift_points(json, tokens, count, obj, s, error,
                                error_cap)) {
+            free(tokens);
+            return 0;
+        }
+        if (!read_drivetrain(json, tokens, count, obj, s, error,
+                             error_cap)) {
             free(tokens);
             return 0;
         }
