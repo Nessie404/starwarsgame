@@ -120,11 +120,12 @@ static void test_tracks_geometry(void)
             CHECK(t.curv[i] >= 0.0f && t.curv[i] < 0.4f,
                   "curvature %.3f at %d on track %d", t.curv[i], i, id);
         }
-        if (id != TRACK_CLASSIC) {
+        if (id != TRACK_CLASSIC && id != TRACK_BULLRING) {
             CHECK(t.max_y - t.min_y > 30.0f, "pass %d too flat", id);
             CHECK(t.alpine, "pass %d not alpine", id);
         } else {
-            CHECK(t.max_y - t.min_y < 1.0f, "classic not flat");
+            CHECK(t.max_y - t.min_y < 1.0f, "%s not flat", t.name);
+            CHECK(!t.alpine, "%s should not be alpine", t.name);
         }
     }
 }
@@ -665,12 +666,13 @@ static void test_ai_races_all_tracks(void)
         CHECK(finished == NUM_KARTS - 1,
               "only %d of %d AI finished on track %d", finished,
               NUM_KARTS - 1, id);
-        /* a plausible pace for the distance: 8..36 m/s average. (Corners
+        /* a plausible pace for the distance: 8..38 m/s average. (Corners
          * were widened across the roster to close off shoulder-cutting
          * and the AI's skill multiplier went up, so the fastest,
          * gentlest circuits run quicker than the 32 m/s this cap used
-         * to allow.) */
-        CHECK(best_lap > g.track.total_len / 36.0f &&
+         * to allow; the corner-smoothing pass added in v1.23.0 pushed
+         * the ceiling up once more, from 36.) */
+        CHECK(best_lap > g.track.total_len / 38.0f &&
               best_lap < g.track.total_len / 8.0f,
               "best lap %.1f s implausible for %.0f m on track %d",
               best_lap, g.track.total_len, id);
@@ -2612,6 +2614,231 @@ static void test_compiled_roster_matches_cars_json(void)
                   "%s: gear %d tops out at %.2f m/s compiled, %.2f m/s "
                   "from cars.json", d->name, g, d->gear_top[g],
                   j->gear_top[g]);
+    }
+    kart_specs_reset_defaults();
+}
+
+/*
+ * The in-game car designer's data model (game.c): kart_specs_add_custom
+ * validates, rejects a name collision or an over-full garage, fills in
+ * default shift points, and appends to the live roster.
+ */
+static void test_car_designer_add_custom(void)
+{
+    KartSpec car;
+    char error[128];
+    int idx, before, i;
+
+    kart_specs_reset_defaults();
+    before = kart_spec_count;
+
+    memset(&car, 0, sizeof(car));
+    snprintf(car.name, sizeof(car.name), "TESTCAR");
+    car.mass_kg = 1000.0f;
+    car.power_hp = 300.0f;
+    car.brake_dist_100 = 34.0f;
+    car.lat_g = 1.15f;
+    car.cd_a = 0.58f;
+    car.wheelbase = 2.50f;
+    car.offroad_grip = 0.40f;
+    car.drivetrain = DRIVETRAIN_RWD;
+    car.awd_front_bias = 0.5f;
+    car.n_gears = 4;
+    car.gear_top[0] = 14.0f; car.gear_top[1] = 24.0f;
+    car.gear_top[2] = 35.0f; car.gear_top[3] = 47.0f;
+
+    idx = kart_specs_add_custom(&car, error, (int)sizeof(error));
+    CHECK(idx == before, "a valid custom car landed at index %d, not %d "
+          "(%s)", idx, before, idx < 0 ? error : "n/a");
+    CHECK(kart_spec_count == before + 1,
+          "adding one car changed the count by %d",
+          kart_spec_count - before);
+    CHECK(strcmp(kart_specs[idx].name, "TESTCAR") == 0 &&
+          fabsf(kart_specs[idx].power_hp - 300.0f) < 0.01f,
+          "the added car's own fields did not stick");
+    CHECK(kart_specs[idx].auto_up[0] > 0.0f &&
+          kart_specs[idx].auto_down[0] > 0.0f,
+          "the added car has no shift points filled in");
+
+    /* a second car under the same name is a duplicate, not a rename */
+    idx = kart_specs_add_custom(&car, error, (int)sizeof(error));
+    CHECK(idx < 0 && strcmp(error, "DUPLICATE CAR NAME") == 0,
+          "a duplicate name was not rejected (idx %d, error \"%s\")",
+          idx, error);
+    CHECK(kart_spec_count == before + 1,
+          "a rejected duplicate still changed the car count");
+
+    /* an invalid spec (mass far outside the sane range) is rejected the
+     * same way cars.json would reject it */
+    snprintf(car.name, sizeof(car.name), "TOOLIGHT");
+    car.mass_kg = 1.0f;
+    idx = kart_specs_add_custom(&car, error, (int)sizeof(error));
+    CHECK(idx < 0 && error[0] != '\0',
+          "an out-of-range car was accepted (idx %d)", idx);
+    CHECK(kart_spec_count == before + 1,
+          "a rejected invalid car still changed the car count");
+
+    /* the garage has a ceiling */
+    car.mass_kg = 1000.0f;
+    for (i = kart_spec_count; i < MAX_KART_SPECS; i++) {
+        char name[KART_NAME_LEN];
+        snprintf(name, sizeof(name), "FILL%d", i);
+        snprintf(car.name, sizeof(car.name), "%s", name);
+        idx = kart_specs_add_custom(&car, error, (int)sizeof(error));
+        CHECK(idx == i, "filling the garage stalled early at %d/%d (%s)",
+              i, MAX_KART_SPECS, error);
+    }
+    CHECK(kart_spec_count == MAX_KART_SPECS,
+          "the garage did not fill to MAX_KART_SPECS (%d, got %d)",
+          MAX_KART_SPECS, kart_spec_count);
+    snprintf(car.name, sizeof(car.name), "ONETOOMANY");
+    idx = kart_specs_add_custom(&car, error, (int)sizeof(error));
+    CHECK(idx < 0 && strcmp(error, "GARAGE IS FULL") == 0,
+          "a car past MAX_KART_SPECS was not rejected as a full garage "
+          "(idx %d, error \"%s\")", idx, error);
+
+    kart_specs_reset_defaults();
+}
+
+/*
+ * The save half: config_write_cars_text has to be the exact inverse of
+ * config_load_cars_text, including for the two shipped cars (FORMULA,
+ * TRUCK) whose shift points are deliberately tuned away from the
+ * compiled default — a save that quietly flattened those back to
+ * default would be a real, silent handling change, not just a cosmetic
+ * JSON diff.
+ */
+static void test_car_designer_save_round_trips(void)
+{
+    KartSpec before[MAX_KART_SPECS];
+    KartSpec car;
+    char *buf;
+    const int cap = 32768;
+    char error[128];
+    int before_count, idx, len, i, g;
+
+    kart_specs_reset_defaults();
+    CHECK(config_load_cars_file("config/cars.json", error,
+                                (int)sizeof(error)),
+          "shipped cars.json did not load: %s", error);
+
+    memset(&car, 0, sizeof(car));
+    snprintf(car.name, sizeof(car.name), "TESTCAR");
+    car.mass_kg = 1000.0f;
+    car.power_hp = 300.0f;
+    car.brake_dist_100 = 34.0f;
+    car.lat_g = 1.15f;
+    car.cd_a = 0.58f;
+    car.wheelbase = 2.50f;
+    car.offroad_grip = 0.40f;
+    car.drivetrain = DRIVETRAIN_AWD;
+    car.awd_front_bias = 0.35f;
+    car.n_gears = 4;
+    car.gear_top[0] = 14.0f; car.gear_top[1] = 24.0f;
+    car.gear_top[2] = 35.0f; car.gear_top[3] = 47.0f;
+    idx = kart_specs_add_custom(&car, error, (int)sizeof(error));
+    CHECK(idx >= 0, "adding the test car before the round trip failed: %s",
+          error);
+
+    before_count = kart_spec_count;
+    memcpy(before, kart_specs, sizeof(before));
+
+    buf = (char *)malloc((size_t)cap);
+    CHECK(buf != NULL, "no memory for the round-trip buffer");
+    if (!buf) return;
+    len = config_write_cars_text(kart_specs, kart_spec_count, buf, cap);
+    CHECK(len > 0, "writing the roster to JSON failed");
+
+    kart_specs_reset_defaults();
+    CHECK(config_load_cars_text(buf, error, (int)sizeof(error)),
+          "the written roster did not load back: %s", error);
+    free(buf);
+    CHECK(kart_spec_count == before_count,
+          "round trip changed the car count (%d -> %d)",
+          before_count, kart_spec_count);
+
+    for (i = 0; i < before_count && i < kart_spec_count; i++) {
+        const KartSpec *b = &before[i];
+        const KartSpec *a = &kart_specs[i];
+
+        CHECK(strcmp(b->name, a->name) == 0,
+              "round-trip car %d: \"%s\" became \"%s\"", i, b->name,
+              a->name);
+        CHECK(fabsf(b->mass_kg - a->mass_kg) < 0.01f &&
+              fabsf(b->power_hp - a->power_hp) < 0.01f &&
+              fabsf(b->brake_dist_100 - a->brake_dist_100) < 0.01f &&
+              fabsf(b->lat_g - a->lat_g) < 0.001f &&
+              fabsf(b->cd_a - a->cd_a) < 0.001f &&
+              fabsf(b->wheelbase - a->wheelbase) < 0.001f &&
+              fabsf(b->offroad_grip - a->offroad_grip) < 0.001f,
+              "%s did not round-trip mass/power/brake/grip/drag/"
+              "wheelbase/dirt", b->name);
+        CHECK(b->drivetrain == a->drivetrain &&
+              fabsf(b->awd_front_bias - a->awd_front_bias) < 0.001f,
+              "%s did not round-trip its drivetrain (%d/%.2f vs %d/%.2f)",
+              b->name, b->drivetrain, b->awd_front_bias, a->drivetrain,
+              a->awd_front_bias);
+        CHECK(fabsf(b->auto_up[0] - a->auto_up[0]) < 0.001f &&
+              fabsf(b->auto_down[0] - a->auto_down[0]) < 0.001f,
+              "%s did not round-trip its shift points (%.2f/%.2f -> "
+              "%.2f/%.2f)", b->name, b->auto_up[0], b->auto_down[0],
+              a->auto_up[0], a->auto_down[0]);
+        CHECK(b->n_gears == a->n_gears, "%s: gear count changed (%d -> %d)",
+              b->name, b->n_gears, a->n_gears);
+        for (g = 0; g < b->n_gears && g < a->n_gears; g++)
+            CHECK(fabsf(b->gear_top[g] - a->gear_top[g]) < 0.01f,
+                  "%s: gear %d changed in the round trip (%.2f -> %.2f)",
+                  b->name, g, b->gear_top[g], a->gear_top[g]);
+    }
+    kart_specs_reset_defaults();
+}
+
+/* config_save_cars_file is config_write_cars_text plus an actual file
+ * write — this is the one part of the designer's save path that
+ * touches disk, so it gets its own pass through a scratch file. */
+static void test_car_designer_save_file_round_trips(void)
+{
+    const char *tmp = "wiikart-test-custom-cars.json";
+    KartSpec car;
+    char error[128];
+    int before_count, idx;
+
+    kart_specs_reset_defaults();
+    memset(&car, 0, sizeof(car));
+    snprintf(car.name, sizeof(car.name), "FILETEST");
+    car.mass_kg = 1200.0f;
+    car.power_hp = 260.0f;
+    car.brake_dist_100 = 35.0f;
+    car.lat_g = 1.10f;
+    car.cd_a = 0.60f;
+    car.wheelbase = 2.60f;
+    car.offroad_grip = 0.45f;
+    car.drivetrain = DRIVETRAIN_FWD;
+    car.awd_front_bias = 0.5f;
+    car.n_gears = 3;
+    car.gear_top[0] = 15.0f; car.gear_top[1] = 27.0f; car.gear_top[2] = 40.0f;
+    idx = kart_specs_add_custom(&car, error, (int)sizeof(error));
+    CHECK(idx >= 0, "adding the file-round-trip car failed: %s", error);
+    before_count = kart_spec_count;
+
+    CHECK(config_save_cars_file(tmp, kart_specs, kart_spec_count, error,
+                                (int)sizeof(error)),
+          "saving the roster to a file failed: %s", error);
+
+    kart_specs_reset_defaults();
+    CHECK(config_load_cars_file(tmp, error, (int)sizeof(error)),
+          "the saved file did not load back: %s", error);
+    remove(tmp);
+
+    CHECK(kart_spec_count == before_count,
+          "the saved file round-tripped to %d cars, not %d",
+          kart_spec_count, before_count);
+    {
+        int found = 0, i;
+        for (i = 0; i < kart_spec_count; i++)
+            if (strcmp(kart_specs[i].name, "FILETEST") == 0) found = 1;
+        CHECK(found, "the saved custom car is missing after reloading "
+              "the file");
     }
     kart_specs_reset_defaults();
 }
@@ -4678,6 +4905,9 @@ static void test_camera_settings_json(void)
 int main(void)
 {
     test_compiled_roster_matches_cars_json();
+    test_car_designer_add_custom();
+    test_car_designer_save_round_trips();
+    test_car_designer_save_file_round_trips();
     test_json_configuration();
     test_steering_filter();
     test_steer_sign();

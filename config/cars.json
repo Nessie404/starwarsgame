@@ -1,5 +1,5 @@
 {
-  "_comment": "All units are shown in field names. Add a new object to this array to add a garage car. Maximum: 16 cars, 6 gears each.",
+  "_comment": "All units are shown in field names. Add a new object to this array to add a garage car. Maximum: 24 cars, 6 gears each.",
   "cars": [
     {
       "name": "RACER",
@@ -152,6 +152,32 @@
       "wheelbase_m": 2.85,
       "offroad_grip": 0.30,
       "gear_top_speeds_kph": [58.0, 98.0, 145.0, 195.0, 250.0],
+      "drivetrain": { "type": "rwd" }
+    },
+    {
+      "_comment": "Oval specialist: a big, heavy stock car built for BULLRING — huge power and low drag for the straights, and enough grip to actually hold a sweeping turn without banking to lean on. Tuned down from an initial, faster cut that could get stuck falling forever on MONARCH's tightest hairpin under AI control (see docs/HANDOFF.md).",
+      "name": "STOCKER",
+      "mass_kg": 1560,
+      "power_hp": 540,
+      "brake_distance_100_kph_m": 36,
+      "lateral_grip_g": 1.38,
+      "drag_area_m2": 0.56,
+      "wheelbase_m": 2.80,
+      "offroad_grip": 0.15,
+      "gear_top_speeds_kph": [70.0, 120.0, 175.0, 235.0, 300.0],
+      "drivetrain": { "type": "rwd" }
+    },
+    {
+      "_comment": "STOCKER's low-drag sibling: less power, but even less drag, so it tops out faster on a long straight and is happiest running nose-to-tail.",
+      "name": "SLIPSTREAM",
+      "mass_kg": 1500,
+      "power_hp": 550,
+      "brake_distance_100_kph_m": 38,
+      "lateral_grip_g": 1.28,
+      "drag_area_m2": 0.50,
+      "wheelbase_m": 2.85,
+      "offroad_grip": 0.15,
+      "gear_top_speeds_kph": [72.0, 122.0, 180.0, 242.0, 310.0],
       "drivetrain": { "type": "rwd" }
     }
   ]

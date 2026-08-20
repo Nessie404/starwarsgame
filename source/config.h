@@ -94,6 +94,15 @@ int config_load_settings_file(GameSettings *settings, const char *path,
 int config_load_controls_file(ControlConfig *controls, const char *path,
                               char *error, int error_cap);
 
+/* Write half of the cars loader, for the in-game car designer to
+ * persist a saved car past the current session. config_write_cars_text
+ * is the pure, host-testable serializer; config_save_cars_file wraps it
+ * with the actual file write. */
+int config_write_cars_text(const KartSpec *specs, int count,
+                           char *buf, int buf_cap);
+int config_save_cars_file(const char *path, const KartSpec *specs,
+                          int count, char *error, int error_cap);
+
 #ifdef __cplusplus
 }
 #endif

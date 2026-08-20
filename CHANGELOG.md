@@ -4,6 +4,37 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.23.0] - 2026-08-23
+
+### Added
+
+- **BULLRING**, a ninth circuit: a flat, wide, barriered oval generated
+  from its own geometry (two straights, two constant-radius sweeping
+  turns) rather than hand-drawn, so it has no abrupt curves anywhere on
+  the lap. Grandstands run the length of both straights.
+- **STOCKER and SLIPSTREAM**, two new oval-specialist cars tuned for
+  BULLRING — huge power and low drag for the straights, with enough
+  grip to actually hold a sweeping turn without banking to lean on.
+  Genuinely competitive with the roster's other big-power cars on the
+  new circuit.
+- **An in-game car designer**, reachable from the main menu: dial in a
+  name, mass, power, brakes, grip, drag, dirt grip and drivetrain, with
+  a live preview of the derived top speed and 0-100 time, then save it
+  into the garage for the rest of the session — and to `cars.json`
+  itself, wherever it was actually found, so it's still there next
+  time.
+
+### Changed
+
+- **Smoother corners on every circuit but MONARCH.** The corner-easing
+  pass in `track_init` now blends over a wider neighborhood, softening
+  how sharply curvature ramps into and out of a bend, without eroding
+  a genuinely tight apex — Berthoud 2.0's and Guanella's hairpins are
+  still real hairpins. MONARCH keeps the original, narrower pass: it's
+  the one circuit where the wider blend measurably hurt, stranding an
+  AI driver in a fall loop on its tightest hairpin under the YOLO
+  strategy sheet.
+
 ## [1.22.0] - 2026-08-22
 
 ### Added

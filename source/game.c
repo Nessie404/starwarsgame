@@ -18,6 +18,7 @@
  * The handbrake can rotate the car, but costs speed; there is deliberately
  * no hidden slide boost or rubber-banding.
  */
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -64,6 +65,10 @@ static const KartSpec default_kart_specs[DEFAULT_SPEC_COUNT] = {
       4, { 10.556f, 18.056f, 26.389f, 34.722f } },
     { "MUSCLE", 1620.f, 420.f, 40.f, 1.00f, 0.68f, 2.85f,   0.30f, DRIVETRAIN_RWD, 0.5f,
       5, { 16.111f, 27.222f, 40.278f, 54.167f, 69.444f } },
+    { "STOCKER", 1560.f, 540.f, 36.f, 1.38f, 0.56f, 2.80f, 0.15f, DRIVETRAIN_RWD, 0.5f,
+      5, { 19.444f, 33.333f, 48.611f, 65.278f, 83.333f } },
+    { "SLIPSTREAM", 1500.f, 550.f, 38.f, 1.28f, 0.50f, 2.85f, 0.15f, DRIVETRAIN_RWD, 0.5f,
+      5, { 20.000f, 33.889f, 50.000f, 67.222f, 86.111f } },
 };
 
 /*
@@ -95,6 +100,10 @@ KartSpec kart_specs[MAX_KART_SPECS] = {
       4, { 10.556f, 18.056f, 26.389f, 34.722f } },
     { "MUSCLE", 1620.f, 420.f, 40.f, 1.00f, 0.68f, 2.85f,   0.30f, DRIVETRAIN_RWD, 0.5f,
       5, { 16.111f, 27.222f, 40.278f, 54.167f, 69.444f } },
+    { "STOCKER", 1560.f, 540.f, 36.f, 1.38f, 0.56f, 2.80f, 0.15f, DRIVETRAIN_RWD, 0.5f,
+      5, { 19.444f, 33.333f, 48.611f, 65.278f, 83.333f } },
+    { "SLIPSTREAM", 1500.f, 550.f, 38.f, 1.28f, 0.50f, 2.85f, 0.15f, DRIVETRAIN_RWD, 0.5f,
+      5, { 20.000f, 33.889f, 50.000f, 67.222f, 86.111f } },
 };
 
 int kart_spec_count = DEFAULT_SPEC_COUNT;
@@ -121,6 +130,111 @@ void kart_specs_reset_defaults(void)
     for (i = 0; i < MAX_KART_SPECS; i++)
         kart_spec_default_shifts(&kart_specs[i]);
     kart_spec_count = DEFAULT_SPEC_COUNT;
+}
+
+static int kart_spec_error(char *error, int error_cap, const char *message)
+{
+    if (error && error_cap > 0) {
+        snprintf(error, (size_t)error_cap, "%s", message);
+        error[error_cap - 1] = '\0';
+    }
+    return 0;
+}
+
+/*
+ * Whether a KartSpec is sane enough to actually race — the same bounds
+ * cars.json is held to (config.c's loader calls this too), plus the
+ * one piece that only matters for a hand-built car: a gearbox that
+ * won't hunt (an upshift point has to clear its own downshift point by
+ * a real margin). Shared by cars.json validation and the in-game car
+ * designer (kart_specs_add_custom below) so a player-built car can
+ * never be less sound than a JSON one.
+ */
+int kart_spec_validate(const KartSpec *s, char *error, int error_cap)
+{
+    int g;
+    if (!s->name[0]) return kart_spec_error(error, error_cap, "CAR NEEDS NAME");
+    for (g = 0; s->name[g]; g++)
+        if (!isalnum((unsigned char)s->name[g]) && s->name[g] != ' ' &&
+            s->name[g] != '-' && s->name[g] != '.')
+            return kart_spec_error(error, error_cap, "BAD CAR NAME");
+    if (s->mass_kg < 100.0f || s->mass_kg > 5000.0f)
+        return kart_spec_error(error, error_cap, "BAD CAR MASS");
+    if (s->power_hp < 5.0f || s->power_hp > 2500.0f)
+        return kart_spec_error(error, error_cap, "BAD CAR POWER");
+    if (s->brake_dist_100 < 5.0f || s->brake_dist_100 > 200.0f)
+        return kart_spec_error(error, error_cap, "BAD CAR BRAKES");
+    if (s->lat_g < 0.20f || s->lat_g > 3.0f)
+        return kart_spec_error(error, error_cap, "BAD CAR GRIP");
+    if (s->cd_a < 0.10f || s->cd_a > 3.0f)
+        return kart_spec_error(error, error_cap, "BAD CAR DRAG");
+    if (s->wheelbase < 0.50f || s->wheelbase > 6.0f)
+        return kart_spec_error(error, error_cap, "BAD WHEELBASE");
+    if (s->offroad_grip < 0.05f || s->offroad_grip > 1.20f)
+        return kart_spec_error(error, error_cap, "BAD DIRT GRIP");
+    if (s->drivetrain != DRIVETRAIN_FWD && s->drivetrain != DRIVETRAIN_RWD &&
+        s->drivetrain != DRIVETRAIN_AWD)
+        return kart_spec_error(error, error_cap, "BAD DRIVETRAIN");
+    if (s->drivetrain == DRIVETRAIN_AWD &&
+        (s->awd_front_bias < 0.0f || s->awd_front_bias > 1.0f))
+        return kart_spec_error(error, error_cap, "BAD AWD BIAS");
+    if (s->n_gears < 1 || s->n_gears > MAX_GEARS)
+        return kart_spec_error(error, error_cap, "BAD GEAR COUNT");
+    for (g = 0; g < s->n_gears; g++) {
+        if (s->gear_top[g] < 2.0f || s->gear_top[g] > 140.0f ||
+            (g > 0 && s->gear_top[g] <= s->gear_top[g - 1]))
+            return kart_spec_error(error, error_cap, "BAD GEAR SPEEDS");
+    }
+    for (g = 0; g < s->n_gears; g++) {
+        if (s->auto_up[g] < 0.30f || s->auto_up[g] > 1.20f)
+            return kart_spec_error(error, error_cap, "BAD UPSHIFT POINT");
+        if (s->auto_down[g] < 0.05f || s->auto_down[g] > 0.90f)
+            return kart_spec_error(error, error_cap, "BAD DOWNSHIFT POINT");
+        /* an upshift that lands on the same car's downshift point is how
+         * a gearbox ends up hunting, so the two have to stay apart */
+        if (s->auto_up[g] - s->auto_down[g] < 0.20f)
+            return kart_spec_error(error, error_cap, "SHIFT POINTS TOO CLOSE");
+    }
+    return 1;
+}
+
+/*
+ * Add one car to the live roster — the in-game car designer's save
+ * step. Validates, rejects a name collision with anything already in
+ * the garage (case-sensitive, same as cars.json), fills in default
+ * shift points if the caller left them at zero, and returns the new
+ * car's index into kart_specs[] (so a caller can select it
+ * immediately), or -1 if it didn't fit. Does not touch disk — see
+ * config_save_cars_file for persisting the roster this now includes.
+ */
+int kart_specs_add_custom(const KartSpec *s, char *error, int error_cap)
+{
+    KartSpec candidate;
+    int i;
+
+    /* fill in any shift point the caller left at zero before validating
+     * — the same order config.c's JSON loader uses (read_shift_points
+     * calls kart_spec_default_shifts before valid_car ever runs), so a
+     * caller that only sets the stats a designer actually exposes does
+     * not get rejected over fields it was never asked to fill in */
+    candidate = *s;
+    kart_spec_default_shifts(&candidate);
+    if (!kart_spec_validate(&candidate, error, error_cap))
+        return -1;
+    for (i = 0; i < kart_spec_count; i++) {
+        if (strcmp(kart_specs[i].name, candidate.name) == 0) {
+            kart_spec_error(error, error_cap, "DUPLICATE CAR NAME");
+            return -1;
+        }
+    }
+    if (kart_spec_count >= MAX_KART_SPECS) {
+        kart_spec_error(error, error_cap, "GARAGE IS FULL");
+        return -1;
+    }
+    kart_specs[kart_spec_count] = candidate;
+    kart_spec_count++;
+    if (error && error_cap > 0) error[0] = '\0';
+    return kart_spec_count - 1;
 }
 
 void game_settings_defaults(GameSettings *s)
@@ -429,6 +543,15 @@ const char *tire_name(int compound)
     case TIRE_SOFT: return "SOFT";
     case TIRE_HARD: return "HARD";
     default:        return "STD";
+    }
+}
+
+const char *drivetrain_name(int drivetrain)
+{
+    switch (drivetrain) {
+    case DRIVETRAIN_FWD: return "FWD";
+    case DRIVETRAIN_AWD: return "AWD";
+    default:             return "RWD";
     }
 }
 

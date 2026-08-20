@@ -52,6 +52,12 @@ static char config_detail[48];
 static char config_where[72];              /* the folder it read from   */
 static char config_file_status[3][40];     /* settings / cars / controls */
 static char config_proof[48];              /* a value you can check      */
+/* Where cars.json was actually found, if anywhere — the in-game car
+ * designer saves back to this exact path. Empty when there was nothing
+ * to find it under (no SD card, or a DOL opened directly with no
+ * config folder at all): SAVE fails with a clear reason instead of
+ * guessing a location nobody asked for. */
+static char cars_json_path[320];
 
 /* app flow */
 enum { APP_MENU = 0, APP_RACE = 1 };
@@ -211,6 +217,7 @@ static void load_editable_config(int argc, char **argv)
                                        (int)sizeof(error)));
     LOAD_ONE(1, "cars.json",
              config_load_cars_file(path, error, (int)sizeof(error)));
+    snprintf(cars_json_path, sizeof(cars_json_path), "%s", path);
     LOAD_ONE(2, "controls.json",
              config_load_controls_file(&control_config, path, error,
                                        (int)sizeof(error)));
@@ -809,6 +816,21 @@ static void audio_update(void)
 static float tree_x[MAX_TREES], tree_z[MAX_TREES], tree_y[MAX_TREES];
 static int n_trees = 0;
 
+/*
+ * Grandstands (Track.grandstands, currently BULLRING only): unlike trees,
+ * these have to actually line up with the road and face it, so they are
+ * placed deterministically along genuinely straight stretches (low
+ * |curv|) rather than scattered by a PRNG — a grandstand on the outside
+ * of a hairpin would read as a mistake, not scenery. Each entry is one
+ * unit's centerline anchor plus the track heading there, so drawing can
+ * lay the stand out parallel to the road and facing in.
+ */
+#define MAX_GRANDSTANDS 24
+static float gs_x[MAX_GRANDSTANDS], gs_z[MAX_GRANDSTANDS], gs_y[MAX_GRANDSTANDS];
+static float gs_yaw[MAX_GRANDSTANDS];
+static int gs_side[MAX_GRANDSTANDS];   /* -1 / +1, which side of the road */
+static int n_grandstands = 0;
+
 static void place_scenery(const Track *t)
 {
     int i;
@@ -833,6 +855,31 @@ static void place_scenery(const Track *t)
             if (tree_y[n_trees] < t->min_y - 2.0f)
                 tree_y[n_trees] = t->min_y - 2.0f;
             n_trees++;
+        }
+    }
+
+    n_grandstands = 0;
+    if (t->grandstands) {
+        const float STRAIGHT_CURV = 0.004f;   /* practically zero bend   */
+        const int STRIDE = 7;                 /* one unit every ~7 samples */
+        int side;
+        for (i = 0; i < t->n && n_grandstands + 1 < MAX_GRANDSTANDS; i += STRIDE) {
+            float lx, lz, setback;
+            if (t->curv[i] >= STRAIGHT_CURV)
+                continue;
+            lx = -t->dz[i];
+            lz = t->dx[i];
+            setback = track_wall_half(t, i) + 9.0f;
+            for (side = -1; side <= 1 && n_grandstands < MAX_GRANDSTANDS;
+                 side += 2) {
+                float s = (float)side;
+                gs_x[n_grandstands] = t->px[i] + lx * setback * s;
+                gs_z[n_grandstands] = t->pz[i] + lz * setback * s;
+                gs_y[n_grandstands] = t->py[i];
+                gs_yaw[n_grandstands] = atan2f(t->dz[i], t->dx[i]);
+                gs_side[n_grandstands] = side;
+                n_grandstands++;
+            }
         }
     }
 }
@@ -937,6 +984,45 @@ static void draw_cone(float cx, float cy_base, float cz,
         GX_Position3f32(cx + cosf(a1) * radius, cy_base, cz + sinf(a1) * radius);
         GX_Color4u8(shade(r, sh), shade(g, sh), shade(b, sh), 255);
         GX_End();
+    }
+}
+
+/*
+ * Grandstands: three stepped, rising tiers of seating plus a roof over
+ * the back tier, laid out with their long axis parallel to the road
+ * (see place_scenery). Distance-culled the same way trees are, since a
+ * full field of these is a lot more geometry per unit than a tree.
+ */
+static void draw_grandstands(float vx, float vz)
+{
+    const int TIERS = 3;
+    int i, tier;
+
+    for (i = 0; i < n_grandstands; i++) {
+        float ddx = gs_x[i] - vx, ddz = gs_z[i] - vz;
+        float lx, lz, s, roof_off, roof_h;
+
+        if (ddx * ddx + ddz * ddz > 220.0f * 220.0f)
+            continue;
+
+        lx = -sinf(gs_yaw[i]);
+        lz =  cosf(gs_yaw[i]);
+        s = (float)gs_side[i];
+
+        for (tier = 0; tier < TIERS; tier++) {
+            float depth_off = 3.0f + (float)tier * 3.6f;
+            float h = 1.1f + (float)tier * 0.35f;
+            u8 rr = (u8)(150 - tier * 14), gg = (u8)(158 - tier * 14),
+               bb = (u8)(168 - tier * 10);
+            draw_box(gs_x[i] + lx * depth_off * s, gs_y[i] + h,
+                     gs_z[i] + lz * depth_off * s, gs_yaw[i], 0.0f,
+                     11.0f, h, 3.4f, rr, gg, bb);
+        }
+        roof_off = 3.0f + (float)(TIERS - 1) * 3.6f + 2.2f;
+        roof_h = 1.1f + (float)(TIERS - 1) * 0.35f + 1.4f;
+        draw_box(gs_x[i] + lx * roof_off * s, gs_y[i] + roof_h,
+                 gs_z[i] + lz * roof_off * s, gs_yaw[i], 0.0f,
+                 12.0f, 0.15f, 4.2f, 70, 76, 92);
     }
 }
 
@@ -1168,6 +1254,8 @@ static void draw_track(const Track *t, int viewer_seg, float race_t)
         draw_cone(tree_x[i], tree_y[i] + 1.2f, tree_z[i], 1.7f, 3.4f,
                   t->alpine ? 24 : 30, t->alpine ? 100 : 130, 45);
     }
+    if (t->grandstands)
+        draw_grandstands(t->px[viewer_seg], t->pz[viewer_seg]);
     {
         float base = t->min_y - (t->alpine ? 8.0f : 0.0f);
         float hs = t->alpine ? 2.2f : 1.0f;
@@ -2430,9 +2518,12 @@ static void menu_update_track_preview(void)
  * button. Nothing is a one-way door.
  */
 enum {
-    RK_PLAYERS = 0, RK_TRACK, RK_LAPS, RK_GARAGE, RK_CONFIG, RK_START,
-    RK_EXIT,                                                  /* setup   */
-    RK_CAR, RK_PAINT, RK_GEARBOX, RK_TIRES, RK_DONE           /* garage  */
+    RK_PLAYERS = 0, RK_TRACK, RK_LAPS, RK_GARAGE, RK_DESIGN, RK_CONFIG,
+    RK_START, RK_EXIT,                                        /* setup   */
+    RK_CAR, RK_PAINT, RK_GEARBOX, RK_TIRES, RK_DONE,          /* garage  */
+    RK_DES_NAME, RK_DES_MASS, RK_DES_POWER, RK_DES_BRAKE, RK_DES_GRIP,
+    RK_DES_DRAG, RK_DES_OFFROAD, RK_DES_DRIVETRAIN, RK_DES_AWD_BIAS,
+    RK_DES_SAVE, RK_DES_CANCEL                                /* designer */
 };
 
 typedef struct {
@@ -2440,19 +2531,85 @@ typedef struct {
     int player;
 } MenuRow;
 
-static MenuRow menu_rows[6 + MAX_HUMANS];
+/* sized for the designer screen's worst case: 8 stat rows (one
+ * conditional on AWD) plus SAVE and CANCEL */
+static MenuRow menu_rows[16];
 static int n_menu_rows;
 static int menu_row;
 static int garage_player;
 static char menu_msg[44];
 static float menu_msg_t;
 
-enum { SCREEN_SETUP = 0, SCREEN_GARAGE = 1, SCREEN_CONFIG = 2 };
+enum { SCREEN_SETUP = 0, SCREEN_GARAGE = 1, SCREEN_CONFIG = 2,
+       SCREEN_DESIGNER = 3 };
 
 static void menu_notice(const char *text)
 {
     snprintf(menu_msg, sizeof(menu_msg), "%s", text);
     menu_msg_t = 4.0f;
+}
+
+/*
+ * The in-game car designer. Rather than a full on-screen keyboard, a
+ * name is picked from a fixed list the same way a paint colour or a
+ * track is — consistent with every other choice in this menu, and one
+ * fewer input widget to build and test blind.
+ *
+ * Only the stats a driver actually feels are exposed; wheelbase and the
+ * gear ladder are derived (designer_finalize) from mass/power/drag the
+ * same way STOCKER and SLIPSTREAM were hand-tuned in cars.json, so a
+ * designed car always ships with a complete, sane KartSpec without
+ * asking the player to fill in six more numbers they have no feel for
+ * yet.
+ */
+static const char *designer_names[] = {
+    "PROTOTYPE", "HOMEBREW", "BLUEPRINT", "MAVERICK", "RENEGADE",
+    "PIONEER", "VELOCITY", "CATALYST", "PHANTOM", "NOVA", "ROOKIE",
+    "APEX", "VECTOR", "INDIE", "GARAGE", "CUSTOM"
+};
+#define DESIGNER_NAME_COUNT \
+    (int)(sizeof(designer_names) / sizeof(designer_names[0]))
+
+static KartSpec designer_car;
+static int designer_name_idx;
+
+static void designer_reset(void)
+{
+    memset(&designer_car, 0, sizeof(designer_car));
+    designer_name_idx = 0;
+    snprintf(designer_car.name, sizeof(designer_car.name), "%s",
+             designer_names[designer_name_idx]);
+    designer_car.mass_kg = 1000.0f;
+    designer_car.power_hp = 220.0f;
+    designer_car.brake_dist_100 = 35.0f;
+    designer_car.lat_g = 1.15f;
+    designer_car.cd_a = 0.62f;
+    designer_car.offroad_grip = 0.40f;
+    designer_car.drivetrain = DRIVETRAIN_RWD;
+    designer_car.awd_front_bias = 0.5f;
+}
+
+/* Fill in the fields the designer doesn't expose directly (wheelbase,
+ * the gear ladder, shift points), producing the complete KartSpec that
+ * preview numbers are computed from and that SAVE actually adds. */
+static void designer_finalize(KartSpec *out)
+{
+    static const float base_gears[5] =
+        { 16.111f, 27.222f, 40.278f, 54.167f, 69.444f };
+    float factor;
+    int g;
+
+    *out = designer_car;
+    out->wheelbase = 2.0f + out->mass_kg / 2500.0f;
+    out->n_gears = 5;
+    /* the same power/drag scaling used to tune STOCKER's and
+     * SLIPSTREAM's ladders against MUSCLE's (420 hp, 0.68 m^2) baseline
+     * — see cars.json */
+    factor = powf((out->power_hp / out->cd_a) / (420.0f / 0.68f),
+                  1.0f / 3.0f);
+    for (g = 0; g < 5; g++)
+        out->gear_top[g] = base_gears[g] * factor;
+    kart_spec_default_shifts(out);
 }
 
 static void build_rows(void)
@@ -2471,6 +2628,8 @@ static void build_rows(void)
             menu_rows[n_menu_rows].kind = RK_GARAGE;
             menu_rows[n_menu_rows++].player = p;
         }
+        menu_rows[n_menu_rows].kind = RK_DESIGN;
+        menu_rows[n_menu_rows++].player = 0;
         menu_rows[n_menu_rows].kind = RK_CONFIG;
         menu_rows[n_menu_rows++].player = 0;
         menu_rows[n_menu_rows].kind = RK_START;
@@ -2479,6 +2638,24 @@ static void build_rows(void)
         menu_rows[n_menu_rows++].player = 0;
     } else if (menu_screen == SCREEN_CONFIG) {
         menu_rows[n_menu_rows].kind = RK_DONE;
+        menu_rows[n_menu_rows++].player = 0;
+    } else if (menu_screen == SCREEN_DESIGNER) {
+        static const int rows[] = {
+            RK_DES_NAME, RK_DES_MASS, RK_DES_POWER, RK_DES_BRAKE,
+            RK_DES_GRIP, RK_DES_DRAG, RK_DES_OFFROAD, RK_DES_DRIVETRAIN
+        };
+        int i;
+        for (i = 0; i < (int)(sizeof(rows) / sizeof(rows[0])); i++) {
+            menu_rows[n_menu_rows].kind = rows[i];
+            menu_rows[n_menu_rows++].player = 0;
+        }
+        if (designer_car.drivetrain == DRIVETRAIN_AWD) {
+            menu_rows[n_menu_rows].kind = RK_DES_AWD_BIAS;
+            menu_rows[n_menu_rows++].player = 0;
+        }
+        menu_rows[n_menu_rows].kind = RK_DES_SAVE;
+        menu_rows[n_menu_rows++].player = 0;
+        menu_rows[n_menu_rows].kind = RK_DES_CANCEL;
         menu_rows[n_menu_rows++].player = 0;
     } else {
         menu_rows[n_menu_rows].kind = RK_CAR;
@@ -2512,6 +2689,18 @@ static void row_label(const MenuRow *r, char *out, int cap)
     case RK_PAINT:   snprintf(out, cap, "PAINT");              break;
     case RK_GEARBOX: snprintf(out, cap, "GEARS");              break;
     case RK_TIRES:   snprintf(out, cap, "TIRES");              break;
+    case RK_DESIGN:  snprintf(out, cap, "DESIGN A CAR");       break;
+    case RK_DES_NAME:       snprintf(out, cap, "NAME");        break;
+    case RK_DES_MASS:       snprintf(out, cap, "MASS");        break;
+    case RK_DES_POWER:      snprintf(out, cap, "POWER");       break;
+    case RK_DES_BRAKE:      snprintf(out, cap, "BRAKES");      break;
+    case RK_DES_GRIP:       snprintf(out, cap, "GRIP");        break;
+    case RK_DES_DRAG:       snprintf(out, cap, "AERO");        break;
+    case RK_DES_OFFROAD:    snprintf(out, cap, "DIRT GRIP");   break;
+    case RK_DES_DRIVETRAIN: snprintf(out, cap, "DRIVE");       break;
+    case RK_DES_AWD_BIAS:   snprintf(out, cap, "AWD BIAS");    break;
+    case RK_DES_SAVE:       snprintf(out, cap, "SAVE");        break;
+    case RK_DES_CANCEL:     snprintf(out, cap, "CANCEL");      break;
     default:         snprintf(out, cap, "DONE");               break;
     }
 }
@@ -2539,6 +2728,28 @@ static void row_value(const MenuRow *r, char *out, int cap)
                               paint_names[sel_paint[p] % PAINT_COUNT]);     break;
     case RK_GEARBOX: snprintf(out, cap, "%s", gearbox_name(sel_gearbox[p])); break;
     case RK_TIRES:   snprintf(out, cap, "%s", tire_name(sel_tire[p]));      break;
+    case RK_DES_NAME:
+        snprintf(out, cap, "%s", designer_names[designer_name_idx]); break;
+    case RK_DES_MASS:
+        snprintf(out, cap, "%d KG", (int)designer_car.mass_kg);      break;
+    case RK_DES_POWER:
+        snprintf(out, cap, "%d HP", (int)designer_car.power_hp);     break;
+    case RK_DES_BRAKE:
+        snprintf(out, cap, "%d M", (int)designer_car.brake_dist_100); break;
+    case RK_DES_GRIP:
+        snprintf(out, cap, "%.2f G", (double)designer_car.lat_g);    break;
+    case RK_DES_DRAG:
+        snprintf(out, cap, "%.2f", (double)designer_car.cd_a);       break;
+    case RK_DES_OFFROAD:
+        snprintf(out, cap, "%d", (int)(designer_car.offroad_grip * 100.0f));
+        break;
+    case RK_DES_DRIVETRAIN:
+        snprintf(out, cap, "%s", drivetrain_name(designer_car.drivetrain));
+        break;
+    case RK_DES_AWD_BIAS:
+        snprintf(out, cap, "%d F",
+                (int)(designer_car.awd_front_bias * 100.0f));
+        break;
     default:         out[0] = 0;                                            break;
     }
 }
@@ -2548,7 +2759,12 @@ static int row_has_value(const MenuRow *r)
     return (r->kind == RK_PLAYERS || r->kind == RK_TRACK ||
             r->kind == RK_LAPS ||
             r->kind == RK_CAR || r->kind == RK_PAINT ||
-            r->kind == RK_GEARBOX || r->kind == RK_TIRES);
+            r->kind == RK_GEARBOX || r->kind == RK_TIRES ||
+            r->kind == RK_DES_NAME || r->kind == RK_DES_MASS ||
+            r->kind == RK_DES_POWER || r->kind == RK_DES_BRAKE ||
+            r->kind == RK_DES_GRIP || r->kind == RK_DES_DRAG ||
+            r->kind == RK_DES_OFFROAD || r->kind == RK_DES_DRIVETRAIN ||
+            r->kind == RK_DES_AWD_BIAS);
 }
 
 static void row_change(const MenuRow *r, int d)
@@ -2585,6 +2801,50 @@ static void row_change(const MenuRow *r, int d)
     case RK_TIRES:
         sel_tire[p] = ((sel_tire[p] + d) % TIRE_COMPOUNDS + TIRE_COMPOUNDS)
                       % TIRE_COMPOUNDS;
+        break;
+    case RK_DES_NAME:
+        designer_name_idx = ((designer_name_idx + d) % DESIGNER_NAME_COUNT +
+                             DESIGNER_NAME_COUNT) % DESIGNER_NAME_COUNT;
+        snprintf(designer_car.name, sizeof(designer_car.name), "%s",
+                designer_names[designer_name_idx]);
+        break;
+    case RK_DES_MASS:
+        designer_car.mass_kg = game_clampf(designer_car.mass_kg +
+                                           (float)d * 40.0f, 600.0f, 2200.0f);
+        break;
+    case RK_DES_POWER:
+        designer_car.power_hp = game_clampf(designer_car.power_hp +
+                                            (float)d * 20.0f, 60.0f, 650.0f);
+        break;
+    case RK_DES_BRAKE:
+        /* lower is a shorter, better stop, so a "right/increase" press
+         * makes it worse — same left-is-less, right-is-more convention
+         * as every other row, just applied to a stat where less is
+         * better */
+        designer_car.brake_dist_100 = game_clampf(
+            designer_car.brake_dist_100 - (float)d, 26.0f, 50.0f);
+        break;
+    case RK_DES_GRIP:
+        designer_car.lat_g = game_clampf(designer_car.lat_g +
+                                         (float)d * 0.05f, 0.85f, 1.85f);
+        break;
+    case RK_DES_DRAG:
+        /* same less-is-better convention as brakes, for drag */
+        designer_car.cd_a = game_clampf(designer_car.cd_a -
+                                        (float)d * 0.02f, 0.42f, 0.85f);
+        break;
+    case RK_DES_OFFROAD:
+        designer_car.offroad_grip = game_clampf(designer_car.offroad_grip +
+                                                (float)d * 0.05f, 0.10f,
+                                                0.90f);
+        break;
+    case RK_DES_DRIVETRAIN:
+        designer_car.drivetrain = ((designer_car.drivetrain + d) % 3 + 3)
+                                  % 3;
+        break;
+    case RK_DES_AWD_BIAS:
+        designer_car.awd_front_bias = game_clampf(
+            designer_car.awd_front_bias + (float)d * 0.05f, 0.0f, 1.0f);
         break;
     default:
         break;
@@ -2672,6 +2932,53 @@ static void try_start_race(void)
     start_race();
 }
 
+/*
+ * SAVE: add the finalized car to the live roster, then try to persist
+ * the whole roster to disk at the exact path cars.json was found under
+ * at boot. A rejected car (duplicate name, full garage) keeps the
+ * player on the designer screen to fix it; an accepted one always
+ * takes effect for the rest of this session even if the disk write
+ * fails or there is nowhere to write it — a car "vanishing" after
+ * being accepted would be a worse surprise than it just not
+ * outlasting the session.
+ */
+static void designer_save(void)
+{
+    KartSpec finalized;
+    char error[128];
+    char notice[44];
+    int idx;
+
+    designer_finalize(&finalized);
+    idx = kart_specs_add_custom(&finalized, error, (int)sizeof(error));
+    if (idx < 0) {
+        menu_notice(error);
+        audio_beep(150.0f, 240, 175);
+        return;
+    }
+
+    if (!cars_json_path[0]) {
+        snprintf(notice, sizeof(notice), "%s ADDED (NOT SAVED)",
+                kart_specs[idx].name);
+        menu_notice(notice);
+        audio_beep(500.0f, 90, 150);
+    } else if (!config_save_cars_file(cars_json_path, kart_specs,
+                                      kart_spec_count, error,
+                                      (int)sizeof(error))) {
+        snprintf(notice, sizeof(notice), "%s ADDED (SAVE FAILED)",
+                kart_specs[idx].name);
+        menu_notice(notice);
+        audio_beep(500.0f, 90, 150);
+    } else {
+        snprintf(notice, sizeof(notice), "%s SAVED TO THE GARAGE",
+                kart_specs[idx].name);
+        menu_notice(notice);
+        audio_beep(920.0f, 70, 150);
+    }
+    menu_screen = SCREEN_SETUP;
+    menu_row = 0;
+}
+
 static void activate_row(const MenuRow *r)
 {
     switch (r->kind) {
@@ -2685,6 +2992,20 @@ static void activate_row(const MenuRow *r)
         menu_screen = SCREEN_CONFIG;
         menu_row = 0;
         audio_beep(760.0f, 60, 140);
+        break;
+    case RK_DESIGN:
+        designer_reset();
+        menu_screen = SCREEN_DESIGNER;
+        menu_row = 0;
+        audio_beep(880.0f, 60, 140);
+        break;
+    case RK_DES_SAVE:
+        designer_save();
+        break;
+    case RK_DES_CANCEL:
+        menu_screen = SCREEN_SETUP;
+        menu_row = 0;
+        audio_beep(660.0f, 60, 130);
         break;
     case RK_START:
         try_start_race();
@@ -2795,6 +3116,75 @@ static void draw_config_screen(void)
              150, 158, 175, 210);
 
     draw_row_list(48.0f, H - 74.0f, 26.0f, 190.0f);
+}
+
+/*
+ * The live preview reuses the exact spec-sheet layout the garage
+ * overlay already shows for a stock car (see draw_garage_overlay) —
+ * same rows, same units — so a player moving between "here's a car"
+ * and "here's the one I'm building" is reading the same sheet both
+ * times, not learning a second display convention.
+ */
+static void draw_designer_screen(void)
+{
+    KartSpec sp;
+    float W = (float)rmode->fbWidth;
+    float H = (float)rmode->efbHeight;
+    float panel_x = W - 260.0f;
+    char buf[48];
+    float y;
+
+    designer_finalize(&sp);
+
+    hud_ortho_fullscreen();
+    hud_rect(0.0f, 0.0f, W, H, 18, 24, 40, 255);
+    hud_text(W * 0.5f - hud_text_width(20.0f, "CAR DESIGNER") * 0.5f, 22.0f,
+             20.0f, 34.0f, "CAR DESIGNER", 230, 210, 90, 255);
+
+    /* the row list, left column, same as every other screen */
+    draw_row_list(48.0f, 90.0f, 28.0f, 190.0f);
+
+    /* a live preview of what SAVE would actually add, right column —
+     * same spec-sheet layout draw_garage_overlay shows for a stock car */
+    hud_rect(panel_x - 12.0f, 80.0f, 244.0f, 260.0f, 12, 15, 24, 170);
+    y = 104.0f;
+    snprintf(buf, sizeof(buf), "HP    %d", (int)sp.power_hp);
+    hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    snprintf(buf, sizeof(buf), "CURB  %d", (int)sp.mass_kg);
+    hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    snprintf(buf, sizeof(buf), "0-100 %.1fS",
+             (double)spec_accel_time_with_settings(&sp, &app_settings));
+    hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    snprintf(buf, sizeof(buf), "TOP   %d",
+             (int)spec_top_speed_with_settings(&sp, &app_settings));
+    hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    snprintf(buf, sizeof(buf), "100-0 %d", (int)sp.brake_dist_100);
+    hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    snprintf(buf, sizeof(buf), "GRIP  %.2fG", (double)sp.lat_g);
+    hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    snprintf(buf, sizeof(buf), "GEARS %d", sp.n_gears);
+    hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    snprintf(buf, sizeof(buf), "DIRT  %d", (int)(sp.offroad_grip * 100.0f));
+    hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
+    if (sp.drivetrain == DRIVETRAIN_AWD)
+        snprintf(buf, sizeof(buf), "DRIVE AWD %dF",
+                (int)(sp.awd_front_bias * 100.0f));
+    else
+        snprintf(buf, sizeof(buf), "DRIVE %s", drivetrain_name(sp.drivetrain));
+    hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 28.0f;
+    hud_text(panel_x, y, 7.0f, 12.0f, "WHEELBASE + GEARING SET FOR YOU",
+             150, 158, 175, 210); y += 14.0f;
+    hud_text(panel_x, y, 7.0f, 12.0f, "FROM POWER, DRAG AND MASS",
+             150, 158, 175, 210);
+    if (!cars_json_path[0]) {
+        y += 22.0f;
+        hud_text(panel_x, y, 7.0f, 12.0f, "NO SD CARD - WON'T PERSIST",
+                 255, 175, 90, 220);
+    }
+
+    if (menu_msg_t > 0.0f)
+        hud_text(W * 0.5f - hud_text_width(11.0f, menu_msg) * 0.5f,
+                 H - 40.0f, 11.0f, 19.0f, menu_msg, 255, 120, 90, 250);
 }
 
 static void draw_setup_screen(void)
@@ -3002,6 +3392,8 @@ static void menu_frame(float dt)
         draw_garage_overlay(garage_player);
     } else if (menu_screen == SCREEN_CONFIG) {
         draw_config_screen();
+    } else if (menu_screen == SCREEN_DESIGNER) {
+        draw_designer_screen();
     } else {
         draw_setup_screen();
     }

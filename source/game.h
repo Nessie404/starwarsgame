@@ -46,7 +46,10 @@ enum {
                            * profile: a stack of hairpins up one side, a
                            * summit, a second stack down the other, a
                            * valley loop-back, and a gentle climb home   */
-    TRACK_COUNT    = 8
+    TRACK_BULLRING = 8,   /* flat, wide, barriered oval with grandstands;
+                           * the odd one out — no elevation and nothing
+                           * tighter than a wide, sweeping turn           */
+    TRACK_COUNT    = 9
 };
 
 typedef struct {
@@ -79,6 +82,8 @@ typedef struct {
     float wall_half_seg[TRACK_MAX_POINTS];
     int   alpine;                   /* 1 = mountain theme (rock skirts)  */
     int   has_walls;                /* 0 = unguarded drop off the edge   */
+    int   grandstands;              /* 1 = draw grandstands along the
+                                     * straights (main.c); oval only      */
     int   laps;                     /* race distance, set from length    */
 
     /* Checkpoints, for putting a car that went over the edge back on the
@@ -133,7 +138,7 @@ int track_weather_at(const Track *t, int seg, float race_t,
 /* Vehicle specs (real-world performance parameters)                  */
 /* ------------------------------------------------------------------ */
 
-#define DEFAULT_SPEC_COUNT 11
+#define DEFAULT_SPEC_COUNT 13
 /* Kept as the built-in roster size for old tests and source users. Runtime
  * code must use kart_spec_count: cars.json can grow the garage. The
  * compiled-in roster mirrors the shipped cars.json exactly, so the full
@@ -141,7 +146,11 @@ int track_weather_at(const Track *t, int seg, float race_t,
  * opened directly in Dolphin with no virtual SD card, for instance) —
  * see HANDOFF.md for why that used to leave most of the garage empty. */
 #define SPEC_COUNT DEFAULT_SPEC_COUNT
-#define MAX_KART_SPECS 16
+/* Headroom past DEFAULT_SPEC_COUNT is for cars.json growing the garage
+ * and, since v1.23.0, for cars a player builds in the in-game car
+ * designer (kart_specs_add_custom in game.c) and saves for the
+ * session. */
+#define MAX_KART_SPECS 24
 #define KART_NAME_LEN   16
 #define MAX_GEARS       6
 
@@ -206,6 +215,7 @@ enum { TIRE_MEDIUM = 0, TIRE_SOFT = 1, TIRE_HARD = 2, TIRE_COMPOUNDS = 3 };
 
 const char *gearbox_name(int mode);
 const char *tire_name(int compound);
+const char *drivetrain_name(int drivetrain);
 float tire_grip_mult(int compound);
 float tire_drag_mult(int compound);
 
@@ -228,6 +238,17 @@ void kart_specs_reset_defaults(void);
 
 /* fill in any shift point a car did not specify */
 void kart_spec_default_shifts(KartSpec *s);
+
+/* Is this a car that could actually race — same bounds cars.json is
+ * held to. error/error_cap may be NULL/0 to skip the message. */
+int kart_spec_validate(const KartSpec *s, char *error, int error_cap);
+
+/* In-game car designer: add a validated, uniquely-named car to the live
+ * kart_specs[] roster (in memory only — see config_save_cars_file in
+ * config.h to persist it). Returns the new car's index, or -1 and an
+ * error message if it was invalid, a duplicate name, or the garage is
+ * already at MAX_KART_SPECS. */
+int kart_specs_add_custom(const KartSpec *s, char *error, int error_cap);
 
 /* ------------------------------------------------------------------ */
 /* Race                                                               */

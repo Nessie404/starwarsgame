@@ -129,6 +129,38 @@ Any patch release that followed a minor release is folded into that
 release's entry rather than getting its own. For anything older,
 `CHANGELOG.md` and `docs/release-notes/` have the full record back to v1.0.
 
+### v1.23.0 — BULLRING, two oval cars, smoother corners, and a car designer
+
+- [x] A ninth circuit, BULLRING: flat, wide, barriered, generated from
+  its own geometry (two straights, two constant-radius sweeping turns)
+  rather than hand-drawn, so it has no abrupt curves anywhere on the
+  lap. New `Track.grandstands` flag (`main.c`'s `place_scenery`/
+  `draw_grandstands`) draws grandstands along both straights.
+- [x] Two new cars tuned for it, STOCKER and SLIPSTREAM — huge power
+  and low drag for the straights, enough grip to hold BULLRING's
+  sweepers without banking to lean on. Both had to be retuned down
+  from their first cut (more power, less grip) after it stranded an
+  AI in a fall loop on MONARCH's tightest hairpin; trading some power
+  for more grip fixed that *and* made them faster on BULLRING, not
+  slower — see `docs/HANDOFF.md` §6.
+- [x] Every circuit but MONARCH got a wider corner-easing pass in
+  `track_init_with_settings` (a 5-point blend instead of 3), softening
+  how sharply curvature ramps into and out of a bend without eroding
+  a genuinely tight apex — Berthoud 2.0's and Guanella's hairpins are
+  unchanged. MONARCH keeps the original pass: the wider blend is the
+  other thing that stranded an AI in a fall loop there, for the same
+  underlying reason as the paragraph above (see `docs/HANDOFF.md` §6
+  — MONARCH has essentially no margin for any geometry change).
+- [x] An in-game car designer, reachable from the main menu as DESIGN
+  A CAR: pick a name, dial in mass, power, brakes, grip, drag, dirt
+  grip and drivetrain, see a live preview of the derived top speed and
+  0-100 time, then SAVE it into the garage for the session and — if
+  `cars.json` was actually found — back to disk too.
+  `kart_spec_validate`/`kart_specs_add_custom` (`game.c`) do the
+  validate-and-append; `config_write_cars_text`/`config_save_cars_file`
+  (`config.c`) do the write. `MAX_KART_SPECS` raised 16 → 24 for
+  headroom.
+
 ### v1.22.0 — difficulty, team and career wired into `game_init`
 
 - [x] `game_init` now reads `GameConfig.difficulty`: a preset sets
@@ -245,21 +277,6 @@ release's entry rather than getting its own. For anything older,
   is no turbocharger/supercharger system — retired in v1.16.0 — and
   `boost` (now v1.21.0's `turbo`) is an unrelated, universal mechanic
   tuned in `settings.json`, not `cars.json`.
-
-### v1.18.0 — real drivetrains, more grip, a roster-visibility fix
-
-- [x] Every car now has a real drivetrain — FWD, RWD, or full-time AWD
-  with a tunable `front_bias` — from an optional `"drivetrain"` block
-  in `cars.json`. AWD gets off the line faster (traction demand split
-  across two axles), FWD understeers a little more under power, RWD
-  gets looser and easier to rotate.
-- [x] Lateral grip up ~25% across the board, with a gentler, later
-  understeer scrub once a corner is driven past the limit.
-- [x] Fixed every car added since v1.15.0 being invisible without an SD
-  card: the compiled fallback roster only had the original four cars
-  while `cars.json` had eleven; the fallback now mirrors `cars.json`
-  exactly. Also fixed RUBY's gear ladder, which could strand an AI
-  driver in first gear for an entire race once it was finally in play.
 
 ## Overall direction
 

@@ -32,6 +32,10 @@ typedef struct {
     int   has_walls;          /* 0 = unguarded: the edge is a drop      */
     float scale;              /* uniform scale on the control points    */
     float y_scale;            /* extra scale on elevation only           */
+    /* 1 = draw grandstands along the straights (main.c); every existing
+     * entry below leaves this unspecified, which zero-initializes it —
+     * see the note on Track.grandstands in game.h */
+    int   grandstands;
 } TrackDef;
 
 /* ---------------- CLASSIC: flat speedway ---------------- */
@@ -278,6 +282,28 @@ static const float CP_BERTHOUD2[][3] = {
     {  113.2,  247.7,   75.4}, {   81.3,  165.1,   92.3}, {   42.5,   82.6,  109.1},
 };
 
+/* ---------------- BULLRING ----------------
+ * The one flat, wide oval in the roster: two 200 m straights joined by
+ * two constant-radius, swept turns (radius 70 m) rather than anything
+ * hand-drawn — a true "donut" shape has no business having a kink in
+ * it anywhere, so this is generated from the geometry directly instead
+ * of authored by eye like the mountain passes. No elevation change
+ * anywhere on the lap. Grandstands (main.c, gated on Track.grandstands)
+ * run the length of both straights.
+ */
+static const float CP_BULLRING[][3] = {
+    { -100.00,  -70.00, 0 }, {  -50.00,  -70.00, 0 }, {    0.00,  -70.00, 0 },
+    {   50.00,  -70.00, 0 }, {  100.00,  -70.00, 0 },
+    {  123.94,  -65.78, 0 }, {  145.03,  -53.62, 0 }, {  160.62,  -35.00, 0 },
+    {  168.94,  -12.16, 0 }, {  168.94,   12.16, 0 }, {  160.62,   35.00, 0 },
+    {  145.03,   53.62, 0 }, {  123.94,   65.78, 0 },
+    {  100.00,   70.00, 0 }, {   50.00,   70.00, 0 }, {    0.00,   70.00, 0 },
+    {  -50.00,   70.00, 0 }, { -100.00,   70.00, 0 },
+    { -123.94,   65.78, 0 }, { -145.03,   53.62, 0 }, { -160.62,   35.00, 0 },
+    { -168.94,   12.16, 0 }, { -168.94,  -12.16, 0 }, { -160.62,  -35.00, 0 },
+    { -145.03,  -53.62, 0 }, { -123.94,  -65.78, 0 },
+};
+
 /*
  * Pavement-to-guardrail gap: a car that runs wide past the paved edge
  * used to have 4-8 m of only lightly-penalized shoulder before it
@@ -316,6 +342,10 @@ static const TrackDef track_defs[TRACK_COUNT] = {
       6.6f,  8.0f, NULL, 1, 1, 1.50f, 0.24f /* big, guarded, real profile;
         scale up from the original 1.30/0.28 for more room everywhere
         while keeping the ~86 m of climb the real elevation data gives it */ },
+    { "BULLRING",
+      CP_BULLRING, (int)(sizeof(CP_BULLRING) / sizeof(CP_BULLRING[0])),
+      7.5f,  9.0f, NULL, 0, 1, 1.00f, 1.00f, /* flat, wide, barriered */
+      1 },
 };
 
 const char *track_name(int track_id)
@@ -421,26 +451,61 @@ void track_init_with_settings(Track *t, int track_id,
      * circuit its character, but a few corners — Berthoud's summit
      * switchbacks especially — come out sharp enough that hugging the
      * inside and running out onto the shoulder is a faster line than the
-     * actual apex. Relax each point toward its neighbors' average,
-     * weighted by how sharp the turn there is (so straights and gentle
-     * sweepers barely move while hairpins open up), for a few passes —
-     * the same trick already used below for the elevation profile.
+     * actual apex. Relax each point toward a wider neighborhood's
+     * average for a few passes — the same trick already used below for
+     * the elevation profile, but over five points instead of three: a
+     * narrow 3-tap kernel barely moves a hairpin's curvature no matter
+     * how many times it's repeated (it converges to removing sample-
+     * level noise, not to opening out a real direction change), while a
+     * single wider pass measurably eases the rate a corner's curvature
+     * ramps up and back down — noticeably less abrupt entering and
+     * exiting a tight bend, without erasing the apex itself.
+     *
+     * MONARCH keeps the original narrow kernel. It is the one circuit
+     * where this was tried and made a real difference for the worse:
+     * unguarded, narrowest, and already right at the edge of what the
+     * YOLO strategy sheet can survive (see the AI/YOLO note on
+     * TRACK_MONARCH's TrackDef entry below) — the wider kernel
+     * perturbed its tightest hairpin just enough that an AI_YOLO driver
+     * stopped ever recovering from a fall there. Every other track
+     * passed the same full AI field on every circuit before and after.
      */
     {
         float tx[TRACK_MAX_POINTS], tz[TRACK_MAX_POINTS];
         int pass;
-        for (pass = 0; pass < 3; pass++) {
-            for (i = 0; i < t->n; i++) {
-                int ip = (i - 1 + t->n) % t->n;
-                int in2 = (i + 1) % t->n;
-                tx[i] = 0.25f * t->px[ip] + 0.5f * t->px[i] +
-                        0.25f * t->px[in2];
-                tz[i] = 0.25f * t->pz[ip] + 0.5f * t->pz[i] +
-                        0.25f * t->pz[in2];
+        if (track_id == TRACK_MONARCH) {
+            for (pass = 0; pass < 3; pass++) {
+                for (i = 0; i < t->n; i++) {
+                    int ip = (i - 1 + t->n) % t->n;
+                    int in2 = (i + 1) % t->n;
+                    tx[i] = 0.25f * t->px[ip] + 0.5f * t->px[i] +
+                            0.25f * t->px[in2];
+                    tz[i] = 0.25f * t->pz[ip] + 0.5f * t->pz[i] +
+                            0.25f * t->pz[in2];
+                }
+                for (i = 0; i < t->n; i++) {
+                    t->px[i] = tx[i];
+                    t->pz[i] = tz[i];
+                }
             }
-            for (i = 0; i < t->n; i++) {
-                t->px[i] = tx[i];
-                t->pz[i] = tz[i];
+        } else {
+            for (pass = 0; pass < 3; pass++) {
+                for (i = 0; i < t->n; i++) {
+                    int im2 = (i - 2 + t->n) % t->n;
+                    int ip = (i - 1 + t->n) % t->n;
+                    int in2 = (i + 1) % t->n;
+                    int ip2 = (i + 2) % t->n;
+                    tx[i] = 0.10f * t->px[im2] + 0.20f * t->px[ip] +
+                            0.40f * t->px[i]   + 0.20f * t->px[in2] +
+                            0.10f * t->px[ip2];
+                    tz[i] = 0.10f * t->pz[im2] + 0.20f * t->pz[ip] +
+                            0.40f * t->pz[i]   + 0.20f * t->pz[in2] +
+                            0.10f * t->pz[ip2];
+                }
+                for (i = 0; i < t->n; i++) {
+                    t->px[i] = tx[i];
+                    t->pz[i] = tz[i];
+                }
             }
         }
     }
@@ -603,6 +668,7 @@ void track_init_with_settings(Track *t, int track_id,
     }
     t->alpine = d->alpine;
     t->has_walls = d->has_walls;
+    t->grandstands = d->grandstands;
 
     /* Lap count from circuit length, so every race covers roughly the
      * same ground: four laps of the little speedway, two of a pass. */

@@ -222,6 +222,24 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   behaving exactly as it did before this release. Still no menu control
   sets any of these fields, so nothing changes in the shipped game yet
   — see `TODO.md`.
+- **v1.23.0**: a ninth circuit, `TRACK_BULLRING` — a flat, wide,
+  barriered oval generated from its own geometry (`CP_BULLRING` in
+  `track.c`, a closed loop of two straights and two constant-radius
+  turns computed directly rather than hand-placed) instead of drawn by
+  eye like every other circuit. New `Track.grandstands` flag drives
+  grandstand scenery in `main.c` (`place_scenery`/`draw_grandstands`),
+  the same deterministic-placement pattern trees already use but keyed
+  to straight sections instead of scattered by a PRNG. Two new cars,
+  STOCKER and SLIPSTREAM, tuned for it (see §6 below for why their
+  first cut had to be retuned). The corner-easing pass in
+  `track_init_with_settings` now blends over a wider 5-point kernel
+  instead of 3, for every circuit except MONARCH (see §6). An in-game
+  car designer (`kart_spec_validate`/`kart_specs_add_custom` in
+  `game.c`, promoted from `config.c`'s file-private `valid_car` so the
+  designer doesn't have to reach into the config layer to validate a
+  car; `config_write_cars_text`/`config_save_cars_file` in `config.c`
+  for the save half) reachable from the main menu as DESIGN A CAR.
+  `MAX_KART_SPECS` raised from 16 to 24 for headroom.
 
 ---
 
@@ -404,6 +422,37 @@ the new effect (by slip, by corner severity, by whatever is actually
 relevant) rather than just turning its magnitude down — a flat
 reduction big enough to save this one pairing tends to blunt the
 feature everywhere else it was never actually a problem.
+
+**It isn't only CROSS+TRUCK — any AI-driven car powerful enough,
+relative to its own grip, can hit the same wall on MONARCH.** Tuning
+STOCKER for v1.23.0 (620 hp, 1.20 g) put whichever AI got assigned it
+into an unrecoverable fall loop on MONARCH's tightest hairpin (a
+scratch harness overriding `Kart.spec` directly — the default 11-AI
+roster never actually reaches spec index 11+ via `ai_no %
+kart_spec_count`, so this cannot happen in a normal race today, only
+under a difficulty preset's `ai_choice_spec` pooling by
+power-to-weight, or a human driving it there themselves, where it's
+just a hard car to drive rather than an AI stuck in a loop). Trading
+power for grip fixed it (620 hp/1.20 g → 540 hp/1.38 g) without giving
+up the car's edge on BULLRING — measured faster there than before, not
+slower, because the extra grip helps in the sweepers more than the
+lost power hurts on the straights. Confirmed on MONARCH, BERTHOUD 2.0
+and GUANELLA — the same three the CROSS+TRUCK note above already
+flags — before it shipped. Any future high-power car needs the same
+check: override an early AI slot's spec to it and run it round
+MONARCH before trusting `test_ai_races_all_tracks`'s default-roster
+pass to have exercised it at all.
+
+**MONARCH did not get the wider corner-smoothing kernel v1.23.0 gave
+every other circuit.** `track_init_with_settings` blends position
+over a 5-point neighborhood now instead of 3 (softer entry/exit on a
+tight bend without opening out the apex), gated on `track_id !=
+TRACK_MONARCH`. The wider blend perturbed MONARCH's own tightest
+hairpin just enough to strand an AI on the YOLO sheet in the same kind
+of fall loop as the paragraph above, for the same underlying reason:
+MONARCH already has close to zero margin, so anything that moves its
+geometry at all is worth a full `test_ai_races_all_tracks` pass before
+it ships, not just a look at the diff.
 
 **Growing `ai_drivers[]` past `NUM_KARTS - 1` (11) entries silently
 adds unreachable drivers, not new ones — replace, don't append.** Car

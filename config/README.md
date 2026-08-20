@@ -50,9 +50,11 @@ cannot read an arbitrary host folder merely because the DOL came from it.
 
 The `cars` array is the garage roster. To add a car, duplicate an object,
 give it a unique 1–15 character name (letters, numbers, spaces, `-`, or
-`.`), and edit its real-unit values. The game supports up to 16 cars and
+`.`), and edit its real-unit values. The game supports up to 24 cars and
 6 forward gears. Gear values are road speeds at the rev limiter, in km/h,
-and must increase from one gear to the next.
+and must increase from one gear to the next. A car can also be built
+in-game from the main menu's car designer, which saves straight back
+into this file.
 
 The whole file is validated before it replaces the built-in roster. Useful
 accepted ranges are deliberately broad: 100–5000 kg, 5–2500 hp, 0.2–3.0 g
@@ -117,7 +119,7 @@ This file exposes the main tuning surfaces:
   range (see below);
 - per-track width, plan scale, elevation, and optional fixed lap count
   (`classic`, `berthoud`, `loveland`, `kenosha`, `monarch`, `breakneck`,
-  `guanella`).
+  `guanella`, `bullring`).
 
 For a track, `laps: 0` means automatic. A positive lap count is an explicit
 override (up to 20), independent of the automatic minimum and maximum.

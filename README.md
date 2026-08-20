@@ -22,13 +22,15 @@ v1.10.0, and [docs/HANDOFF.md](docs/HANDOFF.md) if you are picking this
 project up to work on it.
 
 WiiKart is a semi-sim mountain racer: pick a car in the garage — its
-gearbox, tires and paint, all defined by real-world performance numbers —
-then race a **field of eleven AI drivers who each race differently, shift
-differently, learn from their mistakes, and adapt to you**, over eight
-circuits including seven stylized Colorado passes with real grades,
-switchbacks, cliffs and gravity. Lap counts are set per circuit (2–4 laps
-by default) so short circuits remain multi-lap. Think arcade fun with a
-driving model that expects you to brake for the hairpins.
+gearbox, tires and paint, all defined by real-world performance numbers, or
+build your own from scratch in the in-game car designer — then race a
+**field of eleven AI drivers who each race differently, shift differently,
+learn from their mistakes, and adapt to you**, over nine circuits: seven
+stylized Colorado passes with real grades, switchbacks, cliffs and gravity,
+a flat speedway, and a wide, barriered oval with grandstands. Lap counts
+are set per circuit (2–4 laps by default) so short circuits remain
+multi-lap. Think arcade fun with a driving model that expects you to brake
+for the hairpins.
 
 **Version history**, oldest first:
 
@@ -159,6 +161,18 @@ driving model that expects you to brake for the hairpins.
   combined score; career mode starts a human at the grid slot matching
   their last race's finish. There's still no menu control that sets
   any of it, so nothing changes in the game you can actually play yet.
+- **v1.23.0** — a ninth circuit, BULLRING: a flat, wide, barriered oval
+  with grandstands along both straights, generated from its geometry
+  rather than hand-drawn so it has no abrupt curves anywhere on the
+  lap. Two new cars tuned for it, STOCKER and SLIPSTREAM, competitive
+  with the roster's other big-power cars. Every circuit but MONARCH
+  (a known-fragile track for AI navigation) got a wider, smoother
+  corner-relaxation pass, easing how sharply curvature ramps into and
+  out of a bend without flattening the tight ones. An in-game car
+  designer: pick a name, dial in mass, power, brakes, grip, drag and
+  drivetrain from the garage menu, and save it into the roster for the
+  rest of the session (and to disk, wherever `cars.json` was actually
+  found).
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -200,41 +214,44 @@ driving model that expects you to brake for the hairpins.
   cornering is limited by lateral grip (v²/r ≤ μg) — push past it and the
   car understeers wide, scrubbing speed. Gravity acts along the road
   grade: climbs cost speed, descents give it back.
-- **Eleven cars, and no two drive alike.** RACER (a 260 kg superkart) and
+- **Thirteen cars, and no two drive alike.** RACER (a 260 kg superkart) and
   TRUCK (a 2100 kg pickup) sit at opposite ends of the roster; between
   them are a hot hatch (RUBY), a rally car (RALLY) and a dune buggy
   (BUGGY) that both actually use their dirt grip, a GT tourer (TOURER), a
   wagon (WAGON), an open-wheel FORMULA car with the most grip and the
   least dirt grip in the garage, a vintage roadster (HERITAGE) with drum
-  brakes to match, and a MUSCLE car with more horsepower than chassis to
-  match it. Every one is defined by horsepower, curb weight, stopping
-  distance, lateral g, drag area, wheelbase, dirt grip and per-gear
-  limiter speeds — the menu derives 0-100 time and top speed from the
-  same equations the physics uses. The roster comes from `cars.json`, so
-  another car is an added JSON object, not a C surgery.
-- **Eight circuits**, all measured rather than guessed. Lap counts are set
+  brakes to match, a MUSCLE car with more horsepower than chassis to
+  match it, and two oval specialists built for BULLRING (below) — STOCKER
+  and its lower-drag sibling SLIPSTREAM. Every one is defined by
+  horsepower, curb weight, stopping distance, lateral g, drag area,
+  wheelbase, dirt grip and per-gear limiter speeds — the menu derives
+  0-100 time and top speed from the same equations the physics uses. The
+  roster comes from `cars.json`, so another car is an added JSON object,
+  not a C surgery — or design one from the garage menu's in-game car
+  designer, which saves straight back into that same file.
+- **Nine circuits**, all measured rather than guessed. Lap counts are set
   per circuit so every race covers a similar distance:
 
   | Circuit | Length | Width | Corners | Tightest | Climb | Steepest | Rails | Laps |
   |---------|--------|-------|---------|----------|-------|----------|-------|------|
-  | CLASSIC | 555 m | 11.2 m | 10 | 24 m | flat | — | yes | 4 |
-  | BERTHOUD (US-40) | 1421 m | 9.6 m | 19 | 11 m | 48 m | 15% | yes | 2 |
-  | LOVELAND (US-6) | 1699 m | 12.0 m | 11 | 12 m | 61 m | 14% | **no** | 2 |
-  | KENOSHA (US-285) | 2172 m | 13.2 m | 43 | 15 m | 58 m | 10% | yes | 2 |
-  | MONARCH (US-50) | 2167 m | 8.6 m | 33 | 9 m | 118 m | 19% | **no** | 2 |
-  | BREAKNECK | 945 m | 7.4 m | 13 | 29 m | 44 m | 29% | **no** | 3 |
-  | GUANELLA | 1986 m | 7.8 m | 15 | 6 m | 64 m | 19% | **no** | 2 |
-  | BERTHOUD 2.0 | 1411 m | 13.2 m | 20 | 37 m | 67 m | 21% | yes | 2 |
+  | CLASSIC | 546 m | 11.2 m | 10 | 28 m | flat | — | yes | 4 |
+  | BERTHOUD (US-40) | 1820 m | 9.6 m | 15 | 14 m | 63 m | 15% | yes | 2 |
+  | LOVELAND (US-6) | 1925 m | 12.0 m | 11 | 14 m | 70 m | 14% | **no** | 2 |
+  | KENOSHA (US-285) | 2096 m | 13.2 m | 42 | 16 m | 58 m | 10% | yes | 2 |
+  | MONARCH (US-50) | 2462 m | 8.6 m | 32 | 10 m | 135 m | 20% | **no** | 2 |
+  | BREAKNECK | 938 m | 7.4 m | 12 | 32 m | 44 m | 29% | **no** | 3 |
+  | GUANELLA | 2349 m | 7.8 m | 16 | 7 m | 77 m | 19% | **no** | 2 |
+  | BERTHOUD 2.0 | 3628 m | 13.2 m | 31 | 7 m | 85 m | 21% | yes | 2 |
+  | BULLRING | 838 m | 15.0 m | 10 | 62 m | flat | — | yes | 4 |
 
-  **Kenosha** ties Berthoud 2.0 as the widest and is still the longest of
-  the original five. **Monarch** climbs the most and has no rails.
-  **Breakneck** is the steepest anywhere on the roster and the shortest
-  pass; **Guanella** has the tightest hairpin (6 m). **Berthoud 2.0** is
-  the opposite end of that: built from the real pass's own elevation
-  profile, but with every bend eased out so nothing on it is sharper than
-  a 37 m radius — no hairpins, no near-right-angle corners, just a fast,
-  flowing mountain road with no piece of pavement anywhere close enough
-  to another to clip it.
+  **Berthoud 2.0** is the longest pass; **Monarch** climbs the most and
+  has no rails. **Kenosha** is the widest of the mountain passes and has
+  the most corners. **Breakneck** is the steepest anywhere on the roster
+  and the shortest pass; **Guanella** and **Berthoud 2.0** tie for the
+  tightest hairpin. **BULLRING** is the odd one out: no elevation change
+  anywhere on the lap, the widest pavement in the game, and nothing
+  tighter than a wide, sweeping turn — a generated oval rather than a
+  hand-drawn pass, specifically so it has no abrupt curves anywhere.
 - **Gearboxes.** Every car has a real gearbox — 4 to 6 gears, each with a
   road speed at the limiter. Where you are in the band decides your power:
   bog it below a third of the band and it pulls badly, sit on the limiter

@@ -472,54 +472,6 @@ static int required_float(const char *json, const JsonToken *tokens,
     return 1;
 }
 
-static int valid_car(const KartSpec *s, char *error, int error_cap)
-{
-    int g;
-    if (!s->name[0]) return set_error(error, error_cap, "CAR NEEDS NAME");
-    for (g = 0; s->name[g]; g++)
-        if (!isalnum((unsigned char)s->name[g]) && s->name[g] != ' ' &&
-            s->name[g] != '-' && s->name[g] != '.')
-            return set_error(error, error_cap, "BAD CAR NAME");
-    if (s->mass_kg < 100.0f || s->mass_kg > 5000.0f)
-        return set_error(error, error_cap, "BAD CAR MASS");
-    if (s->power_hp < 5.0f || s->power_hp > 2500.0f)
-        return set_error(error, error_cap, "BAD CAR POWER");
-    if (s->brake_dist_100 < 5.0f || s->brake_dist_100 > 200.0f)
-        return set_error(error, error_cap, "BAD CAR BRAKES");
-    if (s->lat_g < 0.20f || s->lat_g > 3.0f)
-        return set_error(error, error_cap, "BAD CAR GRIP");
-    if (s->cd_a < 0.10f || s->cd_a > 3.0f)
-        return set_error(error, error_cap, "BAD CAR DRAG");
-    if (s->wheelbase < 0.50f || s->wheelbase > 6.0f)
-        return set_error(error, error_cap, "BAD WHEELBASE");
-    if (s->offroad_grip < 0.05f || s->offroad_grip > 1.20f)
-        return set_error(error, error_cap, "BAD DIRT GRIP");
-    if (s->drivetrain != DRIVETRAIN_FWD && s->drivetrain != DRIVETRAIN_RWD &&
-        s->drivetrain != DRIVETRAIN_AWD)
-        return set_error(error, error_cap, "BAD DRIVETRAIN");
-    if (s->drivetrain == DRIVETRAIN_AWD &&
-        (s->awd_front_bias < 0.0f || s->awd_front_bias > 1.0f))
-        return set_error(error, error_cap, "BAD AWD BIAS");
-    if (s->n_gears < 1 || s->n_gears > MAX_GEARS)
-        return set_error(error, error_cap, "BAD GEAR COUNT");
-    for (g = 0; g < s->n_gears; g++) {
-        if (s->gear_top[g] < 2.0f || s->gear_top[g] > 140.0f ||
-            (g > 0 && s->gear_top[g] <= s->gear_top[g - 1]))
-            return set_error(error, error_cap, "BAD GEAR SPEEDS");
-    }
-    for (g = 0; g < s->n_gears; g++) {
-        if (s->auto_up[g] < 0.30f || s->auto_up[g] > 1.20f)
-            return set_error(error, error_cap, "BAD UPSHIFT POINT");
-        if (s->auto_down[g] < 0.05f || s->auto_down[g] > 0.90f)
-            return set_error(error, error_cap, "BAD DOWNSHIFT POINT");
-        /* an upshift that lands on the same car's downshift point is how
-         * a gearbox ends up hunting, so the two have to stay apart */
-        if (s->auto_up[g] - s->auto_down[g] < 0.20f)
-            return set_error(error, error_cap, "SHIFT POINTS TOO CLOSE");
-    }
-    return 1;
-}
-
 /*
  * Optional per-car drivetrain: which axle(s) put power down. A car with
  * no "drivetrain" block is rear-wheel drive. "type" is "fwd", "rwd" or
@@ -687,7 +639,7 @@ int config_load_cars_text(const char *json, char *error, int error_cap)
             free(tokens);
             return 0;
         }
-        if (!valid_car(s, error, error_cap)) {
+        if (!kart_spec_validate(s, error, error_cap)) {
             free(tokens);
             return 0;
         }
@@ -714,6 +666,111 @@ int config_load_cars_file(const char *path, char *error, int error_cap)
     ok = config_load_cars_text(text, error, error_cap);
     free(text);
     return ok;
+}
+
+/*
+ * The save half of the pair above: serialize a kart spec array back
+ * into a cars.json document, field for field, so config_load_cars_text
+ * reads back exactly what was meant, not just something close to it.
+ * The upshift/downshift fraction is always written out explicitly
+ * (never omitted to fall back on the compiled default) because some
+ * shipped cars — FORMULA, TRUCK — are deliberately tuned away from
+ * that default and a round trip must not quietly flatten them back to
+ * it. Returns the number of bytes written, or 0 if the roster didn't
+ * fit in buf_cap.
+ */
+int config_write_cars_text(const KartSpec *specs, int count,
+                           char *buf, int buf_cap)
+{
+    int i, g, n, pos = 0;
+
+    if (count < 1 || count > MAX_KART_SPECS || buf_cap < 1)
+        return 0;
+
+#define EMIT(...)                                                     \
+    do {                                                              \
+        n = snprintf(buf + pos, (size_t)(buf_cap - pos), __VA_ARGS__); \
+        if (n < 0 || pos + n >= buf_cap) return 0;                    \
+        pos += n;                                                     \
+    } while (0)
+
+    EMIT("{\n  \"cars\": [\n");
+    for (i = 0; i < count; i++) {
+        const KartSpec *s = &specs[i];
+        char dt[64];
+
+        if (s->drivetrain == DRIVETRAIN_AWD)
+            snprintf(dt, sizeof(dt),
+                    "{ \"type\": \"awd\", \"front_bias\": %.3f }",
+                    (double)s->awd_front_bias);
+        else
+            snprintf(dt, sizeof(dt), "{ \"type\": \"%s\" }",
+                    s->drivetrain == DRIVETRAIN_FWD ? "fwd" : "rwd");
+
+        EMIT("    {\n"
+             "      \"name\": \"%s\",\n"
+             "      \"mass_kg\": %.3f,\n"
+             "      \"power_hp\": %.3f,\n"
+             "      \"brake_distance_100_kph_m\": %.3f,\n"
+             "      \"lateral_grip_g\": %.3f,\n"
+             "      \"drag_area_m2\": %.3f,\n"
+             "      \"wheelbase_m\": %.3f,\n"
+             "      \"offroad_grip\": %.3f,\n"
+             "      \"gear_top_speeds_kph\": [",
+             s->name, (double)s->mass_kg, (double)s->power_hp,
+             (double)s->brake_dist_100, (double)s->lat_g, (double)s->cd_a,
+             (double)s->wheelbase, (double)s->offroad_grip);
+        for (g = 0; g < s->n_gears; g++)
+            EMIT("%s%.3f", g ? ", " : "", (double)(s->gear_top[g] * 3.6f));
+        EMIT("],\n"
+             "      \"automatic_upshift_fraction\": %.3f,\n"
+             "      \"automatic_downshift_fraction\": %.3f,\n"
+             "      \"drivetrain\": %s\n"
+             "    }%s\n",
+             (double)s->auto_up[0], (double)s->auto_down[0], dt,
+             (i + 1 < count) ? "," : "");
+    }
+    EMIT("  ]\n}\n");
+#undef EMIT
+    return pos;
+}
+
+/*
+ * Write specs[0..count-1] to path as a cars.json document. Used by the
+ * in-game car designer to make a saved car (kart_specs_add_custom,
+ * already live in memory for the rest of this session) survive past
+ * the game closing — without this, "saving" a car would only last
+ * until the console was turned off.
+ */
+int config_save_cars_file(const char *path, const KartSpec *specs,
+                          int count, char *error, int error_cap)
+{
+    char *buf;
+    int len;
+    FILE *f;
+    const int cap = 32768;
+
+    buf = (char *)malloc((size_t)cap);
+    if (!buf) return set_error(error, error_cap, "NO SAVE MEMORY");
+    len = config_write_cars_text(specs, count, buf, cap);
+    if (len <= 0) {
+        free(buf);
+        return set_error(error, error_cap, "CAR ROSTER TOO BIG TO SAVE");
+    }
+    f = fopen(path, "wb");
+    if (!f) {
+        free(buf);
+        return set_error(error, error_cap, "COULD NOT OPEN FILE TO SAVE");
+    }
+    if (fwrite(buf, 1u, (size_t)len, f) != (size_t)len) {
+        fclose(f);
+        free(buf);
+        return set_error(error, error_cap, "COULD NOT WRITE FILE");
+    }
+    fclose(f);
+    free(buf);
+    if (error && error_cap > 0) error[0] = '\0';
+    return 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1081,7 +1138,9 @@ int config_load_settings_text(GameSettings *settings, const char *json,
          !read_track_settings(&s, json, tokens, count, obj, TRACK_GUANELLA,
                               "guanella", error, error_cap) ||
          !read_track_settings(&s, json, tokens, count, obj, TRACK_BERTHOUD2,
-                              "berthoud2", error, error_cap))) goto fail;
+                              "berthoud2", error, error_cap) ||
+         !read_track_settings(&s, json, tokens, count, obj, TRACK_BULLRING,
+                              "bullring", error, error_cap))) goto fail;
 
     if (!game_settings_validate(&s, error, error_cap)) goto fail;
     *settings = s;
