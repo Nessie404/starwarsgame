@@ -184,6 +184,22 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   (new `weather_puddle_drag_mult`), and the AI's own corner-speed
   lookahead discounts grip for whatever weather patch is ahead instead
   of assuming dry pavement everywhere.
+- **v1.21.0**: boost reworked from a meter-you-charge-and-spend into an
+  automatic turbo (`Kart.turbo_spool`, `turbo_spool_rate`/
+  `turbo_spool_decay_rate`/`turbo_max_power_bonus` in the renamed
+  `turbo` settings block) that builds and bleeds off on its own with
+  real throttle and revs and applies straight to engine power, tapered
+  by how much grip is already spent cornering; the "use" button
+  (`Input.boost`) is now an instantaneous full-throttle override
+  instead. Another AI competitiveness pass. Two more HOLT-tier
+  drivers, KESSLER and DUARTE, replacing RENARD and SOLANO. Some AI
+  drivers (OSEI, NORDLI, DUARTE) now genuinely hunt the racing line —
+  `ai_line_curvature` (game.c/game.h) blends in a second, farther
+  curvature sample per driver's `AIDriver.line_lookahead_m`, tapered
+  down the tighter the near corner already is. Both the turbo's grip
+  taper and the racing line's corner-tightness taper exist because an
+  early cut of each briefly broke the same fragile TRUCK/AI_YOLO
+  pairing on Monarch and Berthoud Pass 2.0 — see §6 below.
 
 ---
 
@@ -330,6 +346,52 @@ does not care about oversteer at all. TOURER (`front_bias = 0.50`,
 `rwd_bias` exactly `0.50`, not `> 0.50`) is the deliberate escape
 hatch: assign a test kart to it explicitly when the thing under test
 is unrelated to oversteer/spin behaviour.
+
+**CROSS, driving TRUCK, on Monarch or Berthoud Pass 2.0, has essentially
+zero safety margin — treat it as the canary for any change to engine
+power, AI cornering speed, or AI line selection.** Car spec assignment
+for the AI is purely positional (`ai_no % kart_spec_count` in
+`game_init`, where `ai_no` is a driver's index into `ai_drivers[]`), so
+whichever driver sits at array index 9 is always paired with `TRUCK`
+(index 9 in `cars.json`: the heaviest car, the worst grip in the
+roster, the longest braking distance) — currently CROSS, on the
+`AI_YOLO` sheet (highest aggression, lowest consistency of any sheet).
+That pairing, on the field's two tightest and most technical circuits,
+came within a hair of an unrecoverable fall/respawn loop (v1.21.0's
+turbo rework) and a pinned-against-the-barrier stall (the same
+release's racing-line lookahead) from otherwise-reasonable,
+well-intentioned tuning changes that never touched CROSS, TRUCK, or
+YOLO directly — a modest global engine-power bonus, or a several-meter
+lean toward a different apex on a completely different driver's line,
+was enough to tip it over in each case. `test_ai_races_all_tracks`'s
+per-circuit finish check is what catches this every time; if a future
+change to power delivery, braking, or line selection makes that test
+start timing out on Monarch (track 4) or Berthoud Pass 2.0 (track 7),
+suspect this pairing before anything else, and look for a way to taper
+the new effect (by slip, by corner severity, by whatever is actually
+relevant) rather than just turning its magnitude down — a flat
+reduction big enough to save this one pairing tends to blunt the
+feature everywhere else it was never actually a problem.
+
+**Growing `ai_drivers[]` past `NUM_KARTS - 1` (11) entries silently
+adds unreachable drivers, not new ones — replace, don't append.** Car
+and driver identity for the AI is assigned by `ai_no = i -
+n_humans`, and `ai_driver(ai_no)` indexes `ai_drivers[ai_no %
+ai_driver_count()]`. With a single human, `ai_no` only ever runs 0..10
+(11 AI grid slots, the maximum there is room for), so if the array has
+more than 11 entries the modulo never actually wraps for any of them —
+entries at index 11 and beyond are simply never selected in the
+common single-human case, however many humans besides that one drop
+the AI slot count even further. `test_driver_field_has_characters`
+does not catch this: it only checks `ai_driver_count() >= NUM_KARTS -
+1` and then iterates every entry in the array by index, so a
+dead-in-practice 12th or 13th driver still reads as present and
+correctly shaped to that test. Adding KESSLER and DUARTE in v1.21.0
+meant replacing two existing entries (RENARD and SOLANO, chosen after
+checking which named/strategy dependencies in `tests/test_game.c`
+each one alone was load-bearing for) rather than appending, to keep
+the roster at exactly 11 and guarantee the new characters actually
+show up in a normal race.
 
 ---
 

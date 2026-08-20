@@ -141,6 +141,15 @@ driving model that expects you to brake for the hairpins.
   colour-based team mode and a career/campaign mode that carries a
   finishing position into the next race's starting grid — neither
   wired into an actual race yet.
+- **v1.21.0** — boost reworked into an automatic turbo: it spools up
+  and bleeds off on its own with real throttle and revs, applies
+  straight to engine power (tapered off mid-slide, like a traction
+  control), and the "use" button is now an instantaneous full-throttle
+  stab instead of spending a meter. Two more genuinely hard-to-beat
+  drivers, KESSLER and DUARTE. Some AI drivers now hunt the real
+  racing line, reading past the corner they're in to set up for the
+  next one, each by a different distance — and backing off that
+  anticipation the tighter the corner they're actually in gets.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -247,11 +256,13 @@ driving model that expects you to brake for the hairpins.
   2, quadrants for 3-4), with view culling so a full field still runs at
   frame rate in four-way split.
 - **No collectible power-ups, ever** — no roadside panel, no random
-  pickup. A car's boost is its own: a meter that charges with revs on
-  a curve, spent all at once on the boost button for an instant speed
-  bump, and wiped out by the next gear change. Tires only ever wear
-  over a race, with no mid-lap refresh; picking a compound is a bet on
-  the whole distance, not a resource to manage lap to lap.
+  pickup. A car's turbo is its own: it spools up and bleeds off
+  automatically with real throttle and revs, no button required, and
+  applies straight to engine power for as long as it stays lit. The
+  "use" button is an instantaneous full-throttle stab instead of a
+  resource to spend. Tires only ever wear over a race, with no mid-lap
+  refresh; picking a compound is a bet on the whole distance, not a
+  resource to manage lap to lap.
 - **No arcade cheats.** There is no rubber-banding (a test proves an AI
   left behind gets exactly the same power: 17.05 m/s either way), no
   floor boost pads, and no mini-turbo reward for sliding — the handbrake

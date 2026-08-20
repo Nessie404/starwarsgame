@@ -50,10 +50,11 @@
     "hard":   { "snow_grip": 0.55, "ice_grip": 0.50, "puddle_grip": 0.92 },
     "puddle_drag_multiplier": 1.12
   },
-  "boost": {
-    "_comment": "The meter fills while the car is turning real revs, along a curve (build_rate applies at redline; it falls off toward zero low in the band), and the use button spends whatever is charged for an instant speed bump. Any gear change wipes it.",
-    "build_rate_per_second": 0.55,
-    "max_speed_bonus_mps": 9.0
+  "turbo": {
+    "_comment": "Fully automatic: spool builds on its own while genuinely on the throttle at real revs, along a curve (spool_rate applies at redline; it falls off toward zero low in the band), and bleeds off at decay_rate the instant you lift or brake. A quick gear change just holds it steady rather than wiping it. Whatever is spooled applies straight to engine power as a fraction bonus (max_power_bonus at a full spool), tapered by how much grip is already spent cornering — full effect in a straight line, next to none mid-slide, like a traction control that backs off boost rather than piling more power on top of tires that are already loaded. The 'use' control is a separate, un-tunable instant full-throttle override; see controls.json.",
+    "spool_rate_per_second": 0.90,
+    "decay_rate_per_second": 1.50,
+    "max_power_bonus": 0.35
   },
   "understeer": {
     "_comment": "Pushing past the grip limit costs speed at scrub * (1 + scrub_curve * slip) * dt, so a corner taken barely too hot still just runs a little wide, one taken way too hot really pays for it.",

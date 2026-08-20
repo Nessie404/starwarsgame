@@ -892,16 +892,18 @@ int config_load_settings_text(GameSettings *settings, const char *json,
                         &s.weather_puddle_drag_mult, error, error_cap))
         goto fail;
 
-    obj = object_get(json, tokens, count, 0, "boost");
+    obj = object_get(json, tokens, count, 0, "turbo");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
-        set_error(error, error_cap, "BOOST NEEDS OBJECT");
+        set_error(error, error_cap, "TURBO NEEDS OBJECT");
         goto fail;
     }
     if (obj >= 0 &&
-        (!optional_float(json, tokens, count, obj, "build_rate_per_second",
-                         &s.boost_build_rate, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "max_speed_bonus_mps",
-                         &s.boost_max_speed_bonus_mps, error,
+        (!optional_float(json, tokens, count, obj, "spool_rate_per_second",
+                         &s.turbo_spool_rate, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "decay_rate_per_second",
+                         &s.turbo_spool_decay_rate, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "max_power_bonus",
+                         &s.turbo_max_power_bonus, error,
                          error_cap))) goto fail;
 
     obj = object_get(json, tokens, count, 0, "understeer");

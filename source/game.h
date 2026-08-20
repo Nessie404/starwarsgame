@@ -330,14 +330,28 @@ struct GameSettings {
     float weather_puddle_drag_mult;
 
     /*
-     * Boost: a meter that fills while the engine is turning fast, along
-     * a curve rather than a flat rate, spent all at once on the use
-     * button for an instant speed bump, and wiped out by the next shift
-     * — so working it means holding a gear near the limiter on purpose
-     * instead of just driving normally.
+     * Turbo spool: automatic, no button to press. It builds on its own
+     * while the driver is genuinely on the throttle at real revs, along
+     * a curve rather than a flat rate — time spent near the limiter
+     * counts for far more than the same time low in the band — and
+     * bleeds off on its own the moment they lift or brake, the way a
+     * real turbo's boost pressure drops without exhaust flow driving
+     * it. Whatever is spooled applies straight to engine power, every
+     * frame it's on the gas — nothing to spend, nothing to save up for
+     * later, unlike the meter-you-fill-and-spend version of this
+     * system before v1.21.0. The "use" button now does something
+     * different and un-tunable: see kart_step for the instantaneous
+     * full-throttle override it applies instead.
      */
-    float boost_build_rate;        /* meter/second at redline (curve=1) */
-    float boost_max_speed_bonus_mps; /* bonus speed at a full meter     */
+    float turbo_spool_rate;        /* spool/second at redline (curve=1) */
+    float turbo_spool_decay_rate;  /* spool/second lost off the throttle */
+    float turbo_max_power_bonus;   /* extra engine power at full spool
+                                     * and zero slip, as a fraction
+                                     * (0.35 = +35%) — kart_step tapers
+                                     * this down by how much grip is
+                                     * already spent cornering, so it is
+                                     * a straight-line number, not what
+                                     * a car gets mid-slide            */
 
     /*
      * Understeer: pushing past the grip limit now costs a lot more the
@@ -448,7 +462,7 @@ typedef struct {
     int   hop;       /* handbrake                                       */
     int   gear_up;   /* upshift  (edge-detected by the sim)             */
     int   gear_down; /* downshift                                       */
-    int   boost;     /* "use": spend the boost meter (edge-detected)    */
+    int   boost;     /* "use": instant full throttle, brake overridden  */
 } Input;
 
 /* ------------------------------------------------------------------ */
@@ -569,10 +583,9 @@ typedef struct {
     float rev_frac;       /* 0..1+ position in the current gear band    */
     int   prev_up_btn, prev_down_btn;
 
-    /* boost: builds with revs, spent all at once on the use button,
-     * wiped by the next shift — see kart_step */
-    float boost_meter;    /* 0..1                                       */
-    int   prev_boost_btn;
+    /* turbo spool: builds automatically on the throttle, decays
+     * automatically off it — see kart_step */
+    float turbo_spool;    /* 0..1                                       */
 
     /* going over the edge, and getting put back on the road           */
     int   last_checkpoint;
@@ -831,11 +844,24 @@ typedef struct {
     float tire_care;     /* multiplies their tire wear; <1 is kind      */
     int   paint;         /* their colour, so a rival is recognisable     */
     const char *trait;   /* one word for the results screen             */
+    /* How far past the near apex point (AI_APEX_LOOKAHEAD_M, in
+     * ai_tactical_line, game.c) this driver also reads the track when
+     * deciding their line: 0 means only the immediate bend, same as
+     * every driver before this existed. A driver hunting the real
+     * racing line reads further than the corner in front of them —
+     * they are already leaning toward the NEXT bend's apex on the way
+     * out of this one, using the whole road rather than reacting one
+     * corner at a time. Different drivers read different distances
+     * ahead, which is what makes them feel like different people
+     * finding the line rather than one "good line" setting copied
+     * eleven times. */
+    float line_lookahead_m;
 } AIDriver;
 
 const AIDriver *ai_driver(int grid_slot);
 int ai_driver_count(void);
 float       ai_corner_conf(const Kart *k, const Track *t, int seg);
+float       ai_line_curvature(const Track *t, int seg, float lookahead_m);
 
 /* derived stats for menus: 0-100 km/h time (s) and top speed (km/h) */
 float spec_accel_time(const KartSpec *s);

@@ -197,8 +197,9 @@ void game_settings_defaults(GameSettings *s)
     s->weather_ice_grip[TIRE_HARD]    = 0.50f;
     s->weather_puddle_grip[TIRE_HARD] = 0.92f;
     s->weather_puddle_drag_mult = 1.12f;
-    s->boost_build_rate = 0.55f;
-    s->boost_max_speed_bonus_mps = 9.0f;
+    s->turbo_spool_rate = 0.90f;
+    s->turbo_spool_decay_rate = 1.50f;
+    s->turbo_max_power_bonus = 0.35f;
     s->understeer_scrub = 0.22f;
     s->understeer_scrub_curve = 0.60f;
     s->oversteer_grow_rate = 0.70f;
@@ -315,8 +316,10 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
     }
     FINITE_RANGE(s->weather_puddle_drag_mult, 1.0f, 2.0f,
                  "BAD PUDDLE DRAG");
-    FINITE_RANGE(s->boost_build_rate, 0.02f, 20.0f, "BAD BOOST BUILD RATE");
-    FINITE_RANGE(s->boost_max_speed_bonus_mps, 0.0f, 40.0f, "BAD BOOST BONUS");
+    FINITE_RANGE(s->turbo_spool_rate, 0.02f, 20.0f, "BAD TURBO SPOOL RATE");
+    FINITE_RANGE(s->turbo_spool_decay_rate, 0.02f, 20.0f,
+                 "BAD TURBO DECAY RATE");
+    FINITE_RANGE(s->turbo_max_power_bonus, 0.0f, 2.0f, "BAD TURBO BONUS");
     FINITE_RANGE(s->understeer_scrub, 0.0f, 3.0f, "BAD UNDERSTEER SCRUB");
     FINITE_RANGE(s->understeer_scrub_curve, 0.0f, 5.0f, "BAD UNDERSTEER CURVE");
     FINITE_RANGE(s->oversteer_grow_rate, 0.0f, 10.0f, "BAD OVERSTEER GROWTH");
@@ -579,7 +582,7 @@ const AIStrategy ai_strategies[AI_STRATEGY_COUNT] = {
   /* No guts, no glory: the most overconfident sheet in the field by a
    * wide margin, clips every apex it can reach, never bothers covering
    * a line, and rides every gear to the limiter — which also means it
-   * charges the boost meter faster than anyone else on the grid. */
+   * spools its turbo harder than anyone else on the grid. */
   { "YOLO",       1.14f,   1.08f,   0.008f,  0.20f,   0.80f,  0.10f, 1.00f, 1.000f,
                                                              0.99f, 0.44f, 0.01f },
 };
@@ -655,26 +658,44 @@ void career_record_result(CareerState *cs, int final_rank)
  * a couple of people who are simply along for the ride — which is what
  * makes finishing fourth mean something.
  *
- *   name       sheet         skill  consist  aggr  tires  colour  trait
+ * HOLT was, for a while, the one driver a human genuinely struggled to
+ * beat. KESSLER and DUARTE are cut from the same top-of-the-field cloth
+ * — genuinely hard to beat, not just quick — but not the same driver
+ * twice: KESSLER is HOLT's kind of trouble (late braking, rides the
+ * limiter, commits and rarely pays for it — actually a little more
+ * consistent than HOLT, if anything), while DUARTE is a different
+ * problem entirely, a metronome who takes the tightest line on the
+ * track lap after lap and essentially never puts a wheel wrong.
+ *
+ * A human hunting a lap time reads well past the corner they are in —
+ * the reason to run wide on the way into one bend is often the shape
+ * of the next one. OSEI, NORDLI and DUARTE are the three who do that
+ * too (line_lookahead_m, last column below), each reading a different
+ * distance ahead of the near apex: OSEI just past this corner, NORDLI
+ * a full corner further on, DUARTE further still — three different
+ * amounts of the same idea rather than one setting worn by everybody.
+ *
+ *   name       sheet         skill  consist  aggr  tires  colour  trait      lookahead
  */
 static const AIDriver ai_drivers[] = {
-    /* the sharp end: quick and willing, and IBARRA is quick and wild */
-    { "HOLT",    AI_LATE,      1.05f, 0.86f, 0.90f, 1.15f, 0, "ATTACKER" },
-    { "RENARD",  AI_BALANCED,  1.03f, 0.94f, 0.55f, 0.92f, 1, "COMPLETE" },
-    { "IBARRA",  AI_CHARGER,   1.02f, 0.55f, 1.00f, 1.30f, 5, "WILD" },
+    /* the sharp end: quick and willing, IBARRA is quick and wild, and
+     * KESSLER/DUARTE are the two who are hardest to actually beat */
+    { "HOLT",    AI_LATE,      1.05f, 0.86f, 0.90f, 1.15f, 0, "ATTACKER",   0.0f },
+    { "KESSLER", AI_LATE,      1.04f, 0.89f, 0.85f, 1.05f, 1, "RUTHLESS",   0.0f },
+    { "IBARRA",  AI_CHARGER,   1.02f, 0.55f, 1.00f, 1.30f, 5, "WILD",       0.0f },
+    { "DUARTE",  AI_INSIDE,    1.03f, 0.93f, 0.75f, 1.00f, 4, "SURGICAL",  34.0f },
     /* the dependable middle */
-    { "BASTIEN", AI_DEFENDER,  0.99f, 0.90f, 0.60f, 0.95f, 2, "STUBBORN" },
-    { "OSEI",    AI_INSIDE,    0.98f, 0.92f, 0.50f, 0.90f, 3, "TIDY" },
-    { "NORDLI",  AI_CRUISER,   0.96f, 0.97f, 0.25f, 0.72f, 6, "SMOOTH" },
-    { "SOLANO",  AI_DRAFTER,   0.95f, 0.88f, 0.65f, 1.00f, 4, "PATIENT" },
+    { "BASTIEN", AI_DEFENDER,  0.99f, 0.90f, 0.60f, 0.95f, 2, "STUBBORN",   0.0f },
+    { "OSEI",    AI_INSIDE,    0.98f, 0.92f, 0.50f, 0.90f, 3, "TIDY",      16.0f },
+    { "NORDLI",  AI_CRUISER,   0.96f, 0.97f, 0.25f, 0.72f, 6, "SMOOTH",    24.0f },
     /* the back: one who overdrives, one who under-drives, two learners —
      * still the tail of the field, but no longer plain slow */
     /* no guts, no glory: committed to every apex, defends nothing, rides
      * every gear to the limiter — see the YOLO sheet */
-    { "TANAKA",  AI_YOLO,      0.95f, 0.48f, 0.95f, 1.35f, 7, "RAGGED" },
-    { "DELGADO", AI_CRUISER,   0.93f, 0.95f, 0.15f, 0.75f, 2, "TIMID" },
-    { "CROSS",   AI_YOLO,      0.92f, 0.60f, 0.80f, 1.20f, 5, "OVERDRIVES" },
-    { "PETRAN",  AI_BALANCED,  0.87f, 0.82f, 0.40f, 0.98f, 4, "STEADY" }
+    { "TANAKA",  AI_YOLO,      0.95f, 0.48f, 0.95f, 1.35f, 7, "RAGGED",     0.0f },
+    { "DELGADO", AI_CRUISER,   0.93f, 0.95f, 0.15f, 0.75f, 2, "TIMID",      0.0f },
+    { "CROSS",   AI_YOLO,      0.92f, 0.60f, 0.80f, 1.20f, 5, "OVERDRIVES", 0.0f },
+    { "PETRAN",  AI_BALANCED,  0.87f, 0.82f, 0.40f, 0.98f, 4, "STEADY",     0.0f }
 };
 
 int ai_driver_count(void)
@@ -1069,6 +1090,53 @@ static int nearest_rival(const Game *g, const Kart *k, int ahead,
 #define AI_APEX_LEAN_SCALE  16.0f
 
 /*
+ * The track's signed curvature at the near apex point (AI_APEX_LOOKAHEAD_M
+ * up the road from `seg`), optionally blended with a second, farther
+ * sample read `lookahead_m` past that near point — `lookahead_m <= 0`
+ * skips the far sample entirely and this is just the single-point apex
+ * read every driver used before v1.21.0.
+ *
+ * A driver hunting the real racing line reads past the corner they are
+ * already in — the reason to run wide into this bend is often the shape
+ * of the next one, not this one alone. The far sample blends in at a
+ * modest weight (enough to noticeably pre-load the next bend without
+ * ever letting it out-vote the corner directly under the nose), and
+ * that weight itself fades toward nothing as the near corner gets
+ * tight: a real driver mid-hairpin is committed to THAT corner and is
+ * not still weighing what comes after it. Tight enough that a
+ * genuinely tricky, technical circuit — Monarch, Berthoud Pass 2.0 —
+ * sees a lookahead driver reading closer to only the near apex like
+ * everyone else; a fast, flowing circuit sees the full anticipation.
+ */
+float ai_line_curvature(const Track *t, int seg, float lookahead_m)
+{
+    int ahead = seg;
+    float dist = 0.0f;
+    float curv;
+
+    while (dist < AI_APEX_LOOKAHEAD_M) {
+        dist += t->seg_len[ahead];
+        ahead = (ahead + 1) % t->n;
+    }
+    curv = t->curv_signed[ahead];
+
+    if (lookahead_m > 0.0f) {
+        int far = ahead;
+        float fdist = dist;
+        float target = dist + lookahead_m;
+        float near_severity = game_clampf(fabsf(curv) * 8.0f, 0.0f, 1.0f);
+        float far_weight = 0.25f * (1.0f - near_severity);
+
+        while (fdist < target) {
+            fdist += t->seg_len[far];
+            far = (far + 1) % t->n;
+        }
+        curv = curv * (1.0f - far_weight) + t->curv_signed[far] * far_weight;
+    }
+    return curv;
+}
+
+/*
  * Decide where on the road this driver wants to be, as a signed offset
  * from the centerline (positive = right, see game.h).
  *
@@ -1101,16 +1169,9 @@ static float ai_tactical_line(const Game *g, const Kart *k)
     if (!t->has_walls)
         room *= g->settings.ai_unguarded_line_room;
 
-    {
-        int ahead = k->seg;
-        float dist = 0.0f;
-        while (dist < AI_APEX_LOOKAHEAD_M) {
-            dist += t->seg_len[ahead];
-            ahead = (ahead + 1) % t->n;
-        }
-        line = st->line_bias * t->curv_signed[ahead] *
-               AI_APEX_LEAN_SCALE * room;
-    }
+    line = st->line_bias *
+           ai_line_curvature(t, k->seg, ai_driver(k->driver_no)->line_lookahead_m) *
+           AI_APEX_LEAN_SCALE * room;
 
     /* being hunted: cover the side of the road this human keeps using */
     who = nearest_rival(g, k, 0, 1, AI_DEFEND_RANGE, &gap);
@@ -1328,14 +1389,13 @@ static void ai_control(const Game *g, Kart *k, Input *in, float dt)
         }
     }
 
-    /* fire the boost the instant it is usefully charged and there is
-     * real headroom before whatever corner is coming — same as a human
-     * mashing the button on the straight, not mid-turn-in. Without the
-     * headroom check an AI launches itself into the next corner faster
-     * than its own line was ever computed for and spends the rest of
-     * the lap paying for it. */
-    in->boost = (k->boost_meter > 0.95f) && in->accel && !in->brake &&
-                vmax_allow > v * 1.15f;
+    /* No "use" button for the AI: turbo spool is automatic now, so
+     * simply driving the corner exit on the throttle already builds
+     * and spends it every frame. "use" only matters as an instant
+     * brake-to-throttle override, and the AI never holds both at once
+     * to begin with (see the accel/brake decision above) — there is
+     * nothing left for it to override. */
+    in->boost = 0;
 }
 
 /*
@@ -1602,6 +1662,19 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     float dt_front = (s->drivetrain == DRIVETRAIN_FWD) ? 1.0f :
                       (s->drivetrain == DRIVETRAIN_RWD) ? 0.0f :
                       s->awd_front_bias;
+    /* "use" is an instantaneous full-throttle stab, not a resource to
+     * spend: for this one frame it is exactly as if the driver planted
+     * the gas pedal on the floor and came off the brake, whatever they
+     * were actually holding. It does not add power on its own — see
+     * the automatic turbo spool below for that — it just guarantees
+     * the engine gets the wide-open throttle it needs to use whatever
+     * spool is already built. */
+    int accel = in->accel;
+    int brake = in->brake;
+    if (in->boost) {
+        accel = 1;
+        brake = 0;
+    }
 
     /* the marshal helicopter has arrived: hold most of the engine back
      * until the driver turns around */
@@ -1708,12 +1781,10 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
             k->gear++;
             k->shift_t = g->settings.shift_seconds +
                          ((k->gearbox == GEARBOX_AUTO) ? 0.06f : 0.0f);
-            k->boost_meter = 0.0f;   /* new gear, start the charge over */
         } else if (want_down && k->gear > 0) {
             k->gear--;
             k->shift_t = g->settings.shift_seconds +
                          ((k->gearbox == GEARBOX_AUTO) ? 0.06f : 0.0f);
-            k->boost_meter = 0.0f;
         }
         k->rev_frac = fabsf(v) / s->gear_top[k->gear];
     }
@@ -1721,24 +1792,30 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     k->prev_down_btn = in->gear_down;
 
     /*
-     * Boost: the meter fills while the car is turning real revs in a
-     * gear it isn't mid-shift through, along a curve so time spent near
-     * the limiter counts for far more than the same time low in the
-     * band — working it means holding a gear on purpose, not just
-     * driving. The use button spends whatever is charged in one shot;
-     * a half-full meter is half the bonus, not the full bonus sooner.
+     * Turbo spool: automatic, no button. It builds on its own while the
+     * driver is genuinely on the gas at real revs — same curve as
+     * before, so time spent near the limiter counts for far more than
+     * the same time low in the band — and bleeds off on its own the
+     * moment they lift or get on the brake, exactly like a real
+     * turbo's boost pressure dropping without exhaust flow to drive
+     * it. A quick shift just holds the spool where it was (drive is
+     * cut, but not for long enough to matter) rather than dumping it,
+     * so a driver who short-shifts through a band doesn't get punished
+     * for it. Whatever is spooled applies directly to engine power
+     * every frame it's on the gas — nothing to spend, nothing to save
+     * up for later.
      */
-    if (k->shift_t <= 0.0f) {
-        float curve = k->rev_frac * k->rev_frac;
-        if (curve > 1.0f) curve = 1.0f;
-        k->boost_meter += g->settings.boost_build_rate * curve * dt;
-        if (k->boost_meter > 1.0f) k->boost_meter = 1.0f;
+    if (accel && !brake) {
+        if (k->shift_t <= 0.0f) {
+            float curve = k->rev_frac * k->rev_frac;
+            if (curve > 1.0f) curve = 1.0f;
+            k->turbo_spool += g->settings.turbo_spool_rate * curve * dt;
+            if (k->turbo_spool > 1.0f) k->turbo_spool = 1.0f;
+        }
+    } else {
+        k->turbo_spool -= g->settings.turbo_spool_decay_rate * dt;
+        if (k->turbo_spool < 0.0f) k->turbo_spool = 0.0f;
     }
-    if (in->boost && !k->prev_boost_btn && k->boost_meter > 0.0f) {
-        v += k->boost_meter * g->settings.boost_max_speed_bonus_mps;
-        k->boost_meter = 0.0f;
-    }
-    k->prev_boost_btn = in->boost;
 
     /* drive is cut mid-shift, and where you are in the gear decides how
      * much of the engine you actually have */
@@ -1746,6 +1823,15 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         P = 0.0f;
     else
         P *= gear_power_scale_with_settings(k->rev_frac, &g->settings);
+    /* whatever the turbo has spooled goes straight to the wheels — but
+     * only in proportion to how much grip is not already spent on
+     * cornering (1 - last frame's slip), the way a real traction
+     * control tapers boost when the tires are already loaded rather
+     * than piling more power on right as a corner is asking everything
+     * of them. Full effect in a straight line, tapering to none right
+     * as a car is already sliding. */
+    P *= 1.0f + k->turbo_spool * g->settings.turbo_max_power_bonus *
+                (1.0f - k->slip);
 
     /*
      * --- longitudinal forces ---
@@ -1766,7 +1852,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
              g->settings.grade_gravity_mult;
         mu_a *= load;
     }
-    if (in->accel && !in->brake) {
+    if (accel && !brake) {
         float a_drive = P / (s->mass_kg * (fabsf(v) > 3.0f ? fabsf(v) : 3.0f));
         /* two driven axles share the traction demand between them, so
          * more of the grip circle is left for accelerating without
@@ -1786,10 +1872,10 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
                       g->settings.tire_rolling_mult[rc] * GRAVITY;
         a += (v > 0.0f) ? -a_res : a_res;
     }
-    if (in->brake) {
+    if (brake) {
         if (v > 0.3f) {
             a -= grip * (V100 * V100) / (2.0f * s->brake_dist_100);
-        } else if (!in->accel) {
+        } else if (!accel) {
             /* reverse gear, gently */
             v += (-6.0f - v) * 1.2f * dt;
         }
@@ -1823,7 +1909,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
          * than cornering: a front-driven car understeers under power
          * (the same tires steer and drive). A rear-driven car gets the
          * oversteer treatment below instead of a flat bonus. */
-        if (in->accel && !in->brake && dt_front >= 0.5f)
+        if (accel && !brake && dt_front >= 0.5f)
             yaw_cap *= 1.0f - 0.04f * (dt_front - 0.5f) * 2.0f;
 
         if (k->drifting) {
@@ -1851,7 +1937,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
          * would catch it after barely easing off — the same 0.6 of
          * steering lock means the same thing to a driver in any car.
          */
-        oversteer_risk = in->accel && !in->brake && !k->drifting &&
+        oversteer_risk = accel && !brake && !k->drifting &&
                          rwd_bias > 0.5f && fabsf(steer) > 0.6f &&
                          fabsf(v) > 12.0f && fabsf(yaw_cmd) > yaw_cap;
         if (k->spin_t <= 0.0f) {
@@ -2021,7 +2107,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->speed = 0.0f;
         k->gear = 0;
         k->shift_t = 0.0f;
-        k->boost_meter = 0.0f;
+        k->turbo_spool = 0.0f;
         k->drifting = 0;
         k->slip = 0.0f;
         k->fall_t = 0.0f;

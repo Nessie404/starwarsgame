@@ -104,6 +104,8 @@ This file exposes the main tuning surfaces:
   is, how fast it heats and cools, and how much grip is left outside the
   window — plus the ambient air temperature they cool towards;
 - weather: how a snow patch melts (see below);
+- turbo: how fast it spools on the throttle and bleeds off without it,
+  and how much engine power it's worth fully spooled;
 - understeer and oversteer: how much pushing past the grip limit costs,
   and how a rear-driven car committing hard under power can rotate faster
   than grip alone allows — reward it in time or spin;
@@ -251,10 +253,15 @@ gearbox mode keeps the existing tilt/D-pad steering. In SHIFT mode, a
 sideways Remote uses D-pad Up/Down for gears and Left/Right for optional
 digital steering; a Classic Controller uses ZR/ZL.
 
-`boost` spends the boost meter (see the `boost` block in `settings.json`)
-for an instant speed bump. It defaults to F/H on the two keyboard players,
-GameCube/Xbox Y, and Minus on a bare Wii Remote or Classic Controller —
-editable here the same way as every other action.
+`boost` ("FLOOR IT" on the controls screen) is an instantaneous full
+throttle: for as long as it's held it's exactly as if the gas pedal were
+on the floor and the brake untouched, whatever those two are actually
+doing. There's no meter to spend any more — the turbo itself spools up
+and bleeds off automatically with real throttle and revs (see the
+`turbo` block in `settings.json`), with no button involved at all. It
+defaults to F/H on the two keyboard players, GameCube/Xbox Y, and Minus
+on a bare Wii Remote or Classic Controller — editable here the same way
+as every other action.
 
 Keyboard actions accept a single name or up to three alternatives. Valid
 names are `A`–`Z`, `SPACE`, `ENTER`, `ESC`, `LEFT`, `RIGHT`, `UP`, and

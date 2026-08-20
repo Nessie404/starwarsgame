@@ -1987,14 +1987,14 @@ static void draw_player_hud(int p)
                      150, 200, 240, 220);
     }
 
-    /* Boost: the meter fills near the rev limiter and empties the
-     * instant it is spent — a full bar means the use button is worth
-     * hitting right now. */
+    /* Turbo: spools up on its own near the rev limiter and bleeds off
+     * the instant you lift or brake — a full bar means the engine is
+     * making everything it has right now, no button required. */
     {
-        float meter = game_clampf(k->boost_meter, 0.0f, 1.0f);
+        float meter = game_clampf(k->turbo_spool, 0.0f, 1.0f);
         u8 br = 90, bg = 170, bb = 255;
         if (meter > 0.95f) { br = 255; bg = 220; bb = 90; }
-        hud_text(vx + 112.0f, vy + vh - 72.0f, 8.0f, 14.0f, "BOOST",
+        hud_text(vx + 112.0f, vy + vh - 72.0f, 8.0f, 14.0f, "TURBO",
                  160, 165, 180, 190);
         hud_rect(vx + 112.0f, vy + vh - 60.0f, 62.0f, 7.0f, 15, 15, 20, 170);
         hud_rect(vx + 113.0f, vy + vh - 59.0f, 60.0f * meter, 5.0f,
@@ -2140,7 +2140,7 @@ static void draw_input_translator(int p)
     draw_binding_line(p, x, y, "HAND", CONTROL_HANDBRAKE); y += 14.0f;
     draw_binding_line(p, x, y, "UP", CONTROL_GEAR_UP); y += 14.0f;
     draw_binding_line(p, x, y, "DOWN", CONTROL_GEAR_DOWN); y += 14.0f;
-    draw_binding_line(p, x, y, "BOOST", CONTROL_BOOST); y += 14.0f;
+    draw_binding_line(p, x, y, "FLOOR IT", CONTROL_BOOST); y += 14.0f;
     draw_binding_line(p, x, y, "MENU", CONTROL_RACE_MENU); y += 14.0f;
 
     snprintf(buf, sizeof(buf), "SEEN KEY %s  GC %s  WII %s",

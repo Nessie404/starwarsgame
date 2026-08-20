@@ -1431,19 +1431,23 @@ static void test_shifting(void)
 }
 
 /*
- * Boost has to actually be driven by revs, not just by whether the
- * throttle is down — the same throttle input at low revs and at high
- * revs in the same gear must charge the meter at very different rates,
- * following a curve rather than a flat rate. Any shift has to wipe
- * whatever is charged, and the use button has to spend it all at once
- * for an immediate speed bump rather than a rate change over time.
+ * Turbo spool is automatic — no button, nothing to spend. It has to
+ * actually be driven by revs, not just by whether the throttle is
+ * down: the same throttle input at low revs and at high revs in the
+ * same gear must spool at very different rates, following a curve
+ * rather than a flat rate. Off the throttle (or on the brake) it has
+ * to bleed off on its own, but a quick shift should hold it steady
+ * rather than dumping it — a driver who short-shifts through the band
+ * should not be punished for it. Whatever is spooled has to actually
+ * reach the wheels as extra engine power, every frame, automatically.
  */
-static void test_boost_system(void)
+static void test_turbo_spool(void)
 {
     Game g;
     GameConfig cfg = default_cfg(TRACK_CLASSIC);
     Input in[MAX_HUMANS];
     float top, delta_high, delta_low, before, after;
+    int f;
 
     cfg.gearbox[0] = GEARBOX_MANUAL;
 
@@ -1456,7 +1460,7 @@ static void test_boost_system(void)
     teleport(&g, &g.karts[0], 2, top * 0.92f);   /* deep in the band */
     in[0].accel = 1;
     game_update(&g, in, 1.0f / 60.0f);
-    delta_high = g.karts[0].boost_meter;
+    delta_high = g.karts[0].turbo_spool;
 
     game_init(&g, &cfg);
     g.state = STATE_RACING;
@@ -1465,16 +1469,37 @@ static void test_boost_system(void)
     teleport(&g, &g.karts[0], 2, top * 0.10f);   /* same gear, low revs */
     in[0].accel = 1;
     game_update(&g, in, 1.0f / 60.0f);
-    delta_low = g.karts[0].boost_meter;
+    delta_low = g.karts[0].turbo_spool;
 
-    printf("boost build: %.4f/frame near redline, %.4f/frame low in the "
+    printf("turbo spool: %.4f/frame near redline, %.4f/frame low in the "
            "band (same gear, same throttle)\n", delta_high, delta_low);
-    CHECK(delta_high > 0.0f, "boost never builds at all");
+    CHECK(delta_high > 0.0f, "turbo never spools at all");
     CHECK(delta_high > delta_low * 4.0f,
-          "boost does not build on a curve with revs (%.4f near redline "
+          "turbo does not spool on a curve with revs (%.4f near redline "
           "vs %.4f low in the band)", delta_high, delta_low);
 
-    /* --- any shift wipes the meter --- */
+    /* --- it bleeds off on its own the moment the throttle lifts --- */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].gear = 2;
+    teleport(&g, &g.karts[0], 2, top * 0.92f);
+    in[0].accel = 1;
+    for (f = 0; f < 30; f++)                    /* half a second on it */
+        game_update(&g, in, 1.0f / 60.0f);
+    CHECK(g.karts[0].turbo_spool > 0.0f, "turbo never built up to lift off");
+    before = g.karts[0].turbo_spool;
+    in[0].accel = 0;
+    for (f = 0; f < 15; f++)                    /* a quarter second off it */
+        game_update(&g, in, 1.0f / 60.0f);
+    after = g.karts[0].turbo_spool;
+    printf("turbo decay: %.3f spooled, %.3f a quarter second after lifting "
+           "off\n", before, after);
+    CHECK(after < before * 0.8f,
+          "turbo did not bleed off after lifting off the gas (%.3f -> "
+          "%.3f)", before, after);
+
+    /* --- a quick shift holds it steady instead of wiping it --- */
     game_init(&g, &cfg);
     g.state = STATE_RACING;
     idle_inputs(in);
@@ -1483,37 +1508,77 @@ static void test_boost_system(void)
              kart_specs[g.karts[0].spec].gear_top[1] * 0.95f);
     in[0].accel = 1;
     game_update(&g, in, 1.0f / 60.0f);
-    CHECK(g.karts[0].boost_meter > 0.0f, "boost never built up to shift away");
+    CHECK(g.karts[0].turbo_spool > 0.0f, "turbo never built up to shift away");
+    before = g.karts[0].turbo_spool;
     in[0].gear_up = 1;
     game_update(&g, in, 1.0f / 60.0f);
     CHECK(g.karts[0].gear == 2, "did not actually shift");
-    CHECK(g.karts[0].boost_meter == 0.0f,
-          "boost survived a shift (%.3f left)", g.karts[0].boost_meter);
+    after = g.karts[0].turbo_spool;
+    CHECK(after > before * 0.9f,
+          "a quick shift wiped the turbo spool instead of holding it "
+          "(%.3f -> %.3f)", before, after);
 
-    /* --- the use button spends the meter for an instant speed bump --- */
+    /* --- whatever is spooled reaches the wheels as real power --- */
     game_init(&g, &cfg);
     g.state = STATE_RACING;
     idle_inputs(in);
-    teleport(&g, &g.karts[0], 2, 25.0f);
-    g.karts[0].boost_meter = 0.6f;
+    g.karts[0].gear = 2;
+    teleport(&g, &g.karts[0], 2, top * 0.70f);
+    g.karts[0].turbo_spool = 0.0f;
+    in[0].accel = 1;
     before = g.karts[0].speed;
-    in[0].boost = 1;
     game_update(&g, in, 1.0f / 60.0f);
-    after = g.karts[0].speed;
-    printf("boost use: %.1f -> %.1f m/s spending a 0.6 meter (max bonus "
-           "%.1f m/s)\n", before, after, g.settings.boost_max_speed_bonus_mps);
-    CHECK(after - before > 0.6f * g.settings.boost_max_speed_bonus_mps * 0.8f,
-          "the use button did not give an instant speed bump (%.1f -> "
-          "%.1f)", before, after);
-    CHECK(g.karts[0].boost_meter == 0.0f,
-          "the use button did not spend the meter");
+    delta_low = g.karts[0].speed - before;
 
-    /* holding the button after the meter is empty does nothing more */
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].gear = 2;
+    teleport(&g, &g.karts[0], 2, top * 0.70f);
+    g.karts[0].turbo_spool = 1.0f;
+    in[0].accel = 1;
     before = g.karts[0].speed;
     game_update(&g, in, 1.0f / 60.0f);
-    after = g.karts[0].speed;
-    CHECK(after - before < 1.0f,
-          "an empty meter still gave a boost (%.1f -> %.1f)", before, after);
+    delta_high = g.karts[0].speed - before;
+
+    printf("turbo power: %.4f m/s/frame unspooled, %.4f m/s/frame fully "
+           "spooled (same speed, same gear)\n", delta_low, delta_high);
+    CHECK(delta_high > delta_low * 1.15f,
+          "a full spool did not noticeably out-accelerate an empty one "
+          "(%.4f vs %.4f m/s/frame)", delta_low, delta_high);
+
+    /* --- "use" is an instant full-throttle override, not a resource --- */
+    {
+        float brake_only_after, floor_it_after;
+
+        game_init(&g, &cfg);
+        g.state = STATE_RACING;
+        idle_inputs(in);
+        teleport(&g, &g.karts[0], 2, 20.0f);
+        in[0].accel = 0;
+        in[0].brake = 1;                /* only braking, foot off the gas */
+        game_update(&g, in, 1.0f / 60.0f);
+        brake_only_after = g.karts[0].speed;
+        CHECK(brake_only_after < 20.0f, "braking alone did not slow the car");
+
+        game_init(&g, &cfg);
+        g.state = STATE_RACING;
+        idle_inputs(in);
+        teleport(&g, &g.karts[0], 2, 20.0f);
+        in[0].accel = 0;
+        in[0].brake = 1;
+        in[0].boost = 1;                /* floor it overrides the brake */
+        game_update(&g, in, 1.0f / 60.0f);
+        floor_it_after = g.karts[0].speed;
+
+        printf("floor it: braking alone reaches %.2f m/s, braking + floor "
+               "it reaches %.2f m/s, both from 20.0 m/s\n",
+               brake_only_after, floor_it_after);
+        CHECK(floor_it_after > brake_only_after,
+              "the use button did not override the brake with full "
+              "throttle (%.2f braking alone vs %.2f with floor it)",
+              brake_only_after, floor_it_after);
+    }
 }
 
 /* A gear caps speed: in first, with a manual box, the car cannot pull
@@ -3541,6 +3606,66 @@ static void test_racing_line_pace_is_not_the_sheet(void)
           lap[0], lap[1]);
 }
 
+/*
+ * A driver hunting the real racing line (line_lookahead_m > 0, see the
+ * AIDriver comment) has to actually read past the corner they are in —
+ * on a stretch that is close to straight right now but leads into a
+ * real bend, a lookahead driver's line must differ meaningfully from
+ * the near-apex-only read every other driver uses. And that has to
+ * back off on its own once the near corner is a real hairpin: a driver
+ * mid-hairpin is not still weighing what comes after it, which is the
+ * exact safety margin that stopped a fragile AI/track combination from
+ * getting stuck in a fall/respawn loop on Monarch and Berthoud Pass
+ * 2.0 while this feature was being built.
+ */
+static void test_racing_line_lookahead(void)
+{
+    Track t;
+    int seg, best_straight_seg = -1, tightest_seg = -1;
+    float best_straight_delta = 0.0f, tightest_curv = 0.0f;
+
+    track_init(&t, TRACK_BERTHOUD2);   /* plenty of real corner variety */
+
+    for (seg = 0; seg < t.n; seg++) {
+        float near = ai_line_curvature(&t, seg, 0.0f);
+        float blended = ai_line_curvature(&t, seg, 30.0f);
+        float delta = fabsf(blended - near);
+
+        if (fabsf(near) < 0.02f && delta > best_straight_delta) {
+            best_straight_delta = delta;
+            best_straight_seg = seg;
+        }
+        if (fabsf(near) > tightest_curv) {
+            tightest_curv = fabsf(near);
+            tightest_seg = seg;
+        }
+    }
+
+    CHECK(best_straight_seg >= 0,
+          "could not find a near-straight leading into a real corner");
+    printf("racing line lookahead: near-straight segment %d reads %.4f "
+           "1/m without lookahead, %.4f blended in a corner %.0f m "
+           "later\n", best_straight_seg,
+           ai_line_curvature(&t, best_straight_seg, 0.0f),
+           ai_line_curvature(&t, best_straight_seg, 30.0f), 30.0f);
+    CHECK(best_straight_delta > 0.01f,
+          "a lookahead driver's line does not change on the approach to "
+          "a corner (delta %.4f)", best_straight_delta);
+
+    CHECK(tightest_seg >= 0, "could not find the track's tightest point");
+    {
+        float near = ai_line_curvature(&t, tightest_seg, 0.0f);
+        float blended = ai_line_curvature(&t, tightest_seg, 30.0f);
+        printf("racing line lookahead: tightest segment %d reads %.4f "
+               "1/m either way (blended %.4f)\n", tightest_seg, near,
+               blended);
+        CHECK(fabsf(blended - near) < 0.15f * fabsf(near),
+              "a lookahead driver still let a farther corner dilute its "
+              "line in the track's tightest hairpin (%.4f vs %.4f) — the "
+              "severity taper is not working", near, blended);
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Lap timing                                                          */
 /* ------------------------------------------------------------------ */
@@ -4222,7 +4347,7 @@ int main(void)
     test_gear_power_curve();
     test_gearboxes_sane();
     test_shifting();
-    test_boost_system();
+    test_turbo_spool();
     test_gear_limits_speed();
     test_tire_compounds();
     test_weather_only_on_classic();
@@ -4267,6 +4392,7 @@ int main(void)
     test_temperament_shows_on_track();
     test_skill_sets_pace();
     test_racing_line_pace_is_not_the_sheet();
+    test_racing_line_lookahead();
     test_editing_cars_json_changes_the_car();
     test_grade_costs_speed();
     test_grade_costs_grip();

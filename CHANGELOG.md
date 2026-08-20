@@ -4,6 +4,61 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.21.0] - 2026-08-21
+
+### Changed
+
+- **Boost reworked into an automatic turbo.** The old meter-you-charge-
+  and-spend mechanic is gone. A turbo now spools up entirely on its
+  own while genuinely on the throttle at real revs (same curve as
+  before: time near the limiter counts for far more than the same time
+  low in the band), bleeds off on its own the instant you lift or
+  brake, and applies straight to engine power every frame it's on the
+  gas — nothing to save up, nothing to spend. A quick gear change
+  holds the spool steady rather than wiping it, so short-shifting
+  through a band is no longer punished. The bonus is tapered by how
+  much grip is already spent cornering (full effect in a straight
+  line, next to none mid-slide), the way a traction control would back
+  off boost rather than piling more power onto tires already at their
+  limit. The "use" button does something different now: it's an
+  instantaneous full-throttle stab — for as long as it's held, it's
+  exactly as if the gas pedal were on the floor and the brake
+  untouched, whatever those two are actually doing. Tunable in the
+  renamed `turbo` block of `settings.json` (was `boost`).
+- **AI competitiveness, pushed further, again.** `skill_multiplier` up
+  from 1.02 to 1.06 and `braking_multiplier` up from 0.72 to 0.76, so
+  the field corners and brakes closer to the real limit.
+
+### Added
+
+- **KESSLER and DUARTE**, two more genuinely hard-to-beat drivers,
+  replacing RENARD and SOLANO in the eleven. KESSLER is cut from the
+  same cloth as HOLT — late braking, rides the limiter, commits and
+  rarely pays for it, arguably a little more consistent than HOLT if
+  anything. DUARTE is a different problem: a metronome who takes the
+  tightest line on the track lap after lap and essentially never puts
+  a wheel wrong.
+- **Some AI drivers now hunt the real racing line.** OSEI, NORDLI and
+  DUARTE read past the corner they're already in when deciding their
+  line — the reason to run wide into one bend is often the shape of
+  the next one — each reading a different distance ahead
+  (`line_lookahead_m` per driver), so they feel like different people
+  finding the line rather than one setting worn by everybody. That
+  anticipation fades on its own the tighter the near corner already
+  is: a driver mid-hairpin is committed to that corner, not still
+  weighing what comes after it.
+
+### Fixed
+
+- Two host-testable safety margins that a driver in an unrecoverable
+  fall/respawn or pinned-against-the-barrier loop on Monarch or
+  Berthoud Pass 2.0 exposed while the above two features were being
+  tuned: the turbo's grip-based taper (above) and the racing line's
+  corner-tightness taper (above) both exist because an early cut of
+  each briefly broke the same fragile TRUCK/AI_YOLO pairing on the
+  circuit's tightest point. `test_ai_races_all_tracks` is what caught
+  both.
+
 ## [1.20.0] - 2026-08-20
 
 ### Added
