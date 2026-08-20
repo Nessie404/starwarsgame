@@ -205,6 +205,15 @@ checks `kart_spec_count == DEFAULT_SPEC_COUNT` after loading the
 shipped file for exactly this reason — if that stops matching, one of
 the two rosters drifted from the other.
 
+Count matching is not the same as the *fields* matching, though — see
+`test_compiled_roster_matches_cars_json` (added v1.19.2 after
+`awd_front_bias` quietly drifted between the two rosters for every
+FWD/RWD car: harmless because nothing reads that field off an AWD car,
+but exactly the kind of one-field drift that would matter for a stat
+that isn't gated the same way). That test diffs every field of every
+car between the two rosters and is the one to run after any cars.json
+edit, not just the count check.
+
 **A gear ratio that never gets exercised can still be broken.** The AI
 gearbox only tries to upshift if the target gear would land above
 `bog_fraction + 0.04`; a gear-to-gear ratio much steeper than the rest

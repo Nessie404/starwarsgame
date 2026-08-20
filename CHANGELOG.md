@@ -4,6 +4,38 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.19.2] - 2026-08-20
+
+### Fixed
+
+- **Compiled roster / `cars.json` field drift.** The compiled fallback
+  roster (`default_kart_specs`/`kart_specs` in `game.c`, used whenever
+  there's no SD card for `cars.json` to be read from) hardcoded
+  `awd_front_bias = 0.0` for every FWD/RWD car, while the JSON parser
+  fills in `0.5` as the default for a car whose `"drivetrain"` block
+  doesn't specify `front_bias`. Harmless today — the field is only
+  read for AWD cars — but it was real drift between the two rosters of
+  exactly the kind that caused the v1.18.0 missing-cars bug, just in a
+  field that happened not to matter yet. Fixed, and a new
+  `test_compiled_roster_matches_cars_json` now diffs every field of
+  every car between the two rosters (not just the car count) so a
+  future edit to one side without the other fails loudly instead of
+  waiting to matter.
+
+### Clarified
+
+No code change, but worth stating plainly since it comes up: **there
+is no turbocharger/supercharger system.** WiiKart had one (`aspiration`
+in `cars.json`, added v1.15.0) and retired it completely in v1.16.0 —
+no `"turbo"`/`"supercharged"` field exists in `cars.json` any more.
+The `boost` feature added in v1.19.0 is unrelated: a universal meter
+(not a per-car property) tuned in the `boost` block of
+`settings.json`, not in `cars.json` at all. There is exactly one
+`cars.json` in the project, at `config/cars.json`; the compiled
+fallback roster in `game.c` is not meant to be hand-edited by players
+and exists only so the garage isn't empty when there's no SD card to
+read the real file from.
+
 ## [1.19.1] - 2026-08-20
 
 ### Fixed

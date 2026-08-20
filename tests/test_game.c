@@ -2218,6 +2218,71 @@ static void test_ai_shift_styles(void)
     }
 }
 
+/*
+ * The compiled-in roster (`default_kart_specs`/`kart_specs` in game.c)
+ * is what a release actually runs on whenever there's no SD card to
+ * read cars.json from — the common case opening a DOL directly in an
+ * emulator. It is kept in sync with cars.json by hand, not generated
+ * from it, so nothing stops the two drifting apart one field at a
+ * time: `kart_spec_count == DEFAULT_SPEC_COUNT` only proves the counts
+ * match, not that a car's actual numbers do. This test loads cars.json
+ * over a freshly reset default roster and diffs every field of every
+ * car, so a car that plays differently depending on whether the JSON
+ * was actually read fails here specifically instead of just looking
+ * fine in whichever way happened to get tested. See HANDOFF.md §6.
+ */
+static void test_compiled_roster_matches_cars_json(void)
+{
+    KartSpec from_defaults[MAX_KART_SPECS];
+    char error[128];
+    int default_count;
+    int i, g;
+
+    kart_specs_reset_defaults();
+    default_count = kart_spec_count;
+    memcpy(from_defaults, kart_specs, sizeof(from_defaults));
+
+    CHECK(config_load_cars_file("config/cars.json", error,
+                                (int)sizeof(error)),
+          "shipped cars.json did not load: %s", error);
+    CHECK(default_count == kart_spec_count,
+          "compiled roster has %d cars, cars.json has %d",
+          default_count, kart_spec_count);
+
+    for (i = 0; i < default_count && i < kart_spec_count; i++) {
+        const KartSpec *d = &from_defaults[i];
+        const KartSpec *j = &kart_specs[i];
+
+        CHECK(strcmp(d->name, j->name) == 0,
+              "compiled car %d is \"%s\", cars.json car %d is \"%s\"",
+              i, d->name, i, j->name);
+        CHECK(fabsf(d->mass_kg - j->mass_kg) < 0.01f &&
+              fabsf(d->power_hp - j->power_hp) < 0.01f &&
+              fabsf(d->brake_dist_100 - j->brake_dist_100) < 0.01f &&
+              fabsf(d->lat_g - j->lat_g) < 0.001f &&
+              fabsf(d->cd_a - j->cd_a) < 0.001f &&
+              fabsf(d->wheelbase - j->wheelbase) < 0.001f &&
+              fabsf(d->offroad_grip - j->offroad_grip) < 0.001f,
+              "%s: compiled roster and cars.json disagree on mass/power/"
+              "brake/grip/drag/wheelbase/dirt", d->name);
+        CHECK(d->drivetrain == j->drivetrain &&
+              fabsf(d->awd_front_bias - j->awd_front_bias) < 0.001f,
+              "%s: compiled roster and cars.json disagree on drivetrain "
+              "(%d vs %d) or AWD bias (%.2f vs %.2f)", d->name,
+              d->drivetrain, j->drivetrain, d->awd_front_bias,
+              j->awd_front_bias);
+        CHECK(d->n_gears == j->n_gears,
+              "%s: compiled roster has %d gears, cars.json has %d",
+              d->name, d->n_gears, j->n_gears);
+        for (g = 0; g < d->n_gears && g < j->n_gears; g++)
+            CHECK(fabsf(d->gear_top[g] - j->gear_top[g]) < 0.01f,
+                  "%s: gear %d tops out at %.2f m/s compiled, %.2f m/s "
+                  "from cars.json", d->name, g, d->gear_top[g],
+                  j->gear_top[g]);
+    }
+    kart_specs_reset_defaults();
+}
+
 static void test_json_configuration(void)
 {
     GameSettings settings;
@@ -3817,6 +3882,7 @@ static void test_camera_settings_json(void)
 
 int main(void)
 {
+    test_compiled_roster_matches_cars_json();
     test_json_configuration();
     test_steering_filter();
     test_steer_sign();

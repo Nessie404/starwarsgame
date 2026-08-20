@@ -2,8 +2,8 @@
 <app version="1">
   <name>WiiKart</name>
   <coder>kaz</coder>
-  <version>1.19.1</version>
-  <release_date>20260820230000</release_date>
+  <version>1.19.2</version>
+  <release_date>20260820233000</release_date>
   <short_description>Semi-sim mountain racing</short_description>
   <long_description>Semi-sim racing over eight circuits, including seven stylized Colorado mountain passes with real grades, switchbacks, cliffs, and gravity, plus weather on the original speedway: snow that melts into ice and then a puddle, with soft, medium, and hard tires each suited to a different stage. Eleven fallible AI rivals use different strategies and driver personalities, learn from mistakes, adapt without rubber-banding, and range from careful to a no-guts-no-glory sheet that commits to everything. Every car has its own drivetrain — front, rear, or all-wheel drive with a tunable front/rear bias — on top of its plain horsepower figure, and a boost meter that charges with revs and spends in one burst on the button, wiped by the next gear change. No collectible power-ups. Cars, game settings, and keyboard/GameCube/Xbox control guidance are editable in documented JSON files. Includes lap timing and a live leaderboard, a marshal helicopter for driving the wrong way, an optional Dolphin input translator, per-track lap counts, garage, manual gearboxes, tire strategy, staged cliff recovery, up to 4-player split screen, and procedural audio. Supports Wii Remote, Nunchuk, Classic Controller, GameCube pads, Xbox pads through Dolphin, and USB keyboard. Runs on Wii hardware and in Dolphin.</long_description>
 </app>
