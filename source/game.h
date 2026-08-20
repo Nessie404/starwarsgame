@@ -621,6 +621,7 @@ typedef struct {
     float consistency;    /* 0 ragged .. 1 never puts a wheel wrong     */
     float aggression;     /* 0 follows .. 1 dives up the inside         */
     int   paint_idx;      /* index into the platform layer's palette   */
+    int   team;            /* TEAM_* if GameConfig.team_mode, else -1   */
     float ai_skill;
     float prev_progress;  /* last frame's progress, for pass detection */
 
@@ -679,26 +680,30 @@ enum {
 #define PAINT_COUNT 8
 
 /*
- * Difficulty preset — SCAFFOLDING ONLY. This is the data shape a future
- * "Easy / Normal / Hard" menu choice would set in one step instead of
- * tuning lap count, AI aggression, AI car choice and guardrails one at
- * a time; nothing reads GameConfig.difficulty or difficulty_presets[]
- * yet, so picking a preset today has no effect on a race. See TODO.md
- * for what actually wiring it up needs to touch (game_init's lap and
- * AI setup, and — for guardrails — track_init's has_walls, which is
- * currently fixed per circuit rather than overridable per race).
+ * Difficulty preset. A future "Easy / Normal / Hard" menu choice sets
+ * GameConfig.difficulty in one step instead of tuning lap count, AI
+ * aggression/skill, AI car choice and guardrails one at a time;
+ * game_init reads it (see the DIFFICULTY_CARS_ and DIFFICULTY_GUARDRAILS_
+ * comments below for what each axis does). There is still no menu
+ * control that actually sets it — see TODO.md — so every race today
+ * gets DIFFICULTY_NORMAL by default.
+ *
+ * NORMAL is deliberately value 0: a zero-initialized GameConfig (the
+ * usual pattern everywhere one is built, including every menu path in
+ * main.c today) has to mean "today's behavior, unchanged" rather than
+ * silently landing on EASY.
  */
 enum {
-    DIFFICULTY_EASY   = 0,
-    DIFFICULTY_NORMAL = 1,
+    DIFFICULTY_NORMAL = 0,
+    DIFFICULTY_EASY   = 1,
     DIFFICULTY_HARD   = 2,
     DIFFICULTY_PRESET_COUNT = 3
 };
 
 /* which cars the AI is allowed onto the grid, once ai_car_choice means
  * something: ANY = today's behavior (ai_no % kart_spec_count), MATCHED
- * = only cars in the same performance class as the human's, UNDERDOG =
- * biased toward slower cars than the human's */
+ * = leans toward cars close to the human's own power-to-weight,
+ * UNDERDOG = leans toward cars weaker than the human's */
 enum {
     DIFFICULTY_CARS_ANY     = 0,
     DIFFICULTY_CARS_MATCHED = 1,
@@ -716,7 +721,11 @@ enum {
 typedef struct {
     const char *name;
     int   laps;               /* 0 = use the circuit's automatic count */
-    float ai_aggressiveness;  /* multiplier on top of driver aggression */
+    float ai_aggressiveness;  /* multiplier on driver aggression *and*
+                               * ai_skill, so a harder preset produces a
+                               * field that is both bolder and faster,
+                               * not just one that still drives at
+                               * NORMAL pace with sharper elbows        */
     int   ai_car_choice;      /* DIFFICULTY_CARS_*                      */
     int   guardrails;         /* DIFFICULTY_GUARDRAILS_*                */
 } DifficultyPreset;
@@ -727,15 +736,16 @@ const char *difficulty_preset_name(int preset);
 #define TEAM_COUNT 4
 
 /*
- * Team mode — SCAFFOLDING ONLY, same status as DifficultyPreset above:
- * the data shape a future "pick a team" garage choice would set, not a
- * working team mode. A team is identified by which paint colour its
- * cars fly (see PAINT_COUNT / paint_palette in main.c) so team mates
- * are recognizable on track at a glance. Nothing reads
- * GameConfig.team_mode or GameConfig.team[] yet — no combined team
- * score or team-vs-team final ranking, no AI aware of who its team
- * mates are, and no garage control to actually join one. See TODO.md
- * for what real wiring needs.
+ * Team mode. A team is identified by which paint colour its cars fly
+ * (see PAINT_COUNT / paint_palette in main.c) so team mates are
+ * recognizable on track at a glance. When GameConfig.team_mode is set,
+ * game_init forces every human's Kart.paint_idx to their chosen team's
+ * colour (GameConfig.team[]) and spreads the AI field round-robin
+ * across the four teams; game_team_scores() below adds up a combined
+ * total per team from each kart's final_rank. There is still no garage
+ * control to actually pick a team, and no AI awareness of who its team
+ * mates are (a team mate is just another rival to the strategy code
+ * today) — see TODO.md.
  */
 typedef struct {
     const char *name;
@@ -746,15 +756,17 @@ extern const TeamDef team_defs[TEAM_COUNT];
 const char *team_name(int team);
 
 /*
- * Career/campaign mode — SCAFFOLDING ONLY. The idea: a human who
- * finished 3rd last race should start 3rd on the grid next race
- * instead of always at the back, so a run of races feels like one
- * campaign rather than a reset each time. This is just the shape that
- * would carry a result from one race into the next — no save/load I/O
- * (nothing writes it to or reads it from an SD card), and game_init
- * does not read it: every human still starts at the back of the grid
- * regardless of what a CareerState says. See TODO.md for what real
- * wiring needs.
+ * Career/campaign mode. A human who finished 3rd last race starts 3rd
+ * on the grid next race instead of always at the back, so a run of
+ * races feels like one campaign rather than a reset each time —
+ * game_init reads GameConfig.career[] when placing the grid. There is
+ * still no save/load I/O (nothing writes a CareerState to or reads it
+ * from an SD card, so it only survives as long as the calling code
+ * keeps carrying it from one game_init to the next in memory) and no
+ * "next race" menu flow that actually strings races together — see
+ * TODO.md. A human with has_last_result == 0 (career mode not in use,
+ * or this is their first race in it) is unaffected: they start at the
+ * back of the grid exactly as before.
  */
 typedef struct {
     int has_last_result;    /* 0 until a race has actually finished     */
@@ -775,23 +787,16 @@ typedef struct {
     int tire[MAX_HUMANS];         /* TIRE_* compound                    */
     const GameSettings *settings; /* NULL = compiled defaults           */
     int laps_override;            /* 0 = use the circuit's own count    */
-    /* Selected difficulty preset (DIFFICULTY_*). Not yet read by
-     * game_init or anything downstream of it — see DifficultyPreset
-     * above. Note for whoever wires this up: zero-initializing a
-     * GameConfig (the usual pattern everywhere it's built) leaves this
-     * at DIFFICULTY_EASY, not DIFFICULTY_NORMAL — decide the intended
-     * default explicitly rather than relying on the zero value. */
+    /* Selected difficulty preset (DIFFICULTY_*) — see DifficultyPreset
+     * above. 0 (the zero-init default) is DIFFICULTY_NORMAL. */
     int difficulty;
-    /* Team mode — SCAFFOLDING, see TeamDef above. team_mode 0 (the
-     * zero-init default) means today's behaviour: every human picks
-     * their own paint and there are no teams. team[] is only
-     * meaningful when team_mode is set, and neither is read by
-     * game_init yet. */
+    /* Team mode — see TeamDef above. team_mode 0 (the zero-init
+     * default) means today's behaviour: every human picks their own
+     * paint and Kart.team is -1 for the whole field. team[] is only
+     * read when team_mode is set. */
     int team_mode;
     int team[MAX_HUMANS];         /* TEAM_* per human, if team_mode     */
-    /* Career/campaign mode — SCAFFOLDING, see CareerState above. Not
-     * read by game_init yet: humans still always start at the back of
-     * the grid regardless of what this holds. */
+    /* Career/campaign mode — see CareerState above. */
     CareerState career[MAX_HUMANS];
 } GameConfig;
 
@@ -810,6 +815,12 @@ typedef struct {
 
 void game_init(Game *g, const GameConfig *cfg);
 void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt);
+
+/* Combined score for each team (see TeamDef above), summed from every
+ * kart's Kart.final_rank — 0 for a team that has not finished any of
+ * its karts yet, or for a race with team_mode off (every Kart.team is
+ * -1, so nothing is counted). */
+void game_team_scores(const Game *g, int scores[TEAM_COUNT]);
 
 /* Session-best lap per circuit, per human — survives game_init on
  * purpose (a new race would otherwise reset it with everything else in

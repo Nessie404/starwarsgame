@@ -597,15 +597,14 @@ const char *ai_strategy_name(int strategy)
 }
 
 /*
- * Difficulty presets — SCAFFOLDING ONLY, see the DifficultyPreset comment
- * in game.h. These values are a plausible starting point for what each
- * preset would eventually mean, not a tuned design: nothing in game_init,
- * ai_control or track_init reads GameConfig.difficulty or this table yet.
+ * Difficulty presets, see the DifficultyPreset comment in game.h.
+ * Ordered to match the DIFFICULTY_* enum (index == enum value): NORMAL
+ * first, matching today's untouched behavior, then EASY and HARD.
  */
 const DifficultyPreset difficulty_presets[DIFFICULTY_PRESET_COUNT] = {
-    { "EASY",   0, 0.85f, DIFFICULTY_CARS_UNDERDOG, DIFFICULTY_GUARDRAILS_ON },
     { "NORMAL", 0, 1.00f, DIFFICULTY_CARS_ANY,
                           DIFFICULTY_GUARDRAILS_TRACK_DEFAULT },
+    { "EASY",   0, 0.85f, DIFFICULTY_CARS_UNDERDOG, DIFFICULTY_GUARDRAILS_ON },
     { "HARD",   0, 1.15f, DIFFICULTY_CARS_MATCHED, DIFFICULTY_GUARDRAILS_OFF },
 };
 
@@ -617,10 +616,8 @@ const char *difficulty_preset_name(int preset)
 }
 
 /*
- * Team mode — SCAFFOLDING ONLY, see the TeamDef comment in game.h.
- * Four teams, each flying a colour from the existing paint palette
- * (main.c); nothing in game_init or anywhere downstream reads
- * GameConfig.team_mode or GameConfig.team[] yet.
+ * Team mode, see the TeamDef comment in game.h. Four teams, each flying
+ * a colour from the existing paint palette (main.c).
  */
 const TeamDef team_defs[TEAM_COUNT] = {
     { "CRIMSON", 0 },  /* RED    */
@@ -637,10 +634,33 @@ const char *team_name(int team)
 }
 
 /*
- * Career/campaign mode — SCAFFOLDING ONLY, see the CareerState comment
- * in game.h. Nothing calls this from game_init or game_update; a real
- * campaign shell would call it once a race finishes, then read
- * last_finish_rank back out while building the next race's GameConfig.
+ * Combined per-team score, see the game_team_scores comment in game.h.
+ * A plain linear scale (last place still scores 1) rather than a
+ * motorsport-style top-10-only table, since a 12-car field with team
+ * mode on is meant to make every finish count toward the total, not
+ * just a podium result.
+ */
+void game_team_scores(const Game *g, int scores[TEAM_COUNT])
+{
+    int i;
+
+    for (i = 0; i < TEAM_COUNT; i++)
+        scores[i] = 0;
+    for (i = 0; i < NUM_KARTS; i++) {
+        const Kart *k = &g->karts[i];
+        if (k->team < 0 || k->team >= TEAM_COUNT)
+            continue;
+        if (k->final_rank < 1 || k->final_rank > NUM_KARTS)
+            continue;
+        scores[k->team] += NUM_KARTS + 1 - k->final_rank;
+    }
+}
+
+/*
+ * Career/campaign mode, see the CareerState comment in game.h. A real
+ * campaign shell calls this once a race finishes, then reads
+ * last_finish_rank back out while building the next race's GameConfig
+ * (game_init's grid placement reads it from there).
  */
 void career_record_result(CareerState *cs, int final_rank)
 {
@@ -955,10 +975,115 @@ void session_best_lap_reset_all(void)
     memset(session_best_lap_s, 0, sizeof(session_best_lap_s));
 }
 
+static float kart_spec_ptw(int spec)
+{
+    return kart_specs[spec].power_hp / kart_specs[spec].mass_kg;
+}
+
+/*
+ * Which car an AI driver gets once DifficultyPreset.ai_car_choice is
+ * MATCHED or UNDERDOG (see game.h): a pool of specs judged close to, or
+ * weaker than, the human's own power-to-weight, cycling through the
+ * pool by ai_no so the field still has some variety rather than
+ * everyone driving the identical car. Falls back to the whole roster if
+ * nothing qualifies — e.g. the human is already in the weakest car on
+ * an UNDERDOG grid. CARS_ANY never calls this; it keeps game_init's
+ * plain ai_no % kart_spec_count exactly as it always has been.
+ */
+static int ai_choice_spec(int ai_no, int mode, float human_ptw)
+{
+    int pool[MAX_KART_SPECS];
+    int pool_n = 0;
+    int i;
+
+    if (mode == DIFFICULTY_CARS_UNDERDOG) {
+        for (i = 0; i < kart_spec_count; i++)
+            if (kart_spec_ptw(i) <= human_ptw * 0.95f)
+                pool[pool_n++] = i;
+    } else if (mode == DIFFICULTY_CARS_MATCHED) {
+        for (i = 0; i < kart_spec_count; i++)
+            if (fabsf(kart_spec_ptw(i) - human_ptw) <= human_ptw * 0.20f)
+                pool[pool_n++] = i;
+    }
+    if (pool_n == 0)
+        for (i = 0; i < kart_spec_count; i++)
+            pool[pool_n++] = i;
+    return pool[ai_no % pool_n];
+}
+
+/*
+ * Which starting-grid slot (0 = pole) each kart array index gets. A
+ * human with a recorded CareerState result (career_record_result, see
+ * game.h) claims the slot matching that result; everyone else — every
+ * AI, and any human without a result yet (career mode unused, or this
+ * is their first race in it) — fills the remaining slots front to back
+ * in today's order: AI by driver number, then any leftover humans by
+ * player index. With no career data anywhere in `career`, every slot is
+ * "remaining" and this reproduces the grid game_init has always built.
+ */
+static void grid_slot_assign(int n_humans, const CareerState career[MAX_HUMANS],
+                             int kart_slot[NUM_KARTS])
+{
+    int slot_kart[NUM_KARTS];   /* -1 = empty, else kart array index    */
+    int h, s, next_free, ai_no;
+
+    for (s = 0; s < NUM_KARTS; s++)
+        slot_kart[s] = -1;
+
+    for (h = 0; h < n_humans; h++) {
+        int desired, slot, step;
+        if (!career[h].has_last_result)
+            continue;
+        desired = career[h].last_finish_rank;
+        if (desired < 1) desired = 1;
+        if (desired > NUM_KARTS) desired = NUM_KARTS;
+        slot = desired - 1;
+        if (slot_kart[slot] >= 0) {
+            /* taken — two humans tied last time, say. Walk outward for
+             * the nearest free slot, preferring further back first:
+             * arriving to find your exact spot taken, you slot in just
+             * behind rather than jump the queue. */
+            int back = slot, fwd = slot, found = 0;
+            for (step = 1; step < NUM_KARTS && !found; step++) {
+                back++;
+                fwd--;
+                if (back < NUM_KARTS && slot_kart[back] < 0) {
+                    slot = back;
+                    found = 1;
+                } else if (fwd >= 0 && slot_kart[fwd] < 0) {
+                    slot = fwd;
+                    found = 1;
+                }
+            }
+        }
+        slot_kart[slot] = h;
+    }
+
+    next_free = 0;
+    for (ai_no = 0; ai_no < NUM_KARTS - n_humans; ai_no++) {
+        int kart_i = n_humans + ai_no;
+        while (next_free < NUM_KARTS && slot_kart[next_free] >= 0)
+            next_free++;
+        slot_kart[next_free] = kart_i;
+    }
+    for (h = 0; h < n_humans; h++) {
+        if (career[h].has_last_result)
+            continue;
+        while (next_free < NUM_KARTS && slot_kart[next_free] >= 0)
+            next_free++;
+        slot_kart[next_free] = h;
+    }
+
+    for (s = 0; s < NUM_KARTS; s++)
+        kart_slot[slot_kart[s]] = s;
+}
+
 void game_init(Game *g, const GameConfig *cfg)
 {
     int i, r;
     char settings_error_text[32];
+    const DifficultyPreset *dp;
+    int kart_slot[NUM_KARTS];
 
     memset(g, 0, sizeof(*g));
     g->cfg = *cfg;
@@ -973,6 +1098,10 @@ void game_init(Game *g, const GameConfig *cfg)
     if (g->cfg.n_humans < 1) g->cfg.n_humans = 1;
     if (g->cfg.n_humans > MAX_HUMANS) g->cfg.n_humans = MAX_HUMANS;
 
+    dp = &difficulty_presets[(g->cfg.difficulty >= 0 &&
+                              g->cfg.difficulty < DIFFICULTY_PRESET_COUNT)
+                                  ? g->cfg.difficulty : DIFFICULTY_NORMAL];
+
     if (kart_spec_count < 1 || kart_spec_count > MAX_KART_SPECS)
         kart_specs_reset_defaults();
 
@@ -986,13 +1115,28 @@ void game_init(Game *g, const GameConfig *cfg)
         kart_spec_default_shifts(&kart_specs[i]);
 
     track_init_with_settings(&g->track, cfg->track_id, &g->settings);
-    /* a lap count chosen in the menu beats both the circuit's own count
-     * and the automatic one, within the same sane limits */
+    /* a lap count chosen in the menu beats both the difficulty preset's
+     * and the circuit's own automatic count, within the same sane
+     * limits; the preset's own laps only applies when the menu did not
+     * already choose one */
     if (cfg->laps_override > 0) {
         g->track.laps = cfg->laps_override;
         if (g->track.laps > 20)
             g->track.laps = 20;
+    } else if (dp->laps > 0) {
+        g->track.laps = dp->laps;
+        if (g->track.laps > 20)
+            g->track.laps = 20;
     }
+    /* guardrails: a preset can force a circuit's own has_walls on or
+     * off; TRACK_DEFAULT (NORMAL) leaves what track_init_with_settings
+     * just set alone */
+    if (dp->guardrails == DIFFICULTY_GUARDRAILS_ON)
+        g->track.has_walls = 1;
+    else if (dp->guardrails == DIFFICULTY_GUARDRAILS_OFF)
+        g->track.has_walls = 0;
+
+    grid_slot_assign(g->cfg.n_humans, g->cfg.career, kart_slot);
 
     for (i = 0; i < NUM_KARTS; i++) {
         Kart *k = &g->karts[i];
@@ -1000,8 +1144,16 @@ void game_init(Game *g, const GameConfig *cfg)
             k->human = i;
             k->spec = g->cfg.spec[i] % kart_spec_count;
             if (k->spec < 0) k->spec = 0;
-            k->paint_idx = ((g->cfg.paint[i] % PAINT_COUNT) + PAINT_COUNT)
-                           % PAINT_COUNT;
+            if (g->cfg.team_mode) {
+                int team = g->cfg.team[i];
+                if (team < 0 || team >= TEAM_COUNT) team = 0;
+                k->team = team;
+                k->paint_idx = team_defs[team].paint_idx;
+            } else {
+                k->team = -1;
+                k->paint_idx = ((g->cfg.paint[i] % PAINT_COUNT) + PAINT_COUNT)
+                               % PAINT_COUNT;
+            }
             k->gearbox = (g->cfg.gearbox[i] == GEARBOX_MANUAL)
                              ? GEARBOX_MANUAL : GEARBOX_AUTO;
             k->tire = ((g->cfg.tire[i] % TIRE_COMPOUNDS) + TIRE_COMPOUNDS)
@@ -1023,15 +1175,28 @@ void game_init(Game *g, const GameConfig *cfg)
 
             k->human = -1;
             k->driver_no = ai_no;
-            k->spec = ai_no % kart_spec_count;
-            k->paint_idx = ai_driver(ai_no)->paint % PAINT_COUNT;
+            k->spec = (dp->ai_car_choice == DIFFICULTY_CARS_ANY)
+                          ? ai_no % kart_spec_count
+                          : ai_choice_spec(ai_no, dp->ai_car_choice,
+                                          kart_spec_ptw(g->karts[0].spec));
+            if (g->cfg.team_mode) {
+                int team = ai_no % TEAM_COUNT;
+                k->team = team;
+                k->paint_idx = team_defs[team].paint_idx;
+            } else {
+                k->team = -1;
+                k->paint_idx = ai_driver(ai_no)->paint % PAINT_COUNT;
+            }
             {
                 const AIDriver *d = ai_driver(ai_no);
                 k->strategy = d->strategy;
-                k->ai_skill = d->skill * g->settings.ai_skill_mult;
+                /* a harder preset makes the field both bolder and
+                 * faster, not just aggressive at NORMAL pace */
+                k->ai_skill = d->skill * g->settings.ai_skill_mult *
+                              dp->ai_aggressiveness;
                 k->tire_care = d->tire_care;
                 k->consistency = d->consistency;
-                k->aggression = d->aggression;
+                k->aggression = d->aggression * dp->ai_aggressiveness;
             }
             st = &ai_strategies[k->strategy];
             /* the racing line is computed fresh every frame from the
@@ -1051,11 +1216,9 @@ void game_init(Game *g, const GameConfig *cfg)
                           : (k->tire_care < 0.85f ? TIRE_SOFT
                                                   : TIRE_MEDIUM);
         }
-        /* humans start at the back of the grid */
-        kart_place_on_grid(g, k,
-                           (k->human >= 0)
-                               ? NUM_KARTS - g->cfg.n_humans + k->human
-                               : i - g->cfg.n_humans);
+        /* grid position: today's back-of-grid-for-humans shape unless a
+         * career result says otherwise — see grid_slot_assign above */
+        kart_place_on_grid(g, k, kart_slot[i]);
         k->rank = i + 1;
         k->gear = 0;
         k->tire_wear = 0.0f;

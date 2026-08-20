@@ -4,6 +4,22 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.22.0] - 2026-08-22
+
+### Added
+
+- **`game_init` now reads the difficulty, team and career scaffolding**
+  added back in v1.19.0/v1.20.0. A difficulty preset sets the lap count,
+  scales AI aggression and skill together, leans AI car assignment
+  toward cars matched to (or weaker than) the human's own, and can
+  force a circuit's guardrails on or off. Team mode paints every human
+  and AI car by team and totals a combined per-team score. Career mode
+  starts a human at the grid slot matching their last race's finish
+  instead of always at the back. There is still no menu control that
+  sets any of this, so a race today is unaffected either way — see
+  `TODO.md` for what's left (the garage menu itself, a team-score HUD
+  element, and save/load for career progress).
+
 ## [1.21.0] - 2026-08-21
 
 ### Changed

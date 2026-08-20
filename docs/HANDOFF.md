@@ -206,6 +206,22 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   HUD readout of the next weather zone's condition on the approach to
   it, and the chase camera leaning its aim point toward an upcoming
   bend's curvature (new `cam_corner_lean` setting, `camera.c`).
+- **v1.22.0**: `game_init` now reads the difficulty/team/career
+  scaffolding from v1.19.0/v1.20.0 instead of ignoring it. A
+  `DifficultyPreset` sets the lap count, scales AI `aggression` and
+  `ai_skill` together, leans AI car choice toward specs matched to (or
+  weaker than) the human's own power-to-weight (`ai_choice_spec`), and
+  can force `track.has_walls` on or off. `team_mode`/`team[]` paint
+  every human and AI by team (new `Kart.team` field) and
+  `game_team_scores` totals a combined score. `career[]` moves grid
+  placement off the old fixed human/AI split — `grid_slot_assign` now
+  computes the whole grid from a human's recorded `last_finish_rank`
+  first, then fills whatever's left exactly as before. `DIFFICULTY_
+  NORMAL` was made enum value 0 (it was `EASY`) specifically so every
+  existing zero-initialized `GameConfig`, menu paths included, keeps
+  behaving exactly as it did before this release. Still no menu control
+  sets any of these fields, so nothing changes in the shipped game yet
+  — see `TODO.md`.
 
 ---
 
@@ -257,6 +273,16 @@ but exactly the kind of one-field drift that would matter for a stat
 that isn't gated the same way). That test diffs every field of every
 car between the two rosters and is the one to run after any cars.json
 edit, not just the count check.
+
+**`DIFFICULTY_EASY` is not 0 any more.** v1.22.0 reordered the
+`DIFFICULTY_*` enum so `DIFFICULTY_NORMAL` is value 0 and `EASY`/`HARD`
+shifted to 1/2 — `difficulty_presets[]` was reordered to match (index ==
+enum value). This was deliberate, not a refactor: `game_init` reads
+`GameConfig.difficulty` now, and every existing zero-initialized
+`GameConfig` had to keep meaning "today's behavior, unchanged" instead of
+silently landing on EASY. Any code that compared `cfg.difficulty` against
+a literal `0`/`1`/`2` instead of the enum names would now be reading the
+wrong preset — search for the symbolic names, not the numbers.
 
 **A gear ratio that never gets exercised can still be broken.** The AI
 gearbox only tries to upshift if the target gear would land above

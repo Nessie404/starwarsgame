@@ -3862,14 +3862,19 @@ static void test_session_best_lap_survives_a_new_race(void)
  * HUD font with a limited alphabet and a narrow column.
  */
 /*
- * Difficulty presets are scaffolding (see the DifficultyPreset comment
- * in game.h): the data shape has to be sound even though nothing wires
- * it into an actual race yet. This is a data-model test, not a
- * gameplay one — there is no gameplay effect to test.
+ * Difficulty presets (see the DifficultyPreset comment in game.h) are
+ * wired into game_init: laps, guardrails, AI skill/aggression and AI
+ * car choice all move with GameConfig.difficulty. NORMAL is the
+ * zero-init default and has to reproduce a race exactly as it looked
+ * before difficulty existed — everything else here checks the presets
+ * actually pull in the direction their name promises.
  */
-static void test_difficulty_presets_scaffolding(void)
+static void test_difficulty_presets_wired(void)
 {
+    Game g, normal;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
     int i;
+    float human_ptw;
 
     CHECK(strcmp(difficulty_preset_name(DIFFICULTY_EASY), "EASY") == 0 &&
           strcmp(difficulty_preset_name(DIFFICULTY_NORMAL), "NORMAL") == 0 &&
@@ -3892,15 +3897,81 @@ static void test_difficulty_presets_scaffolding(void)
           difficulty_presets[DIFFICULTY_HARD].guardrails ==
               DIFFICULTY_GUARDRAILS_OFF,
           "easy/hard do not lean the expected way on guardrails");
+
+    CHECK(cfg.difficulty == DIFFICULTY_NORMAL,
+          "a zero-initialized config is not NORMAL difficulty");
+    game_init(&normal, &cfg);
+    for (i = normal.cfg.n_humans; i < NUM_KARTS; i++)
+        CHECK(normal.karts[i].spec ==
+                  (i - normal.cfg.n_humans) % kart_spec_count,
+              "NORMAL changed the plain AI car assignment for slot %d", i);
+
+    /* an out-of-range preset behaves exactly like NORMAL, not garbage */
+    cfg.difficulty = 99;
+    game_init(&g, &cfg);
+    CHECK(g.track.has_walls == normal.track.has_walls,
+          "an out-of-range preset did not fall back to NORMAL's guardrails");
+
+    /* EASY: softer/slower AI, and no AI car faster than the human's own */
+    cfg.difficulty = DIFFICULTY_EASY;
+    game_init(&g, &cfg);
+    human_ptw = kart_specs[g.karts[0].spec].power_hp /
+                kart_specs[g.karts[0].spec].mass_kg;
+    CHECK(g.track.has_walls == 1, "EASY did not force guardrails on");
+    CHECK(g.karts[g.cfg.n_humans].ai_skill <
+              normal.karts[normal.cfg.n_humans].ai_skill,
+          "EASY did not soften the AI's skill relative to NORMAL");
+    for (i = g.cfg.n_humans; i < NUM_KARTS; i++) {
+        float ptw = kart_specs[g.karts[i].spec].power_hp /
+                    kart_specs[g.karts[i].spec].mass_kg;
+        CHECK(ptw <= human_ptw * 1.001f,
+              "EASY put a car faster (ptw %.4f) than the human's own "
+              "(%.4f) on the grid", ptw, human_ptw);
+    }
+    {
+        /* guardrails ON only proves something on a circuit that is
+         * normally unguarded */
+        GameConfig lcfg = default_cfg(TRACK_LOVELAND);
+        Game lg;
+        lcfg.difficulty = DIFFICULTY_EASY;
+        game_init(&lg, &lcfg);
+        CHECK(lg.track.has_walls == 1,
+              "EASY did not force guardrails on for an unguarded circuit");
+    }
+
+    /* HARD: sharper/faster AI, guardrails off, and cars kept close to
+     * the human's own performance instead of the plain roster spread */
+    cfg.difficulty = DIFFICULTY_HARD;
+    game_init(&g, &cfg);
+    CHECK(g.track.has_walls == 0, "HARD did not force guardrails off");
+    CHECK(g.karts[g.cfg.n_humans].ai_skill >
+              normal.karts[normal.cfg.n_humans].ai_skill &&
+          g.karts[g.cfg.n_humans].aggression >
+              normal.karts[normal.cfg.n_humans].aggression,
+          "HARD did not make the AI both faster and more aggressive "
+          "than NORMAL");
+    for (i = g.cfg.n_humans; i < NUM_KARTS; i++) {
+        float ptw = kart_specs[g.karts[i].spec].power_hp /
+                    kart_specs[g.karts[i].spec].mass_kg;
+        CHECK(fabsf(ptw - human_ptw) <= human_ptw * 0.25f,
+              "HARD's matched car choice put a car (ptw %.4f) far from "
+              "the human's (%.4f) on the grid", ptw, human_ptw);
+    }
 }
 
-/* Team mode is scaffolding, same as difficulty presets: this only checks
- * the data shape (names, distinct paint colours) is sane, not that a
- * race actually groups karts into teams — nothing wires that up yet. */
-static void test_team_mode_scaffolding(void)
+/*
+ * Team mode (see the TeamDef comment in game.h) is wired into
+ * game_init: with team_mode on, every human flies its chosen team's
+ * colour and the AI are spread round-robin across all four teams;
+ * game_team_scores adds up a combined total per team.
+ */
+static void test_team_mode_wired(void)
 {
     int i, j;
     GameConfig cfg;
+    Game g;
+    int scores[TEAM_COUNT];
+    int seen_team[TEAM_COUNT];
 
     for (i = 0; i < TEAM_COUNT; i++)
         CHECK(team_defs[i].name && team_defs[i].name[0],
@@ -3915,21 +3986,82 @@ static void test_team_mode_scaffolding(void)
             CHECK(team_defs[i].paint_idx != team_defs[j].paint_idx,
                   "teams %d and %d fly the same paint colour", i, j);
 
-    /* zero-initializing a GameConfig (the usual pattern) must leave team
-     * mode off — this is a scaffolding field, so nothing may start a
-     * race grouped into teams by accident */
-    memset(&cfg, 0, sizeof(cfg));
+    /* team_mode off (the zero-init default): nobody is on a team, and
+     * a finished race still scores nothing */
+    cfg = default_cfg(TRACK_CLASSIC);
     CHECK(cfg.team_mode == 0, "a zero-initialized config has team mode on");
+    game_init(&g, &cfg);
+    for (i = 0; i < NUM_KARTS; i++)
+        CHECK(g.karts[i].team == -1,
+              "kart %d has a team with team_mode off", i);
+    g.karts[0].final_rank = 1;
+    game_team_scores(&g, scores);
+    for (i = 0; i < TEAM_COUNT; i++)
+        CHECK(scores[i] == 0,
+              "team_mode off still produced a nonzero score");
+
+    /* team_mode on: the human flies its chosen team's colour, every AI
+     * lands on some team and flies that team's colour too, and a
+     * finished race adds up into a combined per-team score */
+    cfg.team_mode = 1;
+    cfg.team[0] = 2;    /* VIPER */
+    game_init(&g, &cfg);
+    CHECK(g.karts[0].team == 2 &&
+              g.karts[0].paint_idx == team_defs[2].paint_idx,
+          "the human did not fly its chosen team's colour");
+    for (i = 0; i < TEAM_COUNT; i++)
+        seen_team[i] = 0;
+    for (i = g.cfg.n_humans; i < NUM_KARTS; i++) {
+        CHECK(g.karts[i].team >= 0 && g.karts[i].team < TEAM_COUNT,
+              "AI kart %d has no team with team_mode on", i);
+        CHECK(g.karts[i].paint_idx == team_defs[g.karts[i].team].paint_idx,
+              "AI kart %d is not flying its own team's colour", i);
+        seen_team[g.karts[i].team] = 1;
+    }
+    for (i = 0; i < TEAM_COUNT; i++)
+        CHECK(seen_team[i],
+              "team %d has no AI on it with an 11-strong field", i);
+
+    for (i = 0; i < NUM_KARTS; i++)
+        g.karts[i].final_rank = i + 1;
+    game_team_scores(&g, scores);
+    {
+        int total = 0;
+        for (i = 0; i < TEAM_COUNT; i++) {
+            CHECK(scores[i] > 0,
+                  "team %d scored nothing with every kart finished", i);
+            total += scores[i];
+        }
+        CHECK(total == NUM_KARTS * (NUM_KARTS + 1) / 2,
+              "team scores (%d total) do not add up to every kart's "
+              "points", total);
+    }
 }
 
-/* Career mode is scaffolding too: check the one piece of plumbing it
- * has (career_record_result) actually stores what it's given, and that
- * a race does not yet act on it — every human still starts at the back
- * of the grid no matter what CareerState says. */
-static void test_career_mode_scaffolding(void)
+/* Which grid position (1 = pole) a kart actually started at, read back
+ * from where game_init put it rather than by re-deriving the grid
+ * geometry: the grid is laid out by descending total_progress (pole is
+ * furthest along, since the field starts just behind the line), so a
+ * kart's rank among everyone's total_progress is its 1-based slot. */
+static int grid_rank_of(const Game *g, int kart_idx)
+{
+    int i, rank = 1;
+    float tp = g->karts[kart_idx].total_progress;
+    for (i = 0; i < NUM_KARTS; i++)
+        if (i != kart_idx && g->karts[i].total_progress > tp)
+            rank++;
+    return rank;
+}
+
+/*
+ * Career/campaign mode (see the CareerState comment in game.h) is wired
+ * into game_init's grid placement: a human with a recorded last finish
+ * starts that far up the grid instead of always at the back.
+ */
+static void test_career_mode_wired(void)
 {
     CareerState cs;
-    Game plain, careered;
+    Game plain, third, pole, last;
     GameConfig cfg = default_cfg(TRACK_CLASSIC);
 
     memset(&cs, 0, sizeof(cs));
@@ -3939,14 +4071,54 @@ static void test_career_mode_scaffolding(void)
           "career_record_result did not store the finish (%d, rank %d)",
           cs.has_last_result, cs.last_finish_rank);
 
+    /* no recorded result — a first-ever career race, or career mode
+     * simply unused — starts at the back, same as always */
     game_init(&plain, &cfg);
+    CHECK(grid_rank_of(&plain, 0) == NUM_KARTS,
+          "a human with no recorded result did not start at the back");
+
     cfg.career[0] = cs;                 /* pretend the human finished 3rd */
-    game_init(&careered, &cfg);
-    CHECK(fabsf(plain.karts[0].x - careered.karts[0].x) < 0.001f &&
-          fabsf(plain.karts[0].z - careered.karts[0].z) < 0.001f &&
-          fabsf(plain.karts[0].heading - careered.karts[0].heading) < 0.001f,
-          "a populated CareerState changed the starting grid — "
-          "game_init should not read it yet");
+    game_init(&third, &cfg);
+    CHECK(grid_rank_of(&third, 0) == 3,
+          "a human who finished 3rd did not start 3rd (started %d)",
+          grid_rank_of(&third, 0));
+
+    cfg.career[0].last_finish_rank = 1;
+    game_init(&pole, &cfg);
+    CHECK(grid_rank_of(&pole, 0) == 1,
+          "a recorded win did not start on pole");
+
+    cfg.career[0].last_finish_rank = NUM_KARTS;
+    game_init(&last, &cfg);
+    CHECK(grid_rank_of(&last, 0) == NUM_KARTS,
+          "a recorded last place did not start at the back");
+}
+
+/* Two humans who both earned the same grid slot last time (a tie, or
+ * just stale data) must not collide — one of them slots in next to it
+ * instead of overlapping on the grid. */
+static void test_career_grid_collision(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    int r0, r1;
+
+    cfg.n_humans = 2;
+    cfg.spec[1] = 1;
+    cfg.career[0].has_last_result = 1;
+    cfg.career[0].last_finish_rank = 1;
+    cfg.career[1].has_last_result = 1;
+    cfg.career[1].last_finish_rank = 1;
+    game_init(&g, &cfg);
+
+    r0 = grid_rank_of(&g, 0);
+    r1 = grid_rank_of(&g, 1);
+    CHECK(r0 != r1,
+          "two humans claiming the same grid slot ended up on top of "
+          "each other");
+    CHECK((r0 == 1 && r1 == 2) || (r0 == 2 && r1 == 1),
+          "a rank-1/rank-1 collision did not resolve to adjacent slots "
+          "(got %d and %d)", r0, r1);
 }
 
 static void test_driver_names(void)
@@ -4579,9 +4751,10 @@ int main(void)
     test_lap_times_survive_respawn();
     test_session_best_lap_survives_a_new_race();
     test_lap_count_override();
-    test_difficulty_presets_scaffolding();
-    test_team_mode_scaffolding();
-    test_career_mode_scaffolding();
+    test_difficulty_presets_wired();
+    test_team_mode_wired();
+    test_career_mode_wired();
+    test_career_grid_collision();
     test_driver_names();
     test_tacho_settings();
     test_camera_reverse_swing();

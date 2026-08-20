@@ -52,36 +52,25 @@ through whatever lands here next: cheapest/most self-contained first.
 
 ### Big releases — bundle before shipping, roughly in priority order
 
-**1. Wire up the three scaffolds (difficulty, team, career).** Highest
-priority of the big items: v1.19.0 and v1.20.0 already shipped the full
-data shape for all three (`DifficultyPreset`, `TeamDef`, `CareerState` and
-their `GameConfig` fields) specifically so this would be cheaper later, and
-right now none of it does anything — that's a standing cost (three
-scaffolds a reader has to learn are inert) that only gets paid off by
-finishing the wiring. All three also converge on the same real gap in the
-game: there is no pre-race setup/garage menu screen to add controls to yet,
-so building that once serves all three instead of three separate menu
-efforts. Concretely:
+**1. Finish wiring up the three scaffolds (difficulty, team, career).**
+Highest priority of the big items. v1.22.0 did the `game.c`/`game.h` half —
+`game_init` genuinely reads `cfg.difficulty`, `cfg.team_mode`/`team[]` and
+`cfg.career[]` now (see the shipped-history entry below for what that
+covers). What's left is the reason none of it does anything in the shipped
+game yet: there is still no menu path that ever sets any of those fields
+away from their zero/off defaults. Concretely:
   - a garage/setup menu screen with controls for a difficulty preset, a
-    team, and (once a campaign exists) continuing one;
-  - `game_init` reading `cfg.difficulty` to set `laps_override` and scale
-    AI aggression/skill, and `cfg.team_mode`/`cfg.team[]` to force each
-    human's `paint_idx` to their team's colour and assign AI to teams;
-  - `ai_no % kart_spec_count` car assignment leaning toward
-    `DIFFICULTY_CARS_MATCHED`/`UNDERDOG` relative to the human's car;
-  - `track_init`'s `has_walls` becoming overridable per race for
-    `DIFFICULTY_GUARDRAILS_ON`/`OFF`;
-  - a combined per-team score/ranking alongside each driver's own
-    `final_rank`, plus a HUD element for it, and a decision on whether team
-    mates get any in-race awareness of each other in `ai_control`;
+    team, and (once a campaign exists) continuing one — the one piece that
+    actually lets a player reach any of this;
+  - a HUD element for the per-team score (`game_team_scores` computes it
+    already), and a decision on whether team mates get any in-race
+    awareness of each other in `ai_control` (today a team mate is just
+    another rival to the strategy code);
   - save/load I/O (an SD card file, most likely) to persist `CareerState`
-    across sessions, `kart_place_on_grid` reading it to start a human
-    somewhere other than the back of the grid, and a "next race" menu flow
-    that actually strings races together as one campaign;
-  - explicit decisions on what a zero-initialized `GameConfig` should mean
-    for `difficulty` (today: `DIFFICULTY_EASY`, likely not the intent) and
-    what a first-ever career race (`has_last_result == 0`) should do
-    (likely: fall back to today's back-of-grid start).
+    across sessions — right now it only survives as long as the calling
+    code keeps carrying it from one `game_init` to the next in memory —
+    and a "next race" menu flow that actually strings races together as
+    one campaign.
 
 **2. Winter, for real, across the roster.** The weather system has been
 CLASSIC-only by design since v1.19.0; this is the release where that
@@ -139,6 +128,37 @@ A rolling window, newest first — see "How this list is organized" above.
 Any patch release that followed a minor release is folded into that
 release's entry rather than getting its own. For anything older,
 `CHANGELOG.md` and `docs/release-notes/` have the full record back to v1.0.
+
+### v1.22.0 — difficulty, team and career wired into `game_init`
+
+- [x] `game_init` now reads `GameConfig.difficulty`: a preset sets
+  `laps_override` (when the menu hasn't already), scales AI `aggression`
+  and `ai_skill` together by `DifficultyPreset.ai_aggressiveness`, and
+  overrides `track.has_walls` per `DIFFICULTY_GUARDRAILS_ON`/`OFF`
+  (`TRACK_DEFAULT`, NORMAL's setting, leaves a circuit's own value
+  alone). `DIFFICULTY_NORMAL` is enum value 0 on purpose, so every
+  existing zero-initialized `GameConfig` — every call site today,
+  including every menu path in `main.c` — keeps behaving exactly as it
+  always has.
+- [x] AI car assignment now leans toward `DIFFICULTY_CARS_MATCHED` or
+  `UNDERDOG` once a preset asks for it: `ai_choice_spec` builds a pool of
+  specs judged close to, or weaker than, the human's own power-to-weight,
+  falling back to the full roster if nothing qualifies. `CARS_ANY`
+  (NORMAL) keeps the plain `ai_no % kart_spec_count` untouched.
+- [x] `GameConfig.team_mode`/`team[]` now force each human's `paint_idx`
+  to their chosen team's colour and spread the AI round-robin across the
+  four teams (new `Kart.team` field, `-1` off a team-mode race); a new
+  `game_team_scores` sums a combined per-team total from `final_rank`.
+- [x] `game_init`'s grid placement reads `GameConfig.career[]`: a human
+  with a recorded `last_finish_rank` claims that starting slot instead of
+  always starting at the back; two humans claiming the same slot resolve
+  to adjacent ones instead of overlapping. A human with no result yet —
+  career mode unused, or their first race in it — starts at the back
+  exactly as before.
+- [x] None of the above is reachable in the shipped game yet — no menu
+  sets any of these `GameConfig` fields away from their defaults. See
+  Bundle 1 above for what's still open (the garage menu itself, a
+  per-team HUD element, and `CareerState` save/load).
 
 ### v1.21.0 — automatic turbo, two more challenging drivers, AI racing lines, and a follow-up patch
 
@@ -240,17 +260,6 @@ release's entry rather than getting its own. For anything older,
   while `cars.json` had eleven; the fallback now mirrors `cars.json`
   exactly. Also fixed RUBY's gear ladder, which could strand an AI
   driver in first gear for an entire race once it was finally in play.
-
-### v1.17.0 — six new cars, Berthoud Pass 2.0 rebuilt
-
-- [x] Six new cars (BUGGY, WAGON, FORMULA, TRUCK, HERITAGE, MUSCLE) for
-  eleven in the garage.
-- [x] Berthoud Pass 2.0 rebuilt to stop several pieces of road passing
-  within 1-2 m of each other in plan view. Later found not to have been
-  an actual gameplay bug — `track_locate`'s windowed hint never
-  confuses two switchback tiers close in plan view but far apart in
-  elevation — and the original hairpin layout was restored by the
-  v1.19.1 follow-up patch under v1.19.0, above.
 
 ## Overall direction
 

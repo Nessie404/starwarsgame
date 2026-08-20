@@ -152,6 +152,13 @@ driving model that expects you to brake for the hairpins.
   anticipation the tighter the corner they're actually in gets. A
   follow-up patch added a session-best lap per circuit, a HUD readout
   of the weather ahead, and a chase camera that leans into corners.
+- **v1.22.0** — the difficulty, team and career data shapes from
+  v1.19.0/v1.20.0 now actually do something when a race starts: a
+  difficulty preset sets the lap count and leans AI skill, aggression
+  and car choice; team mode paints every car by team and totals a
+  combined score; career mode starts a human at the grid slot matching
+  their last race's finish. There's still no menu control that sets
+  any of it, so nothing changes in the game you can actually play yet.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
