@@ -4,6 +4,146 @@ These are design targets for releases after v1.11.0. Details may change after
 testing, because apparently cars, mountains, and tires all object to being
 reduced to one convenient slider.
 
+## How this list is organized
+
+Open work below is sorted by **release size**, not by system, because that's
+the decision that actually needs making next: what ships alone in a quick
+patch versus what waits to go out bundled with related work in a real
+feature release. The shipped-history sections further down (Camera, Roads,
+Powertrain, Drivers/AI, Laps, Tires) are kept as-is for engineering context —
+they are where the *next* round of `[x]` entries and implementation notes
+will land once an item below ships — but the open `[ ]` items themselves now
+live only here, so "what's left" doesn't require reading eight sections to
+find.
+
+**Small (patch, x.y.Z) releases** are for a single narrow, low-risk,
+self-contained change — the kind v1.19.1 (Berthoud's switchbacks) and
+v1.19.2 (a roster-drift bug fix) already were. Even so, don't cut a release
+for just one of these the moment it's done: let two or three land on `TODO.md`
+as finished, cumulative changes, and ship them together. A version bump is
+not free — it's a changelog entry, a release-notes doc, a version/date bump
+in three files, and a reader's attention — so it should carry more than one
+line of value.
+
+**Big (minor, x.Y.0) releases** are for a handful of related items landed
+together on purpose, the way v1.19.0 bundled weather + boost + a wilder AI +
+wider corners, v1.20.0 bundled the oversteer rework + AI competitiveness +
+two scaffolds + weather depth, and v1.21.0 bundled the turbo rework + two
+new drivers + AI racing lines. The bundles below are grouped because the
+items in each one touch the same code, the same menu surface, or the same
+underlying subsystem — doing them together means paying the "learn this
+part of the codebase again" cost once instead of three times, not just
+batching unrelated work to make a bigger changelog.
+
+### Small releases — ship alone, batch two or three before pushing
+
+Roughly in the order they're worth doing (cheapest/most self-contained
+first):
+
+- [ ] **Session-best lap per circuit, in-memory only.** Not full persistent
+  standings (that's a big-release item below, and needs real save/load
+  I/O) — just remembering, for the life of the running process, each
+  circuit's best lap across however many races get run before the game is
+  closed, and showing it next to the current best on the results screen.
+  No new subsystem: `best_lap_time` already exists per kart per race, this
+  only needs one array of "best ever seen this session" indexed by
+  `track_id` that survives a `game_init` instead of resetting with it.
+- [ ] **HUD readout of the upcoming weather zone's condition**, not just the
+  color change on the road surface itself. `track_weather_at` already
+  answers "what condition is segment N in" for any segment and any time;
+  this is a look-ahead call against the player's own position plus a
+  `weather_name()` HUD line, no new mechanic and no rendering work beyond
+  one more `hud_text` call.
+- [ ] **Let the camera lead into corners slightly** rather than only aiming
+  along the car's nose. A small extension of the existing speed-scaled
+  look-ahead in `source/camera.c` — bias the aim point toward the signed
+  curvature of the road a little further up, the same `Track.curv_signed`
+  the AI's own racing line already reads. Self-contained to the camera
+  module and its existing tests.
+
+### Big releases — bundle before shipping, roughly in priority order
+
+**1. Wire up the three scaffolds (difficulty, team, career).** Highest
+priority of the big items: v1.19.0 and v1.20.0 already shipped the full
+data shape for all three (`DifficultyPreset`, `TeamDef`, `CareerState` and
+their `GameConfig` fields) specifically so this would be cheaper later, and
+right now none of it does anything — that's a standing cost (three
+scaffolds a reader has to learn are inert) that only gets paid off by
+finishing the wiring. All three also converge on the same real gap in the
+game: there is no pre-race setup/garage menu screen to add controls to yet,
+so building that once serves all three instead of three separate menu
+efforts. Concretely:
+  - a garage/setup menu screen with controls for a difficulty preset, a
+    team, and (once a campaign exists) continuing one;
+  - `game_init` reading `cfg.difficulty` to set `laps_override` and scale
+    AI aggression/skill, and `cfg.team_mode`/`cfg.team[]` to force each
+    human's `paint_idx` to their team's colour and assign AI to teams;
+  - `ai_no % kart_spec_count` car assignment leaning toward
+    `DIFFICULTY_CARS_MATCHED`/`UNDERDOG` relative to the human's car;
+  - `track_init`'s `has_walls` becoming overridable per race for
+    `DIFFICULTY_GUARDRAILS_ON`/`OFF`;
+  - a combined per-team score/ranking alongside each driver's own
+    `final_rank`, plus a HUD element for it, and a decision on whether team
+    mates get any in-race awareness of each other in `ai_control`;
+  - save/load I/O (an SD card file, most likely) to persist `CareerState`
+    across sessions, `kart_place_on_grid` reading it to start a human
+    somewhere other than the back of the grid, and a "next race" menu flow
+    that actually strings races together as one campaign;
+  - explicit decisions on what a zero-initialized `GameConfig` should mean
+    for `difficulty` (today: `DIFFICULTY_EASY`, likely not the intent) and
+    what a first-ever career race (`has_last_result == 0`) should do
+    (likely: fall back to today's back-of-grid start).
+
+**2. Winter, for real, across the roster.** The weather system has been
+CLASSIC-only by design since v1.19.0; this is the release where that
+becomes deliberate rather than just unfinished. Bundled because all three
+depend on and inform each other — extending zones to new circuits is the
+first real test of whether the tire compounds' snow/ice/puddle grip
+numbers hold up outside the one track they were tuned on, and the visual
+work only pays off once there's more than one circuit's worth of zone to
+actually notice:
+  - add zones (snow → ice → puddle, `track_weather_at`) to some or all of
+    the seven mountain passes — its own pass over each circuit's own
+    geometry, not a copy-paste of CLASSIC's three-zone layout;
+  - define dry/snow/ice tire performance deliberately instead of only the
+    grip-multiplier trade that exists today: investigate whether harder
+    compounds should also gain lower rolling resistance or durability on
+    dry pavement, whether winter-oriented/softer compounds should gain
+    something beyond grip in the cold, and keep watching for a compound
+    winning on label alone rather than on the modeled trade;
+  - give weather zones a visible boundary/texture in `draw_track` beyond
+    today's flat color tint, now that there is reason to actually notice
+    a zone's edge on more than one circuit.
+
+**3. Player history, and an AI that learns from it.** Both items are about
+capturing and persisting player performance over time, and the first is
+close to a prerequisite for the second (you need a place to keep lap data
+before you can mine it):
+  - persistent driver standings, records, and player progress across
+    sessions — the real save/load subsystem the career scaffold above also
+    wants, so worth designing once for both if bundle 1 hasn't already
+    landed it;
+  - record exceptional player laps and use their racing-line/braking data
+    to improve selected NPC behavior on later runs, with reset/export
+    controls so a heroic accident does not become mandatory curriculum
+    forever.
+
+**4. A presentation pass: camera modes and pass scenery.** Lowest priority
+of the four — both items are about how the game looks rather than how it
+races, which has consistently been this project's second priority behind
+simulation depth (see Overall direction, below). Bundled because both are
+rendering-heavy, `main.c`-side work rather than `game.c` simulation work,
+so it's one release spent in rendering instead of splitting that context
+switch across two:
+  - optional cockpit and bumper camera views, sharing the existing pitch
+    and look-ahead settings;
+  - rework the mountain passes' scenery, landmarks, elevation transitions,
+    roadside detail, and silhouettes to be more visually distinctive from
+    each other — right now they mostly read as the same road at different
+    grades.
+
+---
+
 ## Camera — done in v1.4.0
 
 The whole camera block shipped in v1.4.0, in `source/camera.c` with host
@@ -29,12 +169,8 @@ tests in `tests/test_game.c` and settings in the `camera` block of
   height, distance, and look-ahead as documented camera settings rather than
   burying the final feel in constants.
 
-Left for later, now that the camera has somewhere to live:
-
-- [ ] Optional cockpit and bumper views, sharing the same pitch and
-  look-ahead settings.
-- [ ] Let the camera lead into corners slightly rather than only along the
-  car's nose.
+Open work for this area (cockpit/bumper views, corner lead-in) is tracked
+under Release planning above.
 
 ## Race end and marshals
 
@@ -56,6 +192,8 @@ Left for later, now that the camera has somewhere to live:
   both `control_config_defaults` and `config/controls.json`, and the setup
   screen's two hint lines are one.
 
+Fully shipped — nothing open here.
+
 ## Roads, passes, and conditions
 
 - [x] Add variable road width by segment or control point. Some sharp turns
@@ -63,8 +201,6 @@ Left for later, now that the camera has somewhere to live:
   wide enough to support multiple lines and meaningful speed through the turn.
       *(v1.6.0: per-control-point width profiles, used by the physics, the
       AI and the renderer.)*
-- [ ] Rework the mountain-pass levels so their scenery, landmarks, elevation
-  transitions, roadside detail, and silhouettes are more visually distinctive.
 - [x] Add **Breakneck Pass**: a short circuit with large elevation changes,
   narrow pavement, abrupt grade transitions, and no guardrails.
       *(v1.6.0: 945 m, 44 m of climb, 29% grades, 7.4 m wide.)*
@@ -89,9 +225,6 @@ Left for later, now that the camera has somewhere to live:
   corners, tightest radius 8 m — with
   `test_berthoud2_keeps_its_switchbacks` guarding against smoothing it
   away a third time.)*
-- [ ] Add winter variants of the mountain passes. The weather system below
-  covers CLASSIC only by design; extending zones to the seven passes is
-  its own pass over each circuit's own geometry.
 - [x] Add localized snow and ice hazards with visible boundaries and distinct
   grip behavior. *(v1.19.0: three zones on CLASSIC only, each independently
   aging from snow to ice to a puddle over the settings-tunable
@@ -99,10 +232,10 @@ Left for later, now that the camera has somewhere to live:
   `track.c`, tire-compound grip multipliers in the `weather` block of
   `settings.json`. Soft is the tire for snow/ice, hard for a puddle,
   medium is deliberately never the best or worst choice. Rendered as a
-  surface color change in `draw_track`. See `config/README.md`.)*
-- [ ] Give weather zones a visible boundary/texture beyond the flat color
-  tint `draw_track` uses today, and consider a HUD readout of the
-  upcoming zone's condition, not just its color on the road itself.
+  surface color change in `draw_track`. Standing water also drags at every
+  car regardless of tire, and the AI's own corner-speed lookahead
+  discounts grip for whatever weather patch is ahead of it — v1.20.0. See
+  `config/README.md`.)*
 - [x] Bring paved edges out to the guardrail on every barriered circuit and
   widen the tightest turns across the roster, closing off the "run onto
   the shoulder to cut a corner" line. *(v1.19.0: barriered tracks'
@@ -114,6 +247,9 @@ Left for later, now that the camera has somewhere to live:
   shrank the whole track and made Guanella's chained switchbacks worse,
   not better). Berthoud's summit switchbacks, the tightest corners and
   closest self-approach on that circuit, specifically benefit.)*
+
+Open work for this area (scenery rework, winter variants beyond CLASSIC,
+weather zone visuals/HUD) is tracked under Release planning above.
 
 ## Powertrain, boost, and instruments
 
@@ -141,13 +277,15 @@ Left for later, now that the camera has somewhere to live:
   garage; `RUBY` stays as a plain naturally-aspirated car.
 - [x] Bring boost back as its own, simpler mechanic instead of a per-car
   engine trait. *(v1.19.0: a universal meter (`Kart.boost_meter`) that
-  charges with revs on a curve — quadratic in `rev_frac`, so redline
-  time counts far more than the same time low in the band — spent all
-  at once on a dedicated `boost` button/input for an instant speed
-  bump, and zeroed by the next shift of any kind so working it means
-  holding a gear on purpose. Tunable in the `boost` block of
-  `settings.json`; the AI fires it too, gated on real headroom before
-  the next corner so it doesn't launch itself into a turn too hot.)*
+  charged with revs on a curve and spent all at once on a button for an
+  instant speed bump, zeroed by the next shift. Reworked again in
+  v1.21.0 into a fully automatic turbo: `Kart.turbo_spool` builds and
+  bleeds off on its own from real throttle and revs — no button — and
+  applies straight to engine power every frame, tapered by how much grip
+  is already spent cornering so it can't destabilize a car mid-corner.
+  The "use" button is now an instantaneous full-throttle override
+  instead of a resource to spend. Tunable in the `turbo` block of
+  `settings.json`.)*
 - [x] Add per-car and optionally per-gear automatic shift ranges to `cars.json`,
   including configurable upshift/downshift points rather than only limiter
   speeds. *(v1.7.0.)*
@@ -157,22 +295,28 @@ Left for later, now that the camera has somewhere to live:
   useful range, shift window, and limiter. *(v1.5.0: grey bogging, green
   useful, amber shift window, red limiter, plus a shift-window mark.)*
 
+Fully shipped — nothing open here.
+
 ## Drivers, AI, and persistent competition
 
 - [x] Raise the AI field's overall competitiveness and add a "no guts, no
   glory" strategy for drivers who commit to everything. *(v1.19.0: a new
   `AI_YOLO` sheet — the highest `conf_start`/`attack` and lowest `defend`
   in the roster, and it rides every gear to the limiter, which also
-  charges its boost meter fastest — assigned to TANAKA and CROSS.
-  `ai_skill_mult` up from 0.97 to 1.02 for the whole field. The weakest
-  couple of drivers (DELGADO, CROSS) got a modest skill bump so they are
-  no longer plain slow, while HOLT and PETRAN stay the field's real top
-  and bottom so the roster keeps a genuine spread
-  (`test_driver_field_has_characters`). An earlier, more extreme YOLO
-  tuning (`conf_start` 1.20) could strand a driver in a permanent
-  fall/respawn loop on one of Monarch's tighter corners — see
-  `test_yolo_can_finish_the_hardest_track`, which exists specifically to
-  catch that again.)*
+  spools its turbo fastest — assigned to TANAKA and CROSS. `ai_skill_mult`
+  up from 0.97 to 1.02 in v1.19.0, then 1.06 in v1.20.0; `braking_multiplier`
+  up from 0.72 to 0.76 in v1.20.0. The weakest couple of drivers (DELGADO,
+  CROSS) got a modest skill bump so they are no longer plain slow, while
+  HOLT and PETRAN stay the field's real top and bottom so the roster keeps
+  a genuine spread (`test_driver_field_has_characters`). An earlier, more
+  extreme YOLO tuning (`conf_start` 1.20) could strand a driver in a
+  permanent fall/respawn loop on one of Monarch's tighter corners — see
+  `test_yolo_can_finish_the_hardest_track`. v1.21.0 added two more
+  HOLT-tier drivers, KESSLER and DUARTE, replacing RENARD and SOLANO after
+  checking which roster tests each removed driver was load-bearing for —
+  see `docs/HANDOFF.md` §6 before growing this roster past eleven, the
+  array-index scheme silently makes anything past `NUM_KARTS - 1` entries
+  unreachable in a normal race.)*
 - [x] Separate driver skill from personality. Build a field containing elite
   aggressive drivers, poor drivers who overcommit, overly passive drivers,
   and dependable safe drivers rather than eleven variations of "quite good."
@@ -199,74 +343,23 @@ Left for later, now that the camera has somewhere to live:
   INSIDE and CRUISER, same skill, same learned corner confidence, land
   within 1.4% of each other; skill alone is still worth 7.3% (0.86 vs 1.06,
   `test_skill_sets_pace`). Test: `test_racing_line_pace_is_not_the_sheet`.
+  *(v1.21.0: some drivers — OSEI, NORDLI, DUARTE — now go a step further
+  and genuinely hunt the racing line, blending in a second, farther
+  curvature sample (`ai_line_curvature`, `AIDriver.line_lookahead_m`) so
+  they set up for the corner after the one they're in, each reading a
+  different distance ahead. That anticipation fades toward nothing the
+  tighter the near corner already is, both because a driver mid-hairpin
+  realistically isn't still planning the next bend and because it turned
+  out to be needed: an early, untapered cut of this briefly broke the
+  same fragile TRUCK/AI_YOLO pairing noted above on Monarch and Berthoud
+  Pass 2.0.)*
 - [x] Add a continuously updating on-screen leaderboard based on current race
   order and keep it visible without covering the useful driving view.
       *(v1.5.0: right-edge column with position, driver and gap in seconds.)*
-- [ ] Add persistent driver standings, records, and player progress across
-  sessions.
-- [ ] Record exceptional player laps and use their racing-line/braking data to
-  improve selected NPC behavior on later runs. Include reset/export controls
-  so a heroic accident does not become mandatory curriculum forever.
-- [ ] Wire up a difficulty preset (Easy/Normal/Hard) that sets lap count, AI
-  aggressiveness, AI car choice, and guardrails together as one menu
-  choice, instead of a player tuning each one by hand. *(v1.19.0 added
-  only the data shape — `DifficultyPreset`, `difficulty_presets[]` and
-  `GameConfig.difficulty` in `game.h`/`game.c`, `test_difficulty_presets_
-  scaffolding` checking the table itself — deliberately not read by
-  `game_init` or anywhere else yet, so choosing a preset today has no
-  effect on a race.)* Real wiring needs, at minimum:
-  - a garage/setup menu control to pick a preset (currently none exists);
-  - `game_init` reading `cfg.difficulty` to set `laps_override` and scale
-    each AI driver's effective aggression/skill;
-  - a way for `ai_no % kart_spec_count` car assignment to instead lean
-    toward `DIFFICULTY_CARS_MATCHED`/`UNDERDOG` relative to the human's
-    chosen car;
-  - `track_init`'s `has_walls` becoming overridable per race rather than
-    fixed per circuit, for `DIFFICULTY_GUARDRAILS_ON`/`OFF`;
-  - a decision on what a zero-initialized `GameConfig` should mean for
-    `difficulty` (today that's `DIFFICULTY_EASY`, likely not the intent —
-    see the comment on the field).
-- [ ] Wire up team mode: group humans and AI onto teams identified by paint
-  colour, with a combined team score/ranking alongside each driver's own.
-  *(v1.20.0 added only the data shape — `TeamDef`, `team_defs[]` and
-  `team_name()` in `game.h`/`game.c`, `GameConfig.team_mode` and
-  `GameConfig.team[]`, `test_team_mode_scaffolding` checking the table
-  itself — deliberately not read by `game_init` or anywhere else yet, so
-  setting `team_mode` today has no effect on a race.)* Real wiring needs,
-  at minimum:
-  - a garage/setup menu control to join a team (currently none exists);
-  - `game_init` reading `cfg.team_mode`/`cfg.team[]` and forcing each
-    human's `paint_idx` to match their team's colour instead of the
-    individually-chosen one;
-  - a way to put AI drivers on a team too — whichever team is short a
-    car, or split evenly, rather than every AI keeping its own fixed
-    `paint` from the `ai_drivers[]` table;
-  - a combined per-team score or ranking computed alongside the existing
-    per-kart `final_rank`, plus a HUD element to show it;
-  - deciding whether team mates should get any in-race awareness of each
-    other (e.g. `ai_control`'s attack/defend logic treating a team mate
-    like a rival it should not fight).
-- [ ] Wire up career/campaign mode: a human's finishing position in one
-  race becomes their starting grid slot in the next, instead of always
-  starting at the back. *(v1.20.0 added only the data shape —
-  `CareerState`, `career_record_result()` and `GameConfig.career[]` in
-  `game.h`/`game.c`, `test_career_mode_scaffolding` checking that the
-  helper stores a result and that `game_init` still ignores it —
-  deliberately not read anywhere else yet, so populating `career[]`
-  today has no effect on a race.)* Real wiring needs, at minimum:
-  - save/load I/O to persist `CareerState` across sessions (an SD card
-    file, most likely) — today it only lives as long as the process;
-  - `game_init`/`kart_place_on_grid` reading `cfg.career[i]` and
-    starting that human somewhere other than the fixed back-of-grid
-    slot it always uses now;
-  - a decision on what "grid slot" means for a rank of 1 with a full
-    twelve-car field — the front slot is presumably still shared with
-    whichever AI would otherwise start there;
-  - a menu flow that actually strings races together as one campaign
-    (a "next race" button that reuses the same human/CareerState pair)
-    rather than every race being launched fresh from the garage;
-  - deciding what a first-ever race (`has_last_result == 0`) should do
-    — likely fall back to today's back-of-grid start.
+
+Open work for this area (persistent standings, learning from player laps,
+and wiring the difficulty/team/career scaffolds) is tracked under Release
+planning above.
 
 ## Laps and timing — done in v1.5.0
 
@@ -276,9 +369,8 @@ Left for later, now that the camera has somewhere to live:
 - [x] Expand lap-count customization beyond the existing per-track JSON
   override, including an accessible pre-race option and sensible validation.
 
-Still open:
-
-- [ ] Keep lap times between races and show a session best per circuit.
+Open work for this area (a session-best lap per circuit) is tracked under
+Release planning above.
 
 ## Tires and surfaces
 
@@ -289,12 +381,12 @@ Still open:
   useful combination of temperature, wear, rolling resistance, durability,
   and surface compatibility. *(v1.8.0: softs win sprints, mediums and hards
   win long races; a regression test fails if that stops being true. Surface
-  compatibility waits for the winter work below.)*
-- [ ] Define dry, snow, and ice performance deliberately. Investigate whether
-  harder compounds should gain lower rolling resistance or durability on dry
-  pavement while winter-oriented/softer compounds gain cold, snow, and ice
-  grip; avoid granting extra acceleration or cornering grip merely because a
-  label says "hard."
+  compatibility landed in v1.19.0 for CLASSIC's weather: soft is the
+  snow/ice tire, hard is the puddle tire, medium is deliberately never the
+  best or worst choice.)*
+
+Open work for this area (deliberately defining dry/snow/ice performance
+beyond the current grip trade) is tracked under Release planning above.
 
 ## Overall direction
 
@@ -302,3 +394,9 @@ Still open:
   formula-car experience: more deliberate setup, braking, power delivery,
   race information, driver identity, and consequence without losing readable
   controls or quick races.
+
+This is the standing north star, not a release-sized item on its own — it's
+the reason simulation-depth work (tires, drivetrain, oversteer/understeer,
+weather, AI) has consistently outpaced presentation work (camera modes,
+scenery) in priority, and it's worth weighing any new idea against directly:
+does this make the car and the mountain feel more real, or just add a knob.
