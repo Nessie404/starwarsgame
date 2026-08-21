@@ -163,7 +163,7 @@ int track_weather_at(const Track *t, int seg, float race_t,
  * session. */
 #define MAX_KART_SPECS 24
 #define KART_NAME_LEN   16
-#define MAX_GEARS       6
+#define MAX_GEARS       12
 
 /*
  * Gearing. Each car has a gearbox whose ratios are expressed as the road

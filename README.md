@@ -311,8 +311,10 @@ for the hairpins.
   tilt to look at: a banked corner genuinely adds cornering grip, part
   of gravity now pointing toward the apex instead of straight down, the
   same reason a real banked turn lets you carry more speed through it.
-- **Gearboxes.** Every car has a real gearbox — 4 to 6 gears, each with a
-  road speed at the limiter — and one engine curve behind all of them,
+- **Gearboxes.** Every car has a real gearbox — the shipped roster runs
+  4 to 6 gears, and the car designer/`cars.json` allow up to 12 — each
+  with a road speed at the limiter, and one engine curve behind all of
+  them,
   peaking at a single nominal RPM shared by every gear, exactly like a
   real engine has one torque curve mapped through different ratios.
   Wander far from that peak, in either direction, and power falls away
@@ -505,7 +507,7 @@ Monarch takes roughly 105 s in the deterministic host simulation.
 The three files in [`config/`](config/) are the supported tuning surface:
 
 - `cars.json` contains the complete garage roster in real-world units;
-  duplicate an object to add a car (up to 16 cars and 6 gears each).
+  duplicate an object to add a car (up to 16 cars and 12 gears each).
 - `settings.json` covers race length, driving physics, steering, tires,
   AI risk, recovery timing, and per-track scale, elevation, width, and
   lap count.
