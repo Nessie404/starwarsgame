@@ -71,6 +71,10 @@ enum { APP_MENU = 0, APP_RACE = 1 };
 static int app_state = APP_MENU;
 static int race_exit_confirm;       /* leave-race guard; pauses simulation */
 static int menu_screen;              /* SCREEN_SETUP / SCREEN_GARAGE     */
+/* Temporary cap: split-screen for 3-4 still works (MAX_HUMANS is
+ * unchanged and still sizes every per-player array), but the menu only
+ * offers up to 2 for now. Raise this back to MAX_HUMANS to reopen it. */
+#define MAX_SELECTABLE_PLAYERS 2
 static int sel_players = 1;
 static int sel_track = 0;
 static int sel_laps = 0;             /* 0 = the circuit's own lap count */
@@ -3051,8 +3055,8 @@ static void row_change(const MenuRow *r, int d)
     switch (r->kind) {
     case RK_PLAYERS:
         sel_players += d;
-        if (sel_players < 1) sel_players = MAX_HUMANS;
-        if (sel_players > MAX_HUMANS) sel_players = 1;
+        if (sel_players < 1) sel_players = MAX_SELECTABLE_PLAYERS;
+        if (sel_players > MAX_SELECTABLE_PLAYERS) sel_players = 1;
         break;
     case RK_TRACK:
         sel_track = ((sel_track + d) % TRACK_COUNT + TRACK_COUNT) % TRACK_COUNT;
