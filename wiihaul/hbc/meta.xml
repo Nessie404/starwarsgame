@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<app version="1">
+  <name>WiiHaul</name>
+  <coder>kaz</coder>
+  <version>0.1.0</version>
+  <release_date>20260821060000</release_date>
+  <short_description>Semi-sim truck and trailer backing test</short_description>
+  <long_description>A semi-realistic tractor-trailer simulator built around the skill WiiKart never asked for: pulling and backing a loaded rig. The trailer physics is the real kinematic model of a car towing a trailer, run honestly in reverse, so "steer opposite the way you want the trailer to go" and a trailer cutting the corner tight on a turn both fall out of the math rather than being scripted. Nine scenarios modeled on real commercial driver's license skills tests: straight-line backing, offset backing left and right, parallel parking, alley docking, a forward cone slalom, a hill start that actually rolls back without the brake, a multi-corner haul route, and a doubles dock for a two-trailer combo. Six rigs across five trailer shapes: a dry van, a flatbed, a tanker with real liquid-slosh handling, a low-boy hauling an oversized load, and a set of pup doubles — each with real mass, engine and braking numbers, so a loaded low-boy brakes and pulls nothing like an empty yard tractor. Push articulation past its structural limit and the rig jackknifes for real, clamped at the joint, recoverable only by easing forward. Every attempt is scored like a real skills test: cone touches, boundary-line crossings, pull-ups past the free allowance, holding position in the target zone. A short campaign unlocks each scenario after passing the one before it. Wii Remote (sideways grip), Nunchuk, Classic Controller, GameCube pads (Xbox pads through Dolphin) and USB keyboard all supported; rigs, physics tuning and controls are editable in documented JSON files. Runs on Wii hardware and in Dolphin.</long_description>
+</app>

@@ -1,0 +1,18 @@
+{
+  "show_input_overlay": true,
+
+  "actions": {
+    "steer_left":    { "keyboard": ["A", "LEFT"],  "gamecube": ["dpad_left"],  "xbox_label": "LEFT STICK" },
+    "steer_right":   { "keyboard": ["D", "RIGHT"], "gamecube": ["dpad_right"], "xbox_label": "LEFT STICK" },
+    "accel":         { "keyboard": ["W", "UP"],    "gamecube": ["a"],          "xbox_label": "A" },
+    "reverse":       { "keyboard": ["S", "DOWN"],  "gamecube": ["b"],          "xbox_label": "B" },
+    "brake":         { "keyboard": ["SPACE"],      "gamecube": ["x"],          "xbox_label": "X" },
+    "parking_brake": { "keyboard": ["P"],          "gamecube": ["y"],          "xbox_label": "Y" },
+    "horn":          { "keyboard": ["H"],          "gamecube": ["z"],          "xbox_label": "LB" },
+    "gear_up":       { "keyboard": ["E"],          "gamecube": ["r"],          "xbox_label": "RB" },
+    "gear_down":     { "keyboard": ["Q"],          "gamecube": ["l"],          "xbox_label": "LT" },
+    "menu":          { "keyboard": ["ESCAPE"],     "gamecube": ["start"],      "xbox_label": "START" },
+    "confirm":       { "keyboard": ["ENTER"],      "gamecube": ["a"],          "xbox_label": "A" },
+    "back":          { "keyboard": ["ESCAPE"],     "gamecube": ["b"],          "xbox_label": "B" }
+  }
+}

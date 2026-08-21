@@ -16,6 +16,11 @@ the original arcade racer as
 on the [v0.1 release](https://github.com/Nessie404/starwarsgame/releases/tag/v0.1)
 (see `patches/README.md` for why 0.1.1 has no tag of its own).
 
+**Also in this repository:** [WiiHaul](wiihaul/README.md), a tractor-
+trailer backing/pulling simulator built next to this project, reusing its
+Wii-homebrew bones (GX rendering, the reverse-swing chase camera, the
+editable-JSON pattern) for a very different kind of driving.
+
 See [CHANGELOG.md](CHANGELOG.md) for the release-by-release inventory and
 [TODO.md](TODO.md) for proposed future work that is explicitly not part of
 v1.10.0, and [docs/HANDOFF.md](docs/HANDOFF.md) if you are picking this

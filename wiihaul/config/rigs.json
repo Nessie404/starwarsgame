@@ -1,0 +1,158 @@
+{
+  "trucks": [
+    {
+      "name": "SHORTHAUL",
+      "mass_kg": 7400,
+      "power_hp": 330,
+      "wheelbase": 3.2,
+      "body_length": 4.6,
+      "body_width": 2.4,
+      "hitch_setback": 0.7,
+      "max_steer_deg": 50,
+      "reverse_top_mps": 4.2,
+      "brake_decel_ref": 4.8,
+      "ref_mass_kg": 12000,
+      "cd_a": 5.6,
+      "nominal_rpm": 0.55,
+      "gear_top": [2, 3.1036911, 4.8164492, 7.4743853, 11.599092, 17.999998]
+    },
+    {
+      "name": "DAYCAB",
+      "mass_kg": 8200,
+      "power_hp": 400,
+      "wheelbase": 4,
+      "body_length": 6.4,
+      "body_width": 2.5,
+      "hitch_setback": 0.9,
+      "max_steer_deg": 36,
+      "reverse_top_mps": 3.4,
+      "brake_decel_ref": 4.4,
+      "ref_mass_kg": 15000,
+      "cd_a": 6.2,
+      "nominal_rpm": 0.5,
+      "gear_top": [2.2, 2.9282904, 3.897675, 5.1879659, 6.9053955, 9.1913652, 12.234084, 16.284069, 21.674767, 28.850004]
+    },
+    {
+      "name": "SLEEPER",
+      "mass_kg": 8800,
+      "power_hp": 455,
+      "wheelbase": 4.3,
+      "body_length": 7.4,
+      "body_width": 2.5,
+      "hitch_setback": 1,
+      "max_steer_deg": 32,
+      "reverse_top_mps": 3,
+      "brake_decel_ref": 4.2,
+      "ref_mass_kg": 18000,
+      "cd_a": 6.6,
+      "nominal_rpm": 0.48,
+      "gear_top": [2.3, 3.0595703, 4.0699873, 5.4140925, 7.202086, 9.5805607, 12.744521, 16.953373, 22.552191, 30.000008]
+    }
+  ],
+  "trailers": [
+    {
+      "name": "DRY VAN 53",
+      "type": "box",
+      "length": 12.4,
+      "hitch_offset": 0,
+      "width": 2.6,
+      "height": 4,
+      "empty_mass_kg": 6800,
+      "max_cargo_kg": 20000,
+      "jackknife_limit_deg": 90,
+      "slosh_strength": 0
+    },
+    {
+      "name": "FLATBED 48",
+      "type": "flatbed",
+      "length": 11.2,
+      "hitch_offset": 0,
+      "width": 2.6,
+      "height": 1.6,
+      "empty_mass_kg": 5400,
+      "max_cargo_kg": 22000,
+      "jackknife_limit_deg": 90,
+      "slosh_strength": 0
+    },
+    {
+      "name": "TANKER 42",
+      "type": "tanker",
+      "length": 10,
+      "hitch_offset": 0,
+      "width": 2.6,
+      "height": 3.4,
+      "empty_mass_kg": 7200,
+      "max_cargo_kg": 18000,
+      "jackknife_limit_deg": 85,
+      "slosh_strength": 1
+    },
+    {
+      "name": "LOWBOY 48",
+      "type": "lowboy",
+      "length": 11.6,
+      "hitch_offset": 0,
+      "width": 2.9,
+      "height": 1.2,
+      "empty_mass_kg": 8600,
+      "max_cargo_kg": 32000,
+      "jackknife_limit_deg": 80,
+      "slosh_strength": 0
+    },
+    {
+      "name": "PUP 28",
+      "type": "pup",
+      "length": 6.2,
+      "hitch_offset": 1.6,
+      "width": 2.6,
+      "height": 3.6,
+      "empty_mass_kg": 3200,
+      "max_cargo_kg": 9000,
+      "jackknife_limit_deg": 90,
+      "slosh_strength": 0
+    }
+  ],
+  "rigs": [
+    {
+      "name": "YARD SPOTTER",
+      "truck": "SHORTHAUL",
+      "trailers": ["DRY VAN 53"],
+      "cargo_mass_kg": 0,
+      "difficulty_stars": 1
+    },
+    {
+      "name": "DRY VAN HAUL",
+      "truck": "DAYCAB",
+      "trailers": ["DRY VAN 53"],
+      "cargo_mass_kg": 12000,
+      "difficulty_stars": 2
+    },
+    {
+      "name": "FLATBED LOAD",
+      "truck": "DAYCAB",
+      "trailers": ["FLATBED 48"],
+      "cargo_mass_kg": 15000,
+      "difficulty_stars": 2
+    },
+    {
+      "name": "TANKER RUN",
+      "truck": "SLEEPER",
+      "trailers": ["TANKER 42"],
+      "cargo_mass_kg": 14000,
+      "difficulty_stars": 3
+    },
+    {
+      "name": "HEAVY HAUL",
+      "truck": "SLEEPER",
+      "trailers": ["LOWBOY 48"],
+      "cargo_mass_kg": 28000,
+      "difficulty_stars": 4
+    },
+    {
+      "name": "DOUBLES",
+      "truck": "SLEEPER",
+      "trailers": ["PUP 28", "PUP 28"],
+      "cargo_mass_kg": 12000,
+      "difficulty_stars": 4
+    }
+  ]
+}

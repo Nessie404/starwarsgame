@@ -1,0 +1,49 @@
+name: wiihaul build
+
+on:
+  push:
+    paths:
+      - 'wiihaul/**'
+      - '.github/workflows/wiihaul-build.yml'
+  pull_request:
+    paths:
+      - 'wiihaul/**'
+      - '.github/workflows/wiihaul-build.yml'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: wiihaul
+
+jobs:
+  test:
+    name: Host tests (game logic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run host test suites
+        run: ./tools/run-host-tests.sh
+
+  build:
+    name: Wii homebrew (devkitPPC)
+    runs-on: ubuntu-latest
+    # Pinned by digest, not by :latest — see WiiKart's own build.yml for
+    # why (a moving build image would make two builds of the same
+    # source not the same binary).
+    container: devkitpro/devkitppc@sha256:44cb1a920e1ec3ec7c06767493c3b85f8d643d6137cc4661f0201895ac6e4967
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build boot.dol
+        run: make
+      - name: Check the DOL the way Dolphin's loader does
+        run: python3 tools/validate_dol.py wiihaul.dol
+      - name: Package Homebrew Channel app
+        run: make dist
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wiihaul
+          path: |
+            wiihaul/wiihaul.dol
+            wiihaul/wiihaul.elf
+            wiihaul/dist/

@@ -1,0 +1,31 @@
+{
+  "steer_rate_on_dps": 130.0,
+  "steer_rate_center_dps": 190.0,
+  "steer_speed_fade": 0.045,
+
+  "rolling_resistance": 0.012,
+  "drivetrain_efficiency": 0.86,
+  "shift_seconds": 0.55,
+
+  "brake_mass_floor": 0.45,
+
+  "jackknife_warn_frac": 0.55,
+  "jackknife_danger_frac": 0.82,
+
+  "slosh_response": 2.2,
+  "slosh_yaw_feedback": 0.9,
+
+  "cam_distance_base_m": 9.0,
+  "cam_distance_per_rig_length": 0.42,
+  "cam_height_m": 3.4,
+  "cam_min_height_m": 0.6,
+  "cam_look_height_m": 1.4,
+  "cam_follow_smoothing": 0.010,
+  "cam_look_smoothing": 0.05,
+  "cam_reverse_deadzone_mps": 0.15,
+  "cam_reverse_full_mps": 3.0,
+  "cam_reverse_orbit_rate_dps": 70.0,
+  "cam_reverse_smoothing": 0.03,
+  "cam_reverse_tail_bias": 0.65,
+  "cam_corner_lean": 2.4
+}
