@@ -129,6 +129,63 @@ Any patch release that followed a minor release is folded into that
 release's entry rather than getting its own. For anything older,
 `CHANGELOG.md` and `docs/release-notes/` have the full record back to v1.0.
 
+### v1.25.0 — grip until it lets go, real gear physics, editable cars, imperial units
+
+- [x] The escalating power-oversteer/forced-spin mechanic (v1.20.0) is
+  gone. Holding the wheel over used to boost `yaw_cap` by up to 40% over
+  about a second and then force an uncontrollable spin if it wasn't
+  "caught" — reported as the car suddenly turning far harder than asked
+  and snapping off the road. Grip now just holds (understeer scrub +
+  the tire "shoulder" from v1.24.0) until the driver deliberately breaks
+  it loose with the handbrake (`k->drifting`) — that is drifting now,
+  not something that could happen by accident. `yaw_cap`'s speed floor
+  also moved 0.5 → 6.0 m/s: below a walking pace, steering geometry is
+  the real limit, not grip, and dividing by a near-zero speed let the
+  cap run away as a car scrubbed off nearly all its speed (e.g. pinned
+  against a guardrail). The guardrail's own speed penalty was softened
+  2.5 → 1.2 /s to match.
+- [x] Gears are RPM-based now, not a percentage of each gear's own span.
+  `KartSpec.auto_up`/`auto_down` (per-gear shift-point fractions) are
+  gone, replaced by a single `nominal_rpm` — one engine curve, same RPM
+  peak in every gear, exactly like a real engine (`gear_power_scale_rpm`
+  in game.c). Output peaks at `nominal_rpm` and falls away — steeply,
+  not gently — to both idle and redline, floored at 22% so a car can
+  still launch and limp, with a real hard cliff at the limiter itself.
+  Automatic shifts now derive straight from where `nominal_rpm` sits
+  relative to redline — there is no separate shift-point dial to tune
+  any more.
+- [x] Cars can be naturally aspirated (default), turbocharged, or
+  supercharged (`KartSpec.aspiration`). NA makes no forced-induction
+  bonus at all. A turbo keeps the existing spool mechanic (builds and
+  bleeds off over real time — genuine lag) and has the biggest bonus of
+  the three. A supercharger is driven off the engine directly: instant,
+  proportional to revs right now, no lag building up or bleeding off,
+  for a smaller bonus than a turbo's — the real trade-off between them.
+- [x] Grip is no longer a free dial in the car designer: `designer_grip()`
+  derives `lat_g` from the mass the power trade-off already settled on
+  (lighter is grippier) and from drag (more `cd_a` reads as more assumed
+  downforce, not just more drag), the same "trade-off, not an
+  independent slider" treatment mass got in v1.24.0. The GRIP row still
+  shows the number, it just can't be dragged around any more.
+- [x] The garage has a new EDIT CAR row: pick any car, including a
+  built-in, and it opens in the same designer view with every stat
+  editable — the only difference from a new build is that SAVE (now
+  labelled APPLY, SESSION ONLY) patches that car's live `kart_specs[]`
+  entry in place instead of adding a new one, and nothing is written to
+  disk. Restarting the game restores the original.
+- [x] The slowing-down lap no longer ends in a dead stop: a finished
+  car ramps down to a ~30 mph cruise (`COOLDOWN_CRUISE_MPS`) over
+  `COOLDOWN_SECONDS` and holds it indefinitely, actively driven rather
+  than left to coast. `Kart.parked`, which used to force the car to a
+  standstill, is gone — nothing needs it any more.
+- [x] Every in-game speed, distance and weight readout is imperial now
+  (mph, feet, pounds) — the HUD speedometer, gear top speeds and
+  nominal RPM in the designer, brake distance, car mass, and track
+  length/elevation/finish-line countdown on the menu and HUD. The
+  simulation itself stays entirely in SI underneath; only the display
+  layer (`main.c`) converts, via `MPS_TO_MPH`/`KPH_TO_MPH`/`M_TO_FT`/
+  `KG_TO_LB`.
+
 ### v1.24.0 — road banking, a bigger BULLRING, cars that hold a line, a rebuilt designer (plus a v1.24.1 follow-up patch)
 
 - [x] Every circuit now cants into its curves: a small, realistic
@@ -273,23 +330,6 @@ release's entry rather than getting its own. For anything older,
   signed curvature of an upcoming bend (new `cam_corner_lean` setting),
   fading out the more the view has swung round for a reverse and
   hard-clamped so a hairpin can't send it somewhere absurd.
-
-### v1.20.0 — punishing oversteer/understeer, sharper AI, deeper weather
-
-- [x] Understeer now scrubs speed progressively with slip instead of a
-  flat rate; rear-driven cars get a new catchable power-oversteer/spin
-  mechanic under throttle, separate from the handbrake drift. New
-  `understeer`/`oversteer` settings blocks.
-- [x] AI competitiveness pushed further: `skill_multiplier` 1.02 → 1.06,
-  `braking_multiplier` 0.72 → 0.76.
-- [x] Data-only scaffolding for a colour-based team mode (`TeamDef`,
-  `GameConfig.team_mode`/`team[]`) and a career/campaign mode
-  (`CareerState`, `GameConfig.career[]`) — neither wired into a race yet;
-  see Release planning above for what finishing them needs.
-- [x] Weather fleshed out further: standing water now drags at every car
-  (`weather_puddle_drag_mult`), and the AI's own corner-speed lookahead
-  discounts grip for whatever weather patch is ahead instead of
-  assuming dry pavement everywhere.
 
 ## Overall direction
 

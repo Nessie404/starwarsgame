@@ -443,131 +443,6 @@ static void test_drivetrain_cornering_balance(void)
     kart_specs_reset_defaults();
 }
 
-/*
- * v1.24.0: power oversteer is no longer RWD-exclusive. AWD can still
- * be provoked into it, but needs a genuinely harder commitment first —
- * the front axle sharing the load keeps it planted well past where a
- * pure RWD car would already be loose. 18 m/s keeps this test below
- * the separate, drivetrain-blind high-speed spin trigger (25 m/s+, see
- * test_high_speed_alone_can_provoke_a_spin) so only the torque path is
- * being measured here.
- */
-static void test_awd_needs_more_torque_commitment_than_rwd(void)
-{
-    Game g;
-    GameConfig cfg = default_cfg(TRACK_CLASSIC);
-    Input in[MAX_HUMANS];
-    char error[80];
-    int f;
-    float rwd_oversteer, awd_oversteer_mild, awd_oversteer_hard;
-
-    CHECK(config_load_cars_text(drivetrain_test_cars, error,
-                                (int)sizeof(error)),
-          "drivetrain test cars did not load: %s", error);
-
-    cfg.spec[0] = 0;   /* RWDCAR */
-    game_init(&g, &cfg);
-    g.state = STATE_RACING;
-    idle_inputs(in);
-    teleport(&g, &g.karts[0], 2, 18.0f);
-    in[0].accel = 1;
-    in[0].steer = 0.65f;      /* past RWD's own 0.6 threshold */
-    for (f = 0; f < 20; f++)
-        game_update(&g, in, 1.0f / 60.0f);
-    rwd_oversteer = g.karts[0].oversteer_t;
-
-    cfg.spec[0] = 2;   /* AWDCAR, identical steer/speed */
-    game_init(&g, &cfg);
-    g.state = STATE_RACING;
-    idle_inputs(in);
-    teleport(&g, &g.karts[0], 2, 18.0f);
-    in[0].accel = 1;
-    in[0].steer = 0.65f;
-    for (f = 0; f < 20; f++)
-        game_update(&g, in, 1.0f / 60.0f);
-    awd_oversteer_mild = g.karts[0].oversteer_t;
-
-    cfg.spec[0] = 2;   /* AWDCAR again, past its own 0.8 threshold */
-    game_init(&g, &cfg);
-    g.state = STATE_RACING;
-    idle_inputs(in);
-    teleport(&g, &g.karts[0], 2, 18.0f);
-    in[0].accel = 1;
-    in[0].steer = 1.0f;
-    for (f = 0; f < 20; f++)
-        game_update(&g, in, 1.0f / 60.0f);
-    awd_oversteer_hard = g.karts[0].oversteer_t;
-
-    printf("torque commitment at 18 m/s: RWD@0.65 %.3f, AWD@0.65 %.3f, "
-           "AWD@1.0 %.3f\n", rwd_oversteer, awd_oversteer_mild,
-           awd_oversteer_hard);
-    CHECK(rwd_oversteer > 0.0f,
-          "RWD did not react to a moderate steering commitment at all "
-          "(oversteer_t %.3f)", rwd_oversteer);
-    CHECK(awd_oversteer_mild <= 0.0f,
-          "AWD entered power oversteer at the same, moderate commitment "
-          "RWD needs (oversteer_t %.3f) — it should need more",
-          awd_oversteer_mild);
-    CHECK(awd_oversteer_hard > 0.0f,
-          "AWD never entered power oversteer even at a hard commitment "
-          "(oversteer_t %.3f) — it should still be provokable, just "
-          "harder to provoke", awd_oversteer_hard);
-
-    kart_specs_reset_defaults();
-}
-
-/*
- * The other new spin trigger: pure excess speed into a tight turn, for
- * any drivetrain, even one that never enters power oversteer at all.
- * FWDCAR is the strictest possible test of this — if a front-driven
- * car (which the torque-spin path above explicitly excludes) can
- * still lose it, the speed-only path really is independent of the
- * driven axle.
- */
-static void test_high_speed_alone_can_provoke_a_spin(void)
-{
-    Game g;
-    GameConfig cfg = default_cfg(TRACK_CLASSIC);
-    Input in[MAX_HUMANS];
-    char error[80];
-    int f;
-
-    CHECK(config_load_cars_text(drivetrain_test_cars, error,
-                                (int)sizeof(error)),
-          "drivetrain test cars did not load: %s", error);
-
-    cfg.spec[0] = 1;   /* FWDCAR: never eligible for torque-based spin */
-    game_init(&g, &cfg);
-    g.state = STATE_RACING;
-    idle_inputs(in);
-    teleport(&g, &g.karts[0], 2, 26.0f);
-    in[0].accel = 1;
-    in[0].steer = 1.0f;
-    for (f = 0; f < 20; f++)
-        game_update(&g, in, 1.0f / 60.0f);
-    CHECK(g.karts[0].oversteer_t > 0.0f,
-          "a front-driven car carrying real excess speed into a tight "
-          "turn showed no sign of losing it at all (oversteer_t %.3f)",
-          g.karts[0].oversteer_t);
-
-    /* the same car, same steering, well under the speed threshold:
-     * a moderate corner at a sane pace should not be punished at all */
-    game_init(&g, &cfg);
-    g.state = STATE_RACING;
-    idle_inputs(in);
-    teleport(&g, &g.karts[0], 2, 18.0f);
-    in[0].accel = 1;
-    in[0].steer = 0.65f;
-    for (f = 0; f < 20; f++)
-        game_update(&g, in, 1.0f / 60.0f);
-    CHECK(g.karts[0].oversteer_t <= 0.0f,
-          "a front-driven car at a moderate pace and steering angle "
-          "should not risk spinning at all (oversteer_t %.3f)",
-          g.karts[0].oversteer_t);
-
-    kart_specs_reset_defaults();
-}
-
 static void test_drivetrain_json_parsing(void)
 {
     char error[80];
@@ -663,113 +538,79 @@ static void test_understeer_scrub_is_progressive(void)
 }
 
 /*
- * Power oversteer: a rear-driven car committing hard to a corner on the
- * throttle can rotate faster than pure grip would allow, for free, for
- * as long as the driver keeps the wheel turned hard — ease off in time
- * and it settles back down having gained real rotation over an
- * identical front-driven car; keep it locked over and it spins,
- * losing a lot of speed and control for a while.
+ * Regression test for the exact bug reported after v1.24.0 shipped: an
+ * escalating "power oversteer" mechanic used to boost yaw_cap by up to
+ * 40% over about a second of committed full-lock steering and then force
+ * an uncontrollable spin if it was not "caught" — which read as the car
+ * suddenly turning far harder than commanded and then snapping off the
+ * road, unannounced. Grip is supposed to hold steady (aside from the
+ * ordinary, progressive understeer scrub) for as long as the tires have
+ * it, with no surprise escalation and no automatic forced spin from
+ * steering alone — the only deliberate way to break traction is the
+ * handbrake (drifting), tested separately below.
  */
-static void test_oversteer_rewards_a_catch_and_punishes_a_miss(void)
+static void test_holding_full_lock_does_not_escalate_or_force_a_spin(void)
 {
     Game g;
     GameConfig cfg = default_cfg(TRACK_CLASSIC);
     Input in[MAX_HUMANS];
+    char error[80];
+    float h0, early_yaw, late_yaw, v0;
     int f;
-    float rwd_heading_caught, fwd_heading, v_before_spin, v_after_spin;
 
-    /* --- caught: RWD gains more rotation than an identical FWD car,
-     * and does not spin --- */
-    {
-        char error[80];
-        CHECK(config_load_cars_text(drivetrain_test_cars, error,
-                                    (int)sizeof(error)),
-              "drivetrain test cars did not load: %s", error);
-    }
-    cfg.spec[0] = 0;   /* RWDCAR */
+    CHECK(config_load_cars_text(drivetrain_test_cars, error,
+                                (int)sizeof(error)),
+          "drivetrain test cars did not load: %s", error);
+
+    cfg.spec[0] = 0;   /* RWDCAR: the drivetrain the old mechanic favored */
     game_init(&g, &cfg);
     g.state = STATE_RACING;
     idle_inputs(in);
     teleport(&g, &g.karts[0], 2, 25.0f);
+    v0 = g.karts[0].speed;
     in[0].accel = 1;
-    in[0].steer = 1.0f;
-    for (f = 0; f < 30; f++) {          /* 0.5 s: builds oversteer      */
-        game_update(&g, in, 1.0f / 60.0f);
-    }
-    in[0].steer = 0.2f;                 /* ease off: catch it           */
-    for (f = 0; f < 60; f++)
-        game_update(&g, in, 1.0f / 60.0f);
-    rwd_heading_caught = fabsf(g.karts[0].heading);
-    CHECK(g.karts[0].spin_t <= 0.0f,
-          "an oversteer that was caught should not still be spinning");
+    in[0].steer = 1.0f;                 /* full lock, held throughout   */
 
-    cfg.spec[0] = 1;   /* FWDCAR, identical stats otherwise */
-    game_init(&g, &cfg);
-    g.state = STATE_RACING;
-    idle_inputs(in);
-    teleport(&g, &g.karts[0], 2, 25.0f);
-    in[0].accel = 1;
-    in[0].steer = 1.0f;
-    for (f = 0; f < 30; f++)
-        game_update(&g, in, 1.0f / 60.0f);
-    in[0].steer = 0.2f;
-    for (f = 0; f < 60; f++)
-        game_update(&g, in, 1.0f / 60.0f);
-    fwd_heading = fabsf(g.karts[0].heading);
-    CHECK(g.karts[0].oversteer_t <= 0.0f,
-          "a front-driven car should never enter power oversteer");
+    h0 = g.karts[0].heading;
+    game_update(&g, in, 1.0f / 60.0f);
+    early_yaw = fabsf(game_angle_wrap(g.karts[0].heading - h0)) * 60.0f;
 
-    printf("oversteer reward: RWD rotated %.3f rad, identical FWD "
-           "rotated %.3f rad over the same 1.5 s\n",
-           rwd_heading_caught, fwd_heading);
-    /* the margin used to be 5%; v1.24.0's tire "shoulder" (kart_step —
-     * a car pushed past its nominal grip cap genuinely turns tighter
-     * instead of just being clamped, up to TIRE_SHOULDER) lifts both
-     * cars' rotation over the long 60-frame catch tail this test also
-     * measures, diluting the RWD bonus's share of the 1.5 s total even
-     * though the bonus itself (oversteer_max_bonus) is unchanged in
-     * kind, only in degree. RWD still, reliably, out-rotates FWD. */
-    CHECK(rwd_heading_caught > fwd_heading * 1.03f,
-          "a caught oversteer did not out-rotate the identical FWD car "
-          "(%.3f vs %.3f)", rwd_heading_caught, fwd_heading);
+    /* hold full lock for a full 2 seconds — well past the old mechanic's
+     * ~1 second escalate-then-spin window */
+    for (f = 0; f < 119; f++)
+        game_update(&g, in, 1.0f / 60.0f);
 
-    /* --- missed: the same RWD car, held flat out with no correction,
-     * has to spin: heavy speed loss and slip pinned at 1.0 --- */
-    cfg.spec[0] = 0;
-    game_init(&g, &cfg);
-    g.state = STATE_RACING;
-    idle_inputs(in);
-    teleport(&g, &g.karts[0], 2, 25.0f);
-    in[0].accel = 1;
-    in[0].steer = 1.0f;
-    for (f = 0; f < 65; f++)            /* past oversteer_spin_seconds  */
-        game_update(&g, in, 1.0f / 60.0f);
-    CHECK(g.karts[0].spin_t > 0.0f,
-          "holding the wheel over for a full second under power never "
-          "spun the car");
-    v_before_spin = g.karts[0].speed;
-    for (f = 0; f < 20; f++)
-        game_update(&g, in, 1.0f / 60.0f);
-    v_after_spin = g.karts[0].speed;
-    printf("missed oversteer: %.1f -> %.1f m/s through the spin, "
-           "slip %.2f\n", v_before_spin, v_after_spin, g.karts[0].slip);
-    CHECK(v_after_spin < v_before_spin - 3.0f,
-          "a spin did not cost real speed (%.1f -> %.1f)",
-          v_before_spin, v_after_spin);
-    CHECK(g.karts[0].slip > 0.9f, "a spinning car should read as fully "
-          "sliding, not %.2f", g.karts[0].slip);
+    h0 = g.karts[0].heading;
+    game_update(&g, in, 1.0f / 60.0f);
+    late_yaw = fabsf(game_angle_wrap(g.karts[0].heading - h0)) * 60.0f;
+
+    printf("held full lock: yaw rate %.3f rad/s at frame 1, %.3f rad/s "
+           "after 2 s, speed %.1f -> %.1f m/s\n",
+           early_yaw, late_yaw, v0, g.karts[0].speed);
+    CHECK(late_yaw < early_yaw * 1.15f,
+          "yaw rate grew under sustained full lock (%.3f -> %.3f) — this "
+          "is the escalating bonus the mechanic was supposed to lose",
+          early_yaw, late_yaw);
+    CHECK(g.karts[0].speed > v0 * 0.35f,
+          "speed collapsed under sustained understeer scrub alone (%.1f "
+          "-> %.1f) — that shape of loss belongs to the removed forced "
+          "spin, not ordinary scrub", v0, g.karts[0].speed);
+    CHECK(!isnan(g.karts[0].heading) && !isnan(g.karts[0].speed),
+          "held full lock produced a NaN");
 
     kart_specs_reset_defaults();
 }
 
-/* Gentle driving must never trip the oversteer mechanism — this is the
- * regression test for a first cut of the risk condition that compared
- * yaw_cmd against the grip cap directly, which broke down for
- * short-wheelbase cars (their yaw_cmd so outsizes their own cap that
- * "catching" it would have meant nearly releasing the wheel). Risk and
- * catch are both judged on the steering input instead, which means the
- * same 0.6 of lock means the same thing in any car. */
-static void test_oversteer_never_triggers_when_driving_gently(void)
+/*
+ * Gentle steering should read as essentially no slip at all — full grip,
+ * not a mechanism waiting to trip. Held at a fixed, moderate speed (no
+ * throttle): the point is to check steering alone, not to let two
+ * seconds of wide-open throttle carry a light, powerful car up to a
+ * speed where even a small wheel angle genuinely would ask for more
+ * lateral g than the tires have (yaw_cap falls with speed) — that is a
+ * real high-speed effect, not gentle-steering oversensitivity.
+ */
+static void test_gentle_steering_stays_gripped(void)
 {
     Game g;
     GameConfig cfg = default_cfg(TRACK_CLASSIC);
@@ -782,14 +623,57 @@ static void test_oversteer_never_triggers_when_driving_gently(void)
         g.state = STATE_RACING;
         idle_inputs(in);
         teleport(&g, &g.karts[0], 2, 20.0f);
-        in[0].accel = 1;
-        in[0].steer = 0.15f;
-        for (f = 0; f < 120; f++)
+        in[0].steer = 0.08f;
+        for (f = 0; f < 30; f++)
             game_update(&g, in, 1.0f / 60.0f);
-        CHECK(g.karts[0].oversteer_t <= 0.0f && g.karts[0].spin_t <= 0.0f,
-              "%s entered oversteer from gentle steering",
-              kart_specs[spec].name);
+        CHECK(g.karts[0].slip < 0.05f,
+              "%s picked up real slip from gentle steering alone (%.2f)",
+              kart_specs[spec].name, g.karts[0].slip);
     }
+}
+
+/*
+ * Drifting (the handbrake, hop) is the one deliberate way to break the
+ * rear loose on purpose: it should genuinely rotate the car faster than
+ * the same steering input would manage gripped, which is the whole point
+ * of it existing as a mechanic distinct from grip-limited cornering.
+ */
+static void test_drifting_rotates_faster_than_gripped_cornering(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    float h0, gripped_yaw, drift_yaw;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 12.0f);
+    in[0].steer = 1.0f;
+    h0 = g.karts[0].heading;
+    game_update(&g, in, 1.0f / 60.0f);
+    gripped_yaw = fabsf(game_angle_wrap(g.karts[0].heading - h0)) * 60.0f;
+    CHECK(g.karts[0].drifting == 0, "car started already marked drifting");
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 12.0f);
+    in[0].steer = 1.0f;
+    in[0].hop = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    CHECK(g.karts[0].drifting != 0,
+          "hop plus steering at speed did not engage the drift");
+    h0 = g.karts[0].heading;
+    game_update(&g, in, 1.0f / 60.0f);
+    drift_yaw = fabsf(game_angle_wrap(g.karts[0].heading - h0)) * 60.0f;
+
+    printf("cornering yaw rate: gripped %.3f rad/s, drifting %.3f rad/s\n",
+           gripped_yaw, drift_yaw);
+    CHECK(drift_yaw > gripped_yaw * 1.1f,
+          "drifting did not rotate the car faster than gripped cornering "
+          "at the same steering input (%.3f vs %.3f)",
+          drift_yaw, gripped_yaw);
 }
 
 /* The whole AI field must be able to finish a full race on every track,
@@ -1503,19 +1387,40 @@ static void test_no_rubber_banding(void)
 
 /* The gear power curve: bogging below the band, full in it, nothing at
  * the limiter (which is what stops a gear pulling past its top speed). */
+/*
+ * gear_power_scale_rpm peaks at nominal_frac (a stand-in for a real
+ * engine's power peak — see the KartSpec comment in game.h) and falls
+ * away the further off it you are, all the way down to a floor at
+ * idle (0) and at redline (1) — no flat "dead zone" at either end, but
+ * still enough at idle to actually launch the car, since a real idling
+ * engine is not making zero torque either. The limiter itself
+ * (rev_frac >= 1.0) is a genuine hard cliff, unlike either end of the
+ * curve leading up to it. 0.70 stands in for a nominal RPM comfortably
+ * inside redline (a car whose nominal_rpm is 70% of
+ * GameSettings.tacho_redline_rpm).
+ */
 static void test_gear_power_curve(void)
 {
-    printf("gear curve: bog %.2f  band %.2f  peak-out %.2f  limiter %.2f\n",
-           gear_power_scale(0.15f), gear_power_scale(0.70f),
-           gear_power_scale(0.97f), gear_power_scale(1.10f));
-    CHECK(gear_power_scale(0.15f) < 0.8f, "bogging is not penalised");
-    CHECK(gear_power_scale(0.70f) > 0.99f, "no full power in the band");
-    CHECK(gear_power_scale(0.97f) < 1.0f &&
-          gear_power_scale(0.97f) > 0.7f, "past-peak falloff wrong");
-    CHECK(gear_power_scale(1.10f) == 0.0f, "limiter still makes power");
-    /* monotonic through the bog region */
-    CHECK(gear_power_scale(0.05f) < gear_power_scale(0.25f),
-          "bog region not monotonic");
+    const float nom = 0.70f;
+
+    printf("gear curve at nominal_frac=0.70: idle %.2f  near %.2f  peak "
+           "%.2f  near-redline %.2f  limiter %.2f\n",
+           gear_power_scale_rpm(0.0f, nom), gear_power_scale_rpm(0.55f, nom),
+           gear_power_scale_rpm(nom, nom), gear_power_scale_rpm(0.99f, nom),
+           gear_power_scale_rpm(1.10f, nom));
+    CHECK(gear_power_scale_rpm(nom, nom) > 0.99f,
+          "no full power right at the nominal RPM");
+    CHECK(gear_power_scale_rpm(0.0f, nom) < 0.35f,
+          "idle is not down near the floor");
+    CHECK(gear_power_scale_rpm(0.99f, nom) < 0.35f,
+          "just under the limiter is not down near the floor");
+    CHECK(gear_power_scale_rpm(1.10f, nom) == 0.0f,
+          "the limiter still makes power");
+    /* monotonic falling away on both sides of the peak */
+    CHECK(gear_power_scale_rpm(0.55f, nom) > gear_power_scale_rpm(0.0f, nom),
+          "below-nominal falloff not monotonic");
+    CHECK(gear_power_scale_rpm(0.85f, nom) > gear_power_scale_rpm(0.99f, nom),
+          "above-nominal falloff not monotonic");
 }
 
 /* Every car must have a sane gearbox: rising ratios, and a top gear that
@@ -1639,6 +1544,12 @@ static void test_turbo_spool(void)
     Input in[MAX_HUMANS];
     float top, delta_high, delta_low, before, after;
     int f;
+
+    /* only a turbo actually spools (v1.25.0) — naturally aspirated and
+     * supercharged cars have their own, deliberately different power
+     * delivery, tested separately (test_aspiration_differences) */
+    kart_specs_reset_defaults();
+    kart_specs[cfg.spec[0]].aspiration = ASPIRATION_TURBO;
 
     cfg.gearbox[0] = GEARBOX_MANUAL;
 
@@ -1770,6 +1681,76 @@ static void test_turbo_spool(void)
               "throttle (%.2f braking alone vs %.2f with floor it)",
               brake_only_after, floor_it_after);
     }
+    kart_specs_reset_defaults();
+}
+
+/*
+ * NA makes no extra power at all; a turbo's bonus is the biggest of the
+ * three but only after it has spooled; a supercharger's is real but
+ * smaller, and — unlike a turbo — there the instant the revs are,
+ * with no lag either building up or bleeding off.
+ */
+static void test_aspiration_differences(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    float top;
+    float na_spool, turbo_spool_1f, sc_spool_1f, sc_spool_after_lift;
+
+    cfg.gearbox[0] = GEARBOX_MANUAL;
+    top = kart_specs[cfg.spec[0]].gear_top[2];
+
+    kart_specs_reset_defaults();
+    kart_specs[cfg.spec[0]].aspiration = ASPIRATION_NA;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].gear = 2;
+    teleport(&g, &g.karts[0], 2, top * 0.92f);
+    in[0].accel = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    na_spool = g.karts[0].turbo_spool;
+
+    kart_specs_reset_defaults();
+    kart_specs[cfg.spec[0]].aspiration = ASPIRATION_TURBO;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].gear = 2;
+    teleport(&g, &g.karts[0], 2, top * 0.92f);
+    in[0].accel = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    turbo_spool_1f = g.karts[0].turbo_spool;
+
+    kart_specs_reset_defaults();
+    kart_specs[cfg.spec[0]].aspiration = ASPIRATION_SUPERCHARGED;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].gear = 2;
+    teleport(&g, &g.karts[0], 2, top * 0.92f);
+    in[0].accel = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    sc_spool_1f = g.karts[0].turbo_spool;
+    in[0].accel = 0;
+    game_update(&g, in, 1.0f / 60.0f);
+    sc_spool_after_lift = g.karts[0].turbo_spool;
+
+    printf("aspiration after 1 frame on the gas near redline: NA %.3f, "
+           "turbo %.3f, supercharged %.3f (supercharged drops to %.3f "
+           "the instant off the gas)\n", na_spool, turbo_spool_1f,
+           sc_spool_1f, sc_spool_after_lift);
+    CHECK(na_spool == 0.0f, "naturally aspirated made boost anyway");
+    CHECK(sc_spool_1f > turbo_spool_1f,
+          "a supercharger did not spool instantly (%.3f) compared to a "
+          "turbo's real lag (%.3f) after the same single frame",
+          sc_spool_1f, turbo_spool_1f);
+    CHECK(sc_spool_after_lift == 0.0f,
+          "a supercharger's boost did not drop the instant off the gas "
+          "(%.3f)", sc_spool_after_lift);
+
+    kart_specs_reset_defaults();
 }
 
 /* A gear caps speed: in first, with a manual box, the car cannot pull
@@ -2810,7 +2791,7 @@ static void test_compiled_roster_matches_cars_json(void)
 /*
  * The in-game car designer's data model (game.c): kart_specs_add_custom
  * validates, rejects a name collision or an over-full garage, fills in
- * default shift points, and appends to the live roster.
+ * a default nominal RPM, and appends to the live roster.
  */
 static void test_car_designer_add_custom(void)
 {
@@ -2845,9 +2826,8 @@ static void test_car_designer_add_custom(void)
     CHECK(strcmp(kart_specs[idx].name, "TESTCAR") == 0 &&
           fabsf(kart_specs[idx].power_hp - 300.0f) < 0.01f,
           "the added car's own fields did not stick");
-    CHECK(kart_specs[idx].auto_up[0] > 0.0f &&
-          kart_specs[idx].auto_down[0] > 0.0f,
-          "the added car has no shift points filled in");
+    CHECK(kart_specs[idx].nominal_rpm > 0.0f,
+          "the added car has no nominal RPM filled in");
 
     /* a second car under the same name is a duplicate, not a rename */
     idx = kart_specs_add_custom(&car, error, (int)sizeof(error));
@@ -2891,11 +2871,11 @@ static void test_car_designer_add_custom(void)
 
 /*
  * The save half: config_write_cars_text has to be the exact inverse of
- * config_load_cars_text, including for the two shipped cars (FORMULA,
- * TRUCK) whose shift points are deliberately tuned away from the
- * compiled default — a save that quietly flattened those back to
- * default would be a real, silent handling change, not just a cosmetic
- * JSON diff.
+ * config_load_cars_text, including for the shipped cars (FORMULA,
+ * TRUCK, MUSCLE) whose nominal RPM and/or aspiration are deliberately
+ * tuned away from the compiled default — a save that quietly flattened
+ * those back to default would be a real, silent handling change, not
+ * just a cosmetic JSON diff.
  */
 static void test_car_designer_save_round_trips(void)
 {
@@ -2967,11 +2947,11 @@ static void test_car_designer_save_round_trips(void)
               "%s did not round-trip its drivetrain (%d/%.2f vs %d/%.2f)",
               b->name, b->drivetrain, b->awd_front_bias, a->drivetrain,
               a->awd_front_bias);
-        CHECK(fabsf(b->auto_up[0] - a->auto_up[0]) < 0.001f &&
-              fabsf(b->auto_down[0] - a->auto_down[0]) < 0.001f,
-              "%s did not round-trip its shift points (%.2f/%.2f -> "
-              "%.2f/%.2f)", b->name, b->auto_up[0], b->auto_down[0],
-              a->auto_up[0], a->auto_down[0]);
+        CHECK(fabsf(b->nominal_rpm - a->nominal_rpm) < 0.5f &&
+              b->aspiration == a->aspiration,
+              "%s did not round-trip its nominal RPM/aspiration "
+              "(%.0f/%d -> %.0f/%d)", b->name, b->nominal_rpm,
+              b->aspiration, a->nominal_rpm, a->aspiration);
         CHECK(b->n_gears == a->n_gears, "%s: gear count changed (%d -> %d)",
               b->name, b->n_gears, a->n_gears);
         for (g = 0; g < b->n_gears && g < a->n_gears; g++)
@@ -3461,42 +3441,48 @@ static void test_grade_costs_grip(void)
           steep_stop, flat_stop);
 }
 
-/* A car can bring its own automatic shift points, per car or per gear. */
-static void test_car_shift_points(void)
+/*
+ * A car can bring its own nominal RPM and aspiration. Shift points are
+ * no longer a separate dial (v1.25.0) — they follow straight from
+ * nominal RPM in kart_step, so the thing to test is that a lower
+ * nominal RPM genuinely shifts sooner, and that both fields parse (and
+ * reject nonsense) the way every other car field does.
+ */
+static void test_car_nominal_rpm_and_aspiration(void)
 {
     char error[128];
-    const char *early =
-        "{\"cars\":[{\"name\":\"SHORTY\",\"mass_kg\":900,"
+    const char *low_rpm =
+        "{\"cars\":[{\"name\":\"LOWREV\",\"mass_kg\":900,"
         "\"power_hp\":150,\"brake_distance_100_kph_m\":38,"
         "\"lateral_grip_g\":0.95,\"drag_area_m2\":0.66,"
         "\"wheelbase_m\":2.4,\"offroad_grip\":0.45,"
         "\"gear_top_speeds_kph\":[47,79,119,162],"
-        "\"automatic_upshift_fraction\":0.62,"
-        "\"automatic_downshift_fraction\":0.30}]}";
-    const char *per_gear =
-        "{\"cars\":[{\"name\":\"STAGED\",\"mass_kg\":900,"
+        "\"nominal_rpm\":2200}]}";
+    const char *turbo_car =
+        "{\"cars\":[{\"name\":\"BOOSTED\",\"mass_kg\":900,"
         "\"power_hp\":150,\"brake_distance_100_kph_m\":38,"
         "\"lateral_grip_g\":0.95,\"drag_area_m2\":0.66,"
         "\"wheelbase_m\":2.4,\"offroad_grip\":0.45,"
         "\"gear_top_speeds_kph\":[47,79,119,162],"
-        "\"automatic_upshift_per_gear\":[0.70,0.85,0.95,0.99]}]}";
-    const char *hunting =
-        "{\"cars\":[{\"name\":\"HUNTER\",\"mass_kg\":900,"
+        "\"aspiration\":\"turbo\"}]}";
+    const char *bad_aspiration =
+        "{\"cars\":[{\"name\":\"BAD\",\"mass_kg\":900,"
         "\"power_hp\":150,\"brake_distance_100_kph_m\":38,"
         "\"lateral_grip_g\":0.95,\"drag_area_m2\":0.66,"
         "\"wheelbase_m\":2.4,\"offroad_grip\":0.45,"
         "\"gear_top_speeds_kph\":[47,79,119,162],"
-        "\"automatic_upshift_fraction\":0.50,"
-        "\"automatic_downshift_fraction\":0.45}]}";
-    int shifts_default, shifts_early;
+        "\"aspiration\":\"diesel\"}]}";
+    int shifts_default, shifts_low;
     int variant;
 
-    /* the shipped cars keep the standard points */
+    /* the shipped cars keep the standard nominal RPM unless tuned away
+     * from it (RALLY, BUGGY, TRUCK, FORMULA, MUSCLE, STOCKER, SLIPSTREAM
+     * — see default_kart_specs) */
     kart_specs_reset_defaults();
-    CHECK(fabsf(kart_specs[1].auto_up[0] - AUTO_UP_FRAC) < 0.001f,
-          "a built-in car lost its default upshift point");
+    CHECK(fabsf(kart_specs[1].nominal_rpm - DEFAULT_NOMINAL_RPM) < 0.5f,
+          "a built-in car lost its default nominal RPM");
 
-    /* a car that shifts at 62% of each gear must use more gears sooner */
+    /* a car whose engine peaks at a much lower RPM shifts sooner */
     for (variant = 0; variant < 2; variant++) {
         Game g;
         GameConfig cfg;
@@ -3505,8 +3491,8 @@ static void test_car_shift_points(void)
 
         kart_specs_reset_defaults();
         if (variant == 1)
-            CHECK(config_load_cars_text(early, error, (int)sizeof(error)),
-                  "an early-shifting car was rejected: %s", error);
+            CHECK(config_load_cars_text(low_rpm, error, (int)sizeof(error)),
+                  "a low-nominal-RPM car was rejected: %s", error);
         cfg = default_cfg(TRACK_CLASSIC);
         cfg.spec[0] = variant == 1 ? 0 : 1;
         game_init(&g, &cfg);
@@ -3518,29 +3504,25 @@ static void test_car_shift_points(void)
             game_update(&g, in, 1.0f / 60.0f);
             if (g.karts[0].gear != last) { changes++; last = g.karts[0].gear; }
         }
-        if (variant == 0) shifts_default = changes; else shifts_early = changes;
+        if (variant == 0) shifts_default = changes; else shifts_low = changes;
     }
-    printf("shift points: %d changes in 20 s with the standard box, "
-           "%d with one set to 62%%\n", shifts_default, shifts_early);
-    CHECK(shifts_early >= shifts_default,
-          "an early-shifting car changed gear less often (%d vs %d)",
-          shifts_early, shifts_default);
+    printf("nominal RPM: %d changes in 20 s with the standard engine, "
+           "%d with nominal RPM at 2200\n", shifts_default, shifts_low);
+    CHECK(shifts_low >= shifts_default,
+          "a low-nominal-RPM car changed gear less often (%d vs %d)",
+          shifts_low, shifts_default);
 
-    /* per-gear points load and land where they were put */
+    /* aspiration parses, and rejects a value that is not one of the
+     * three real ones */
     kart_specs_reset_defaults();
-    CHECK(config_load_cars_text(per_gear, error, (int)sizeof(error)),
-          "per-gear shift points were rejected: %s", error);
-    CHECK(fabsf(kart_specs[0].auto_up[0] - 0.70f) < 0.001f &&
-          fabsf(kart_specs[0].auto_up[3] - 0.99f) < 0.001f,
-          "per-gear shift points did not land (%.2f, %.2f)",
-          kart_specs[0].auto_up[0], kart_specs[0].auto_up[3]);
-    CHECK(fabsf(kart_specs[0].auto_down[0] - AUTO_DOWN_FRAC) < 0.001f,
-          "setting upshifts clobbered the downshifts");
+    CHECK(config_load_cars_text(turbo_car, error, (int)sizeof(error)),
+          "a turbo car was rejected: %s", error);
+    CHECK(kart_specs[0].aspiration == ASPIRATION_TURBO,
+          "aspiration \"turbo\" did not land");
 
-    /* points close enough to hunt are refused, and nothing is applied */
     kart_specs_reset_defaults();
-    CHECK(!config_load_cars_text(hunting, error, (int)sizeof(error)),
-          "a gearbox that would hunt was accepted");
+    CHECK(!config_load_cars_text(bad_aspiration, error, (int)sizeof(error)),
+          "an unknown aspiration was accepted");
     CHECK(kart_spec_count == DEFAULT_SPEC_COUNT,
           "a rejected car file was applied anyway");
 }
@@ -3639,8 +3621,10 @@ static void test_editing_cars_json_changes_the_car(void)
 /*
  * The slowing-down lap. Crossing the line takes the car away from the
  * player, so a stand-in driver has to bring it home: down the road, over
- * to the side, to a stop — without going over the edge of an unguarded
- * pass, and without selecting reverse and driving back into the field.
+ * to the side, settled into a steady COOLDOWN_CRUISE_MPS cruise it holds
+ * indefinitely rather than a dead stop — without going over the edge of
+ * an unguarded pass, and without selecting reverse and driving back into
+ * the field.
  */
 static void test_cooldown_driver_brings_the_car_home(void)
 {
@@ -3696,9 +3680,10 @@ static void test_cooldown_driver_brings_the_car_home(void)
               track_name(tracks[ti]), k->falls);
         CHECK(!reversed, "%s: the finished car drove backwards",
               track_name(tracks[ti]));
-        CHECK(fabsf(k->speed) < 1.5f,
-              "%s: the finished car was still doing %.1f km/h after 30 s",
-              track_name(tracks[ti]), k->speed * 3.6f);
+        CHECK(fabsf(k->speed - COOLDOWN_CRUISE_MPS) < 3.0f,
+              "%s: the finished car was not holding its cruise after 30 s "
+              "(%.1f km/h, wanted close to %.1f)", track_name(tracks[ti]),
+              k->speed * 3.6f, COOLDOWN_CRUISE_MPS * 3.6f);
         CHECK(fastest_after <= v_flag + 1.0f,
               "%s: the finished car sped up after the flag (%.1f from %.1f)",
               track_name(tracks[ti]), fastest_after, v_flag);
@@ -5119,13 +5104,12 @@ int main(void)
     test_cornering_grip_cap();
     test_drivetrain_traction();
     test_drivetrain_cornering_balance();
-    test_awd_needs_more_torque_commitment_than_rwd();
-    test_high_speed_alone_can_provoke_a_spin();
     test_drivetrain_json_parsing();
     test_gear_power_curve();
     test_gearboxes_sane();
     test_shifting();
     test_turbo_spool();
+    test_aspiration_differences();
     test_gear_limits_speed();
     test_tire_compounds();
     test_weather_only_on_classic();
@@ -5149,8 +5133,9 @@ int main(void)
     test_berthoud2_keeps_its_switchbacks();
     test_full_grid_fits();
     test_understeer_scrub_is_progressive();
-    test_oversteer_rewards_a_catch_and_punishes_a_miss();
-    test_oversteer_never_triggers_when_driving_gently();
+    test_holding_full_lock_does_not_escalate_or_force_a_spin();
+    test_gentle_steering_stays_gripped();
+    test_drifting_rotates_faster_than_gripped_cornering();
     test_ai_races_all_tracks();
     test_full_race_classic();
     test_yolo_strategy_is_the_wildest();
@@ -5174,7 +5159,7 @@ int main(void)
     test_editing_cars_json_changes_the_car();
     test_grade_costs_speed();
     test_grade_costs_grip();
-    test_car_shift_points();
+    test_car_nominal_rpm_and_aspiration();
     test_new_passes();
     test_variable_road_width();
     test_narrow_sections_bite();

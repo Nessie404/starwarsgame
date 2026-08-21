@@ -55,27 +55,34 @@ static const KartSpec default_kart_specs[DEFAULT_SPEC_COUNT] = {
     { "SPORT",   950.f, 150.f, 37.f, 1.19f, 0.66f, 2.45f,   0.45f, DRIVETRAIN_RWD, 0.5f,
       5, { 13.000f, 22.000f, 33.000f, 45.000f, 60.000f } },
     { "RALLY",  1180.f, 220.f, 40.f, 1.10f, 0.70f, 2.60f,   0.72f, DRIVETRAIN_AWD, 0.40f,
-      6, { 12.000f, 20.000f, 29.000f, 40.000f, 53.000f, 67.000f } },
+      6, { 12.000f, 20.000f, 29.000f, 40.000f, 53.000f, 67.000f },
+      6200.0f, ASPIRATION_TURBO },
     { "TOURER", 1350.f, 310.f, 34.f, 1.28f, 0.60f, 2.70f,   0.35f, DRIVETRAIN_AWD, 0.50f,
       6, { 15.000f, 25.000f, 37.000f, 50.000f, 64.000f, 79.000f } },
     { "RUBY",   1080.f, 310.f, 33.f, 1.25f, 0.58f, 2.55f,   0.40f, DRIVETRAIN_FWD, 0.5f,
       6, { 10.556f, 17.583f, 26.028f, 35.167f, 45.000f, 55.556f } },
     { "BUGGY",   620.f,  95.f, 32.f, 1.44f, 0.55f, 2.20f,   0.85f, DRIVETRAIN_AWD, 0.45f,
-      4, { 11.111f, 19.444f, 29.167f, 40.278f } },
+      4, { 11.111f, 19.444f, 29.167f, 40.278f },
+      6500.0f, ASPIRATION_TURBO },
     { "WAGON",  1550.f, 190.f, 42.f, 1.06f, 0.72f, 2.75f,   0.40f, DRIVETRAIN_FWD, 0.5f,
       5, { 12.500f, 21.667f, 31.944f, 43.056f, 54.167f } },
     { "FORMULA", 720.f, 260.f, 28.f, 1.81f, 0.55f, 2.90f,   0.10f, DRIVETRAIN_RWD, 0.5f,
-      6, { 15.278f, 26.389f, 38.889f, 51.389f, 63.889f, 75.000f } },
+      6, { 15.278f, 26.389f, 38.889f, 51.389f, 63.889f, 75.000f },
+      7200.0f, ASPIRATION_NA },
     { "TRUCK",  2100.f, 280.f, 48.f, 0.88f, 0.85f, 3.10f,   0.78f, DRIVETRAIN_AWD, 0.35f,
-      5, { 11.667f, 19.444f, 27.778f, 36.111f, 45.833f } },
+      5, { 11.667f, 19.444f, 27.778f, 36.111f, 45.833f },
+      3400.0f, ASPIRATION_TURBO },
     { "HERITAGE", 890.f, 85.f, 45.f, 0.94f, 0.58f, 2.35f,   0.35f, DRIVETRAIN_RWD, 0.5f,
       4, { 10.556f, 18.056f, 26.389f, 34.722f } },
     { "MUSCLE", 1620.f, 420.f, 40.f, 1.00f, 0.68f, 2.85f,   0.30f, DRIVETRAIN_RWD, 0.5f,
-      5, { 16.111f, 27.222f, 40.278f, 54.167f, 69.444f } },
+      5, { 16.111f, 27.222f, 40.278f, 54.167f, 69.444f },
+      5200.0f, ASPIRATION_SUPERCHARGED },
     { "STOCKER", 1560.f, 540.f, 36.f, 1.38f, 0.56f, 2.80f, 0.15f, DRIVETRAIN_RWD, 0.5f,
-      5, { 19.444f, 33.333f, 48.611f, 65.278f, 83.333f } },
+      5, { 19.444f, 33.333f, 48.611f, 65.278f, 83.333f },
+      6000.0f, ASPIRATION_NA },
     { "SLIPSTREAM", 1500.f, 550.f, 38.f, 1.28f, 0.50f, 2.85f, 0.15f, DRIVETRAIN_RWD, 0.5f,
-      5, { 20.000f, 33.889f, 50.000f, 67.222f, 86.111f } },
+      5, { 20.000f, 33.889f, 50.000f, 67.222f, 86.111f },
+      6000.0f, ASPIRATION_NA },
 };
 
 /*
@@ -90,43 +97,49 @@ KartSpec kart_specs[MAX_KART_SPECS] = {
     { "SPORT",   950.f, 150.f, 37.f, 1.19f, 0.66f, 2.45f,   0.45f, DRIVETRAIN_RWD, 0.5f,
       5, { 13.000f, 22.000f, 33.000f, 45.000f, 60.000f } },
     { "RALLY",  1180.f, 220.f, 40.f, 1.10f, 0.70f, 2.60f,   0.72f, DRIVETRAIN_AWD, 0.40f,
-      6, { 12.000f, 20.000f, 29.000f, 40.000f, 53.000f, 67.000f } },
+      6, { 12.000f, 20.000f, 29.000f, 40.000f, 53.000f, 67.000f },
+      6200.0f, ASPIRATION_TURBO },
     { "TOURER", 1350.f, 310.f, 34.f, 1.28f, 0.60f, 2.70f,   0.35f, DRIVETRAIN_AWD, 0.50f,
       6, { 15.000f, 25.000f, 37.000f, 50.000f, 64.000f, 79.000f } },
     { "RUBY",   1080.f, 310.f, 33.f, 1.25f, 0.58f, 2.55f,   0.40f, DRIVETRAIN_FWD, 0.5f,
       6, { 10.556f, 17.583f, 26.028f, 35.167f, 45.000f, 55.556f } },
     { "BUGGY",   620.f,  95.f, 32.f, 1.44f, 0.55f, 2.20f,   0.85f, DRIVETRAIN_AWD, 0.45f,
-      4, { 11.111f, 19.444f, 29.167f, 40.278f } },
+      4, { 11.111f, 19.444f, 29.167f, 40.278f },
+      6500.0f, ASPIRATION_TURBO },
     { "WAGON",  1550.f, 190.f, 42.f, 1.06f, 0.72f, 2.75f,   0.40f, DRIVETRAIN_FWD, 0.5f,
       5, { 12.500f, 21.667f, 31.944f, 43.056f, 54.167f } },
     { "FORMULA", 720.f, 260.f, 28.f, 1.81f, 0.55f, 2.90f,   0.10f, DRIVETRAIN_RWD, 0.5f,
-      6, { 15.278f, 26.389f, 38.889f, 51.389f, 63.889f, 75.000f } },
+      6, { 15.278f, 26.389f, 38.889f, 51.389f, 63.889f, 75.000f },
+      7200.0f, ASPIRATION_NA },
     { "TRUCK",  2100.f, 280.f, 48.f, 0.88f, 0.85f, 3.10f,   0.78f, DRIVETRAIN_AWD, 0.35f,
-      5, { 11.667f, 19.444f, 27.778f, 36.111f, 45.833f } },
+      5, { 11.667f, 19.444f, 27.778f, 36.111f, 45.833f },
+      3400.0f, ASPIRATION_TURBO },
     { "HERITAGE", 890.f, 85.f, 45.f, 0.94f, 0.58f, 2.35f,   0.35f, DRIVETRAIN_RWD, 0.5f,
       4, { 10.556f, 18.056f, 26.389f, 34.722f } },
     { "MUSCLE", 1620.f, 420.f, 40.f, 1.00f, 0.68f, 2.85f,   0.30f, DRIVETRAIN_RWD, 0.5f,
-      5, { 16.111f, 27.222f, 40.278f, 54.167f, 69.444f } },
+      5, { 16.111f, 27.222f, 40.278f, 54.167f, 69.444f },
+      5200.0f, ASPIRATION_SUPERCHARGED },
     { "STOCKER", 1560.f, 540.f, 36.f, 1.38f, 0.56f, 2.80f, 0.15f, DRIVETRAIN_RWD, 0.5f,
-      5, { 19.444f, 33.333f, 48.611f, 65.278f, 83.333f } },
+      5, { 19.444f, 33.333f, 48.611f, 65.278f, 83.333f },
+      6000.0f, ASPIRATION_NA },
     { "SLIPSTREAM", 1500.f, 550.f, 38.f, 1.28f, 0.50f, 2.85f, 0.15f, DRIVETRAIN_RWD, 0.5f,
-      5, { 20.000f, 33.889f, 50.000f, 67.222f, 86.111f } },
+      5, { 20.000f, 33.889f, 50.000f, 67.222f, 86.111f },
+      6000.0f, ASPIRATION_NA },
 };
 
 int kart_spec_count = DEFAULT_SPEC_COUNT;
 
 /*
- * A car that says nothing about its automatic box gets the standard shift
- * points in every gear. Called for the built-ins and for any car loaded
- * from cars.json before its own numbers are read over the top.
+ * A car that says nothing about its own engine character gets a middling
+ * naturally-aspirated peak-power RPM. Called for the built-ins and for
+ * any car loaded from cars.json before its own numbers are read over
+ * the top (aspiration needs no equivalent fill-in: 0 is already the
+ * naturally-aspirated default).
  */
-void kart_spec_default_shifts(KartSpec *s)
+void kart_spec_default_gearing(KartSpec *s)
 {
-    int g;
-    for (g = 0; g < MAX_GEARS; g++) {
-        if (!(s->auto_up[g] > 0.0f))   s->auto_up[g] = AUTO_UP_FRAC;
-        if (!(s->auto_down[g] > 0.0f)) s->auto_down[g] = AUTO_DOWN_FRAC;
-    }
+    if (!(s->nominal_rpm > 0.0f))
+        s->nominal_rpm = DEFAULT_NOMINAL_RPM;
 }
 
 void kart_specs_reset_defaults(void)
@@ -135,7 +148,7 @@ void kart_specs_reset_defaults(void)
     memset(kart_specs, 0, sizeof(kart_specs));
     memcpy(kart_specs, default_kart_specs, sizeof(default_kart_specs));
     for (i = 0; i < MAX_KART_SPECS; i++)
-        kart_spec_default_shifts(&kart_specs[i]);
+        kart_spec_default_gearing(&kart_specs[i]);
     kart_spec_count = DEFAULT_SPEC_COUNT;
 }
 
@@ -192,24 +205,19 @@ int kart_spec_validate(const KartSpec *s, char *error, int error_cap)
             (g > 0 && s->gear_top[g] <= s->gear_top[g - 1]))
             return kart_spec_error(error, error_cap, "BAD GEAR SPEEDS");
     }
-    for (g = 0; g < s->n_gears; g++) {
-        if (s->auto_up[g] < 0.30f || s->auto_up[g] > 1.20f)
-            return kart_spec_error(error, error_cap, "BAD UPSHIFT POINT");
-        if (s->auto_down[g] < 0.05f || s->auto_down[g] > 0.90f)
-            return kart_spec_error(error, error_cap, "BAD DOWNSHIFT POINT");
-        /* an upshift that lands on the same car's downshift point is how
-         * a gearbox ends up hunting, so the two have to stay apart */
-        if (s->auto_up[g] - s->auto_down[g] < 0.20f)
-            return kart_spec_error(error, error_cap, "SHIFT POINTS TOO CLOSE");
-    }
+    if (s->nominal_rpm < 1500.0f || s->nominal_rpm > 9500.0f)
+        return kart_spec_error(error, error_cap, "BAD NOMINAL RPM");
+    if (s->aspiration != ASPIRATION_NA && s->aspiration != ASPIRATION_TURBO &&
+        s->aspiration != ASPIRATION_SUPERCHARGED)
+        return kart_spec_error(error, error_cap, "BAD ASPIRATION");
     return 1;
 }
 
 /*
  * Add one car to the live roster — the in-game car designer's save
  * step. Validates, rejects a name collision with anything already in
- * the garage (case-sensitive, same as cars.json), fills in default
- * shift points if the caller left them at zero, and returns the new
+ * the garage (case-sensitive, same as cars.json), fills in a default
+ * nominal RPM if the caller left it at zero, and returns the new
  * car's index into kart_specs[] (so a caller can select it
  * immediately), or -1 if it didn't fit. Does not touch disk — see
  * config_save_cars_file for persisting the roster this now includes.
@@ -219,13 +227,14 @@ int kart_specs_add_custom(const KartSpec *s, char *error, int error_cap)
     KartSpec candidate;
     int i;
 
-    /* fill in any shift point the caller left at zero before validating
-     * — the same order config.c's JSON loader uses (read_shift_points
-     * calls kart_spec_default_shifts before valid_car ever runs), so a
-     * caller that only sets the stats a designer actually exposes does
-     * not get rejected over fields it was never asked to fill in */
+    /* fill in nominal_rpm if the caller left it at zero before
+     * validating — the same order config.c's JSON loader uses
+     * (read_gearing calls kart_spec_default_gearing before
+     * kart_spec_validate ever runs), so a caller that only sets the
+     * stats a designer actually exposes does not get rejected over a
+     * field it was never asked to fill in */
     candidate = *s;
-    kart_spec_default_shifts(&candidate);
+    kart_spec_default_gearing(&candidate);
     if (!kart_spec_validate(&candidate, error, error_cap))
         return -1;
     for (i = 0; i < kart_spec_count; i++) {
@@ -261,7 +270,6 @@ void game_settings_defaults(GameSettings *s)
     s->rolling_resistance = DEFAULT_CRR;
     s->drivetrain_efficiency = DEFAULT_DRIVE;
     s->shift_seconds = SHIFT_TIME;
-    s->bog_fraction = BOG_FRACTION;
     s->steer_rate_on = 2.6f;
     s->steer_rate_center = 6.0f;
     s->steer_speed_fade = 0.035f;
@@ -323,13 +331,6 @@ void game_settings_defaults(GameSettings *s)
     s->turbo_max_power_bonus = 0.35f;
     s->understeer_scrub = 0.22f;
     s->understeer_scrub_curve = 0.60f;
-    s->oversteer_grow_rate = 1.00f;
-    s->oversteer_max_bonus = 0.40f;
-    s->oversteer_catch_decay = 2.5f;
-    s->oversteer_spin_seconds = 1.0f;
-    s->spin_seconds = 0.6f;
-    s->spin_yaw_mult = 4.0f;
-    s->spin_speed_loss = 1.0f;
     s->ai_skill_mult = 1.06f;
     s->ai_brake_mult = 0.76f;
     s->ai_unguarded_line_room = 0.72f;
@@ -406,7 +407,6 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
     FINITE_RANGE(s->rolling_resistance, 0.0f, 0.10f, "BAD ROLLING DRAG");
     FINITE_RANGE(s->drivetrain_efficiency, 0.20f, 1.0f, "BAD DRIVE EFF");
     FINITE_RANGE(s->shift_seconds, 0.02f, 2.0f, "BAD SHIFT TIME");
-    FINITE_RANGE(s->bog_fraction, 0.05f, 0.75f, "BAD BOG POINT");
     FINITE_RANGE(s->steer_rate_on, 0.2f, 20.0f, "BAD STEER RATE");
     FINITE_RANGE(s->steer_rate_center, 0.2f, 30.0f, "BAD CENTER RATE");
     FINITE_RANGE(s->steer_speed_fade, 0.0f, 0.5f, "BAD SPEED FADE");
@@ -444,13 +444,6 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
     FINITE_RANGE(s->turbo_max_power_bonus, 0.0f, 2.0f, "BAD TURBO BONUS");
     FINITE_RANGE(s->understeer_scrub, 0.0f, 3.0f, "BAD UNDERSTEER SCRUB");
     FINITE_RANGE(s->understeer_scrub_curve, 0.0f, 5.0f, "BAD UNDERSTEER CURVE");
-    FINITE_RANGE(s->oversteer_grow_rate, 0.0f, 10.0f, "BAD OVERSTEER GROWTH");
-    FINITE_RANGE(s->oversteer_max_bonus, 0.0f, 3.0f, "BAD OVERSTEER BONUS");
-    FINITE_RANGE(s->oversteer_catch_decay, 0.0f, 20.0f, "BAD OVERSTEER DECAY");
-    FINITE_RANGE(s->oversteer_spin_seconds, 0.05f, 10.0f, "BAD OVERSTEER TIMER");
-    FINITE_RANGE(s->spin_seconds, 0.05f, 10.0f, "BAD SPIN TIMER");
-    FINITE_RANGE(s->spin_yaw_mult, 0.0f, 20.0f, "BAD SPIN YAW");
-    FINITE_RANGE(s->spin_speed_loss, 0.0f, 5.0f, "BAD SPIN SPEED LOSS");
     FINITE_RANGE(s->grade_gravity_mult, 0.0f, 3.0f, "BAD GRADE GRAUITY");
     FINITE_RANGE(s->grade_load_effect, 0.0f, 1.0f, "BAD GRADE LOAD");
     FINITE_RANGE(s->tacho_idle_rpm, 0.0f, 20000.0f, "BAD IDLE RPM");
@@ -506,42 +499,53 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
 }
 
 /*
- * Where you are in a gear matters. Below the torque band the engine bogs,
- * the middle of the band is where the power is, and past peak revs output
- * tails off until the limiter cuts it entirely — which is what stops a
- * gear from pulling past its top speed.
+ * Where you are in a gear matters, same as real RPM does: an engine
+ * makes its rated power at one nominal RPM (nominal_frac, the same
+ * fraction-of-redline units as rev_frac itself — see the KartSpec
+ * comment in game.h) and falls away sharply to either side of it — a
+ * highly strung engine punishes wandering off its peak far more than a
+ * lazy, torquey one would, which is why the falloff is steep rather
+ * than a gentle ramp. The redline itself (rev_frac >= 1.0) is a hard
+ * wall, same as it always was — that is what stops a gear from pulling
+ * past its own top speed.
  */
-float gear_power_scale(float frac)
+float gear_power_scale_rpm(float rev_frac, float nominal_frac)
 {
-    if (frac < 0.0f)
-        frac = 0.0f;
-    if (frac < BOG_FRACTION)
-        return 0.45f + 1.6f * frac;          /* bogging: 0.45 .. 0.99   */
-    if (frac <= 0.92f)
-        return 1.0f;                          /* in the band            */
-    if (frac <= 1.0f)
-        return 1.0f - 2.4f * (frac - 0.92f);  /* past peak revs         */
-    return 0.0f;                              /* on the limiter         */
-}
+    const float FLOOR = 0.22f;   /* still enough to launch and to limp
+                                  * home well off the power peak — a
+                                  * real idling engine is not actually
+                                  * making zero torque either */
+    float d, width, x, peak;
 
-static float gear_power_scale_with_settings(float frac,
-                                            const GameSettings *settings)
-{
-    float bog = settings->bog_fraction;
-    if (frac < 0.0f)
-        frac = 0.0f;
-    if (frac < bog)
-        return 0.45f + 0.54f * (frac / bog);
-    if (frac <= 0.92f)
-        return 1.0f;
-    if (frac <= 1.0f)
-        return 1.0f - 2.4f * (frac - 0.92f);
-    return 0.0f;
+    if (rev_frac >= 1.0f)
+        return 0.0f;                          /* bounced off the limiter */
+    if (nominal_frac < 0.05f) nominal_frac = 0.05f;
+    if (nominal_frac > 0.95f) nominal_frac = 0.95f;
+    d = rev_frac - nominal_frac;
+    /* a full parabola spanning nominal_frac's whole distance to idle (0)
+     * or to redline (1) on whichever side rev_frac falls — smooth and
+     * continuously falling away the further off nominal you are, no
+     * flat "dead zone", but still down at FLOOR by the time you reach
+     * either end, and a hard cliff at the limiter itself */
+    width = (d >= 0.0f) ? (1.0f - nominal_frac) : nominal_frac;
+    x = d / width;
+    peak = 1.0f - x * x;
+    if (peak < 0.0f) peak = 0.0f;
+    return FLOOR + (1.0f - FLOOR) * peak;
 }
 
 const char *gearbox_name(int mode)
 {
     return (mode == GEARBOX_MANUAL) ? "SHIFT" : "AUTO";
+}
+
+const char *aspiration_name(int aspiration)
+{
+    switch (aspiration) {
+    case ASPIRATION_TURBO:        return "TURBO";
+    case ASPIRATION_SUPERCHARGED: return "SUPERCHARGED";
+    default:                      return "N/A";
+    }
 }
 
 const char *tire_name(int compound)
@@ -1237,12 +1241,12 @@ void game_init(Game *g, const GameConfig *cfg)
 
     /*
      * Any car that never went through the JSON loader — the compiled-in
-     * roster, or one an older config left half-filled — still needs shift
-     * points. Zero would mean "upshift immediately", which puts the car in
-     * top gear at walking pace and leaves it bogged there.
+     * roster, or one an older config left half-filled — still needs a
+     * nominal RPM. Zero would put the power peak at idle, souring the
+     * whole curve toward a permanent, precipitous bog.
      */
     for (i = 0; i < MAX_KART_SPECS; i++)
-        kart_spec_default_shifts(&kart_specs[i]);
+        kart_spec_default_gearing(&kart_specs[i]);
 
     track_init_with_settings(&g->track, cfg->track_id, &g->settings);
     /* a lap count chosen in the menu beats both the difficulty preset's
@@ -1693,6 +1697,7 @@ static void ai_control(const Game *g, Kart *k, Input *in, float dt)
      */
     if (k->shift_t <= 0.0f) {
         const KartSpec *sp = &kart_specs[k->spec];
+        float nominal_frac = sp->nominal_rpm / g->settings.tacho_redline_rpm;
         float next_frac = (k->gear + 1 < sp->n_gears)
                               ? v / sp->gear_top[k->gear + 1] : 0.0f;
         float low_frac = (k->gear > 0)
@@ -1704,11 +1709,14 @@ static void ai_control(const Game *g, Kart *k, Input *in, float dt)
          * 1.6, so a short-shifter changing up at 0.87 of the band lands
          * near 0.52 — and if that is below its downshift point it changes
          * straight back, for ever. Requiring a margin on both sides is
-         * what stops the box oscillating.
+         * what stops the box oscillating. The "won't bog" check reads
+         * the car's own engine curve directly (gear_power_scale_rpm)
+         * rather than a fixed fraction, since how far below nominal_frac
+         * really hurts depends on the same curve the engine itself uses.
          */
         if (k->rev_frac > st->shift_up_frac && k->gear < sp->n_gears - 1 &&
             next_frac > st->shift_down_frac + 0.06f &&
-            next_frac > g->settings.bog_fraction + 0.04f) {
+            gear_power_scale_rpm(next_frac, nominal_frac) > 0.25f) {
             in->gear_up = 1;
         } else if (k->gear > 0 && low_frac < st->shift_up_frac - 0.06f &&
                    (k->rev_frac < st->shift_down_frac ||
@@ -1860,13 +1868,13 @@ static float ai_power_scale(const Game *g, const Kart *k)
  * to drive it: left to itself it coasts in a straight line, and on an
  * unguarded pass a straight line ends over the edge. A stand-in driver
  * takes the wheel, steers the car down the road, eases it to the side out
- * of the way of the cars still racing, and brings it to a stop.
+ * of the way of the cars still racing, and settles it into a steady
+ * cruise at COOLDOWN_CRUISE_MPS — it keeps circulating for as long as the
+ * race runs on, rather than coming to a dead stop and sitting there.
  *
- * It is deliberately not the racing AI. No throttle, no gambling on
- * corners, and — importantly — none of the reverse-out recovery, which is
- * what made handing a finished car to the AI look like it had lost its
- * mind: it would stop, select reverse, and drive back down the circuit
- * into the oncoming field.
+ * It is deliberately not the racing AI: no gambling on corners, and no
+ * throttle beyond what it takes to hold the cruise, since the point is a
+ * marshal easing the car around, not a car still trying to race.
  */
 static void cooldown_control(Game *g, Kart *k, Input *in, float dt)
 {
@@ -1904,13 +1912,11 @@ static void cooldown_control(Game *g, Kart *k, Input *in, float dt)
     }
 
     /*
-     * Speed: come down from whatever it crossed the line at to a stop
-     * over COOLDOWN_SECONDS, braking only when it is running ahead of
-     * that. The brake is released below walking pace because holding it
-     * at a standstill is what selects reverse gear — the car parks
-     * itself instead (see kart_step).
+     * Speed: come down from whatever it crossed the line at to
+     * COOLDOWN_CRUISE_MPS over COOLDOWN_SECONDS, then hold that cruise
+     * indefinitely — never brought to a dead stop.
      */
-    target = k->cooldown_v0 *
+    target = COOLDOWN_CRUISE_MPS + (k->cooldown_v0 - COOLDOWN_CRUISE_MPS) *
              (1.0f - game_clampf(k->cooldown_t / COOLDOWN_SECONDS,
                                  0.0f, 1.0f));
 
@@ -1953,16 +1959,8 @@ static void cooldown_control(Game *g, Kart *k, Input *in, float dt)
 
     if (v > 1.6f && v > target + 0.4f)
         in->brake = 1;
-
-    /*
-     * Any near-stop after the first second counts as parked. Waiting for
-     * the clock to run out is not enough: a car that has braked to a halt
-     * for a hairpin would spend the remaining seconds rolling back down
-     * the hill it stopped on, which is exactly the reversing this was
-     * meant to get rid of.
-     */
-    if (fabsf(v) < 0.9f && k->cooldown_t > 1.0f)
-        k->parked = 1;
+    else if (v < target - 0.4f)
+        in->accel = 1;         /* hold the cruise, don't just coast to it */
 }
 
 static void kart_step(Game *g, Kart *k, const Input *in, float dt,
@@ -2084,91 +2082,119 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     if (k->gear >= s->n_gears) k->gear = s->n_gears - 1;
     k->rev_frac = fabsf(v) / s->gear_top[k->gear];
 
-    if (k->shift_t > 0.0f) {
-        k->shift_t -= dt;
-    } else {
-        int want_up = 0, want_down = 0;
+    /* the engine's own peak-power RPM, in the same fraction-of-redline
+     * units as rev_frac (see the KartSpec comment in game.h) — the same
+     * value every gear is judged against, since it is one engine curve
+     * mapped through different ratios, not a per-gear property */
+    {
+        float nominal_frac = game_clampf(s->nominal_rpm /
+                                         g->settings.tacho_redline_rpm,
+                                         0.05f, 0.95f);
 
-        if (k->gearbox == GEARBOX_MANUAL) {
-            /* edge-triggered, so holding the key does not run through the
-             * whole gearbox in three frames */
-            want_up   = in->gear_up   && !k->prev_up_btn;
-            want_down = in->gear_down && !k->prev_down_btn;
+        if (k->shift_t > 0.0f) {
+            k->shift_t -= dt;
         } else {
-            /*
-             * Automatic. Both decisions are checked against where the
-             * revs would land AFTER the shift, otherwise the box hunts:
-             * upshifting at the top of one gear can drop you straight
-             * below the downshift threshold of the next, and back again,
-             * for ever.
-             */
-            float next_frac = (k->gear + 1 < s->n_gears)
-                                  ? fabsf(v) / s->gear_top[k->gear + 1]
-                                  : 0.0f;
-            float low_frac = (k->gear > 0)
-                                 ? fabsf(v) / s->gear_top[k->gear - 1]
-                                 : 9.0f;
-            want_up   = (k->rev_frac > s->auto_up[k->gear] &&
-                         next_frac > g->settings.bog_fraction + 0.08f);
-            want_down = (k->rev_frac < s->auto_down[k->gear] &&
-                         low_frac < 0.92f);
+            int want_up = 0, want_down = 0;
+
+            if (k->gearbox == GEARBOX_MANUAL) {
+                /* edge-triggered, so holding the key does not run through
+                 * the whole gearbox in three frames */
+                want_up   = in->gear_up   && !k->prev_up_btn;
+                want_down = in->gear_down && !k->prev_down_btn;
+            } else {
+                /*
+                 * Automatic: shift up once comfortably past the power
+                 * peak (most of the way from it to redline), down once
+                 * comfortably below it, judged on where the revs would
+                 * land AFTER the shift so the box does not hunt — and
+                 * never into a gear so tall the engine would bog badly
+                 * doing it (gear_power_scale_rpm reads the same curve
+                 * the engine itself uses, not a separate fixed point).
+                 */
+                float next_frac = (k->gear + 1 < s->n_gears)
+                                      ? fabsf(v) / s->gear_top[k->gear + 1]
+                                      : 0.0f;
+                float low_frac = (k->gear > 0)
+                                     ? fabsf(v) / s->gear_top[k->gear - 1]
+                                     : 9.0f;
+                float up_thresh = nominal_frac +
+                                  (1.0f - nominal_frac) * 0.75f;
+                float down_thresh = nominal_frac * 0.45f;
+
+                want_up   = (k->rev_frac > up_thresh &&
+                             gear_power_scale_rpm(next_frac, nominal_frac) >
+                                 0.25f);
+                want_down = (k->rev_frac < down_thresh && low_frac < 0.92f);
+            }
+
+            if (want_up && k->gear < s->n_gears - 1) {
+                k->gear++;
+                k->shift_t = g->settings.shift_seconds +
+                             ((k->gearbox == GEARBOX_AUTO) ? 0.06f : 0.0f);
+            } else if (want_down && k->gear > 0) {
+                k->gear--;
+                k->shift_t = g->settings.shift_seconds +
+                             ((k->gearbox == GEARBOX_AUTO) ? 0.06f : 0.0f);
+            }
+            k->rev_frac = fabsf(v) / s->gear_top[k->gear];
+        }
+        k->prev_up_btn = in->gear_up;
+        k->prev_down_btn = in->gear_down;
+
+        /*
+         * Forced induction: how it spools depends on KartSpec.aspiration
+         * (game.h) — naturally aspirated makes no extra power at all, a
+         * turbo builds it up and bleeds it off over real time (genuine
+         * lag either way), a supercharger is driven straight off the
+         * engine so it is there the instant the revs are, proportional
+         * to rev_frac right now, with no lag in either direction. A
+         * quick shift just holds a turbo's spool where it was (drive is
+         * cut, but not for long enough to matter) rather than dumping
+         * it, so a driver who short-shifts through a band is not
+         * punished for it.
+         */
+        if (s->aspiration == ASPIRATION_NA) {
+            k->turbo_spool = 0.0f;
+        } else if (s->aspiration == ASPIRATION_SUPERCHARGED) {
+            k->turbo_spool = (accel && !brake && k->shift_t <= 0.0f)
+                                 ? game_clampf(k->rev_frac, 0.0f, 1.0f)
+                                 : 0.0f;
+        } else if (accel && !brake) {
+            if (k->shift_t <= 0.0f) {
+                float curve = k->rev_frac * k->rev_frac;
+                if (curve > 1.0f) curve = 1.0f;
+                k->turbo_spool += g->settings.turbo_spool_rate * curve * dt;
+                if (k->turbo_spool > 1.0f) k->turbo_spool = 1.0f;
+            }
+        } else {
+            k->turbo_spool -= g->settings.turbo_spool_decay_rate * dt;
+            if (k->turbo_spool < 0.0f) k->turbo_spool = 0.0f;
         }
 
-        if (want_up && k->gear < s->n_gears - 1) {
-            k->gear++;
-            k->shift_t = g->settings.shift_seconds +
-                         ((k->gearbox == GEARBOX_AUTO) ? 0.06f : 0.0f);
-        } else if (want_down && k->gear > 0) {
-            k->gear--;
-            k->shift_t = g->settings.shift_seconds +
-                         ((k->gearbox == GEARBOX_AUTO) ? 0.06f : 0.0f);
+        /* drive is cut mid-shift, and where you are in the gear decides
+         * how much of the engine you actually have */
+        if (k->shift_t > 0.0f)
+            P = 0.0f;
+        else
+            P *= gear_power_scale_rpm(k->rev_frac, nominal_frac);
+        /*
+         * Whatever is spooled goes straight to the wheels — but only in
+         * proportion to how much grip is not already spent on cornering
+         * (1 - last frame's slip), the way a real traction control
+         * tapers boost when the tires are already loaded rather than
+         * piling more power on right as a corner is asking everything
+         * of them. A turbo's bonus is the biggest of the three; a
+         * supercharger's is real but smaller — the trade for having no
+         * lag to manage.
+         */
+        {
+            float aspiration_bonus_mult =
+                (s->aspiration == ASPIRATION_TURBO) ? 1.0f :
+                (s->aspiration == ASPIRATION_SUPERCHARGED) ? 0.6f : 0.0f;
+            P *= 1.0f + k->turbo_spool * g->settings.turbo_max_power_bonus *
+                        aspiration_bonus_mult * (1.0f - k->slip);
         }
-        k->rev_frac = fabsf(v) / s->gear_top[k->gear];
     }
-    k->prev_up_btn = in->gear_up;
-    k->prev_down_btn = in->gear_down;
-
-    /*
-     * Turbo spool: automatic, no button. It builds on its own while the
-     * driver is genuinely on the gas at real revs — same curve as
-     * before, so time spent near the limiter counts for far more than
-     * the same time low in the band — and bleeds off on its own the
-     * moment they lift or get on the brake, exactly like a real
-     * turbo's boost pressure dropping without exhaust flow to drive
-     * it. A quick shift just holds the spool where it was (drive is
-     * cut, but not for long enough to matter) rather than dumping it,
-     * so a driver who short-shifts through a band doesn't get punished
-     * for it. Whatever is spooled applies directly to engine power
-     * every frame it's on the gas — nothing to spend, nothing to save
-     * up for later.
-     */
-    if (accel && !brake) {
-        if (k->shift_t <= 0.0f) {
-            float curve = k->rev_frac * k->rev_frac;
-            if (curve > 1.0f) curve = 1.0f;
-            k->turbo_spool += g->settings.turbo_spool_rate * curve * dt;
-            if (k->turbo_spool > 1.0f) k->turbo_spool = 1.0f;
-        }
-    } else {
-        k->turbo_spool -= g->settings.turbo_spool_decay_rate * dt;
-        if (k->turbo_spool < 0.0f) k->turbo_spool = 0.0f;
-    }
-
-    /* drive is cut mid-shift, and where you are in the gear decides how
-     * much of the engine you actually have */
-    if (k->shift_t > 0.0f)
-        P = 0.0f;
-    else
-        P *= gear_power_scale_with_settings(k->rev_frac, &g->settings);
-    /* whatever the turbo has spooled goes straight to the wheels — but
-     * only in proportion to how much grip is not already spent on
-     * cornering (1 - last frame's slip), the way a real traction
-     * control tapers boost when the tires are already loaded rather
-     * than piling more power on right as a corner is asking everything
-     * of them. Full effect in a straight line, tapering to none right
-     * as a car is already sliding. */
-    P *= 1.0f + k->turbo_spool * g->settings.turbo_max_power_bonus *
-                (1.0f - k->slip);
 
     /*
      * --- longitudinal forces ---
@@ -2233,18 +2259,44 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->drifting = 0;
     }
 
-    /* --- steering: bicycle model, grip-capped yaw, with real oversteer --- */
+    /*
+     * --- steering: bicycle model, grip-capped yaw — grip until it lets go ---
+     *
+     * A tire holds its line right up to yaw_cap (derived from mu_a, the
+     * same cornering-grip budget the corner-speed AI reads), with a
+     * little shoulder past that (TIRE_SHOULDER) where it turns in a bit
+     * tighter than the nominal limit before understeer scrub really
+     * bites — progressively, the further past the limit you ask for.
+     * There is deliberately no automatic, timed "hold the wheel over and
+     * it spins" mechanic here any more: that used to escalate yaw_cap by
+     * up to 40% over about a second of committed steering and then force
+     * an uncontrollable spin if it wasn't "caught," which read as the
+     * car suddenly turning far harder than the driver asked for and then
+     * snapping off the road, unannounced. The only deliberate way to
+     * break the rear loose now is the handbrake (k->drifting, below) —
+     * that is drifting; this is just grip.
+     */
     {
         float delta_max = 0.48f / (1.0f + fabsf(v) * 0.02f);
         float yaw_cmd = v * tanf(steer * delta_max) / s->wheelbase;
-        float yaw_cap = mu_a / (fabsf(v) > 0.5f ? fabsf(v) : 0.5f);
+        /*
+         * yaw_cap = mu_a / v is a steady-state approximation (v^2/r <=
+         * mu*g) that only holds while speed is the thing actually
+         * limiting the turn. Below a walking pace, steering geometry
+         * (delta_max above) is the real limit, not grip — dividing by
+         * the true, near-zero v here would let yaw_cap grow without
+         * bound as a car scrubbed off nearly all its speed (e.g. pinned
+         * against a guardrail under sustained understeer), which read
+         * as the car spinning faster and faster the slower it got. A
+         * 6 m/s floor keeps the cap from ever running away like that.
+         */
+        float yaw_cap = mu_a / (fabsf(v) > 6.0f ? fabsf(v) : 6.0f);
         float yaw;
-        int oversteer_risk;
 
         /* the driven axle spends some of its own grip on traction rather
          * than cornering: a front-driven car understeers under power
-         * (the same tires steer and drive). A rear-driven car gets the
-         * oversteer treatment below instead of a flat bonus. */
+         * (the same tires steer and drive) a little more than a
+         * rear-driven one, which keeps the front axle free to corner. */
         if (accel && !brake && dt_front >= 0.5f)
             yaw_cap *= 1.0f - 0.04f * (dt_front - 0.5f) * 2.0f;
 
@@ -2255,91 +2307,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
             k->slip = fmaxf(k->slip, 0.7f);
         }
 
-        /*
-         * Power oversteer: committing hard to a corner on the throttle
-         * in a rear-driven car lets the rear step out — free extra
-         * rotation, for as long as the driver keeps the wheel turned
-         * hard. Ease off the steering before oversteer_t reaches
-         * oversteer_spin_seconds and it settles back down for nothing
-         * (the reward already banked as heading turned faster than
-         * pure grip would allow); keep it locked over and it spins.
-         *
-         * Catching it is judged on the steering input, not on whether
-         * yaw_cmd has technically dropped under the grip cap: a
-         * short-wheelbase kart's yaw_cmd is so oversized relative to
-         * its own cap (tan(steer*delta_max)/wheelbase, wheelbase as
-         * small as 1.05 m) that "under the cap" would mean almost
-         * releasing the wheel entirely, while a long-wheelbase car
-         * would catch it after barely easing off — the same 0.6 of
-         * steering lock means the same thing to a driver in any car.
-         */
-        /*
-         * Two independent ways to actually spin, not just understeer,
-         * each standing in for a real drivetrain difference:
-         *
-         * - Torque, on lock, in a tight turn. A rear-driven car's rear
-         *   axle is free to step out under power with only a modest
-         *   commitment (steering, speed) since none of its own grip is
-         *   spent finding traction up front. AWD needs a much harder
-         *   commitment first — the front axle sharing the load keeps
-         *   it planted well past where a pure RWD car would already be
-         *   loose — and a front-driven car never reaches this at all;
-         *   it understeers instead (the yaw_cap reduction above), the
-         *   way a real FWD car pushes rather than spins under power.
-         * - Speed alone, for any drivetrain: carrying enough more
-         *   speed than a corner's grip allows that no amount of
-         *   throttle discipline would have saved it — the "just came
-         *   in too hot" case, independent of the driven axle.
-         */
-        {
-            int is_fwd = (s->drivetrain == DRIVETRAIN_FWD);
-            int is_awd = (s->drivetrain == DRIVETRAIN_AWD);
-            float torque_steer_min = is_awd ? 0.80f : 0.6f;
-            float torque_speed_min = is_awd ? 16.0f : 12.0f;
-            int torque_spin_risk = accel && !brake && !k->drifting &&
-                                   !is_fwd &&
-                                   fabsf(steer) > torque_steer_min &&
-                                   fabsf(v) > torque_speed_min &&
-                                   fabsf(yaw_cmd) > yaw_cap;
-            int speed_spin_risk = !k->drifting && fabsf(steer) > 0.5f &&
-                                  fabsf(v) > 25.0f &&
-                                  fabsf(yaw_cmd) > yaw_cap * 2.0f;
-            oversteer_risk = torque_spin_risk || speed_spin_risk;
-        }
-        if (k->spin_t <= 0.0f) {
-            if (oversteer_risk) {
-                k->oversteer_t += dt;
-            } else {
-                k->oversteer_t -= g->settings.oversteer_catch_decay * dt;
-                if (k->oversteer_t < 0.0f) k->oversteer_t = 0.0f;
-            }
-            if (k->oversteer_t > 0.0f) {
-                float max_bonus = g->settings.oversteer_max_bonus;
-                float bonus = fminf(k->oversteer_t *
-                                    g->settings.oversteer_grow_rate,
-                                    max_bonus);
-                yaw_cap *= 1.0f + bonus;
-                if (max_bonus > 0.0f)
-                    k->slip = fmaxf(k->slip, 0.6f * bonus / max_bonus);
-            }
-            if (k->oversteer_t > g->settings.oversteer_spin_seconds) {
-                k->spin_t = g->settings.spin_seconds;
-                k->spin_yaw = (yaw_cmd >= 0.0f ? 1.0f : -1.0f) * yaw_cap *
-                              g->settings.spin_yaw_mult;
-                k->oversteer_t = 0.0f;
-            }
-        }
-
-        if (k->spin_t > 0.0f) {
-            /* out of control: steering input does nothing useful until
-             * the spin runs its course */
-            k->spin_t -= dt;
-            yaw = k->spin_yaw *
-                  (k->spin_t > 0.0f ? k->spin_t / g->settings.spin_seconds
-                                    : 0.0f);
-            v -= g->settings.spin_speed_loss * mu_a * dt;
-            k->slip = 1.0f;
-        } else if (yaw_cmd > yaw_cap) {
+        if (yaw_cmd > yaw_cap) {
             /* the tire's shoulder: genuinely deliver more turn-in than
              * the nominal grip circle allows, up to TIRE_SHOULDER, so a
              * driver who pushes a little past the limit holds the
@@ -2361,22 +2329,11 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
                  mu_a * k->slip * dt;
         } else {
             yaw = yaw_cmd;
-            if (k->oversteer_t <= 0.0f)
-                k->slip *= (1.0f - 4.0f * dt);
+            k->slip *= (1.0f - 4.0f * dt);
         }
         k->heading = game_angle_wrap(k->heading + yaw * dt);
     }
     k->steer_vis += (steer - k->steer_vis) * 10.0f * dt;
-    /*
-     * A car that has finished and come to a stop is standing on its
-     * brakes, not in neutral: without this it rolls back down whatever
-     * hill it stopped on, and Monarch has plenty of those. It reads as
-     * the car driving backwards through the race it has just finished.
-     */
-    if (k->parked) {
-        v = 0.0f;
-        k->slip = 0.0f;
-    }
     k->speed = v;
 
     /* --- integrate --- */
@@ -2399,7 +2356,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
                 float excess = lat - clamped;
                 k->x += t->dz[seg] * excess;
                 k->z -= t->dx[seg] * excess;
-                k->speed *= (1.0f - 2.5f * dt);
+                k->speed *= (1.0f - 1.2f * dt);
                 if (was_inside)
                     k->hit_wall = 1;
                 lat = clamped;

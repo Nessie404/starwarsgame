@@ -280,6 +280,32 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   now gated on `t->has_walls` on its own — BULLRING and CLASSIC both set
   `has_walls = 1` but are not alpine, so they had never actually drawn
   a barrier despite the flag; see §6.
+- **v1.25.0**: the v1.20.0 power-oversteer/forced-spin mechanic is gone
+  from `kart_step` — no more escalating `yaw_cap` bonus or timed forced
+  spin from steering alone; understeer scrub and the tire shoulder are
+  the whole grip model now, and the handbrake (`k->drifting`) is the
+  only deliberate way to break the rear loose. `yaw_cap`'s speed floor
+  moved 0.5 → 6.0 m/s and the guardrail collision penalty 2.5 → 1.2 /s
+  — see §6, both were load-bearing fixes for a regression the removal
+  alone didn't catch. Gearing reworked: `KartSpec.auto_up`/`auto_down`
+  (per-gear shift-point fractions) are gone, replaced by a single
+  `nominal_rpm` (one engine curve, same peak in every gear) and
+  `gear_power_scale_rpm` (game.c) — a real parabola peaking at
+  `nominal_rpm`, floored at 22%, hard cliff at the limiter. New
+  `KartSpec.aspiration` (NA/turbo/supercharged) changes how
+  `k->turbo_spool` builds: turbo unchanged (real lag, biggest bonus),
+  supercharged instant and lag-free (smaller bonus), NA always zero.
+  `designer_grip()` (main.c) now derives `lat_g` from mass and drag
+  instead of a free dial, same treatment mass got in v1.24.0. New
+  `RK_EDIT_CAR` row (garage) and `designer_apply_edit`/
+  `designer_load_existing` let a player edit any car — including a
+  built-in — in the designer, patching `kart_specs[]` in place for the
+  session with no disk write. `cooldown_control` now ramps to
+  `COOLDOWN_CRUISE_MPS` (~30 mph) and holds it instead of ramping to a
+  stop; `Kart.parked` is gone. Every in-game speed/distance/weight
+  display converts to mph/feet/pounds at the point it's drawn
+  (`main.c`'s `MPS_TO_MPH`/`KPH_TO_MPH`/`M_TO_FT`/`KG_TO_LB`); the
+  simulation itself is still entirely SI.
 
 ---
 
@@ -605,6 +631,59 @@ edge to the fixed background at the exact point they need to meet,
 rather than trying to push the fixed background far enough away to
 never need to think about it again — the latter works until the next
 thing that moves more than expected.
+
+**`yaw_cap = mu_a / v` diverges as v shrinks, and a car pinned against a
+guardrail under sustained understeer will shrink v a lot.** Removing
+v1.20.0's forced-spin mechanic (v1.25.0) was not, by itself, enough to
+fix the "holds full lock and loses it" report: a synthetic test that
+held full steering lock and full throttle for 2 seconds still showed
+yaw rate climbing (0.45 → 0.91 rad/s) and speed collapsing (25 → 4.5
+m/s) with the mechanic gone entirely. The actual sequence: full lock
+understeers the car wide, it runs off the road into the guardrail
+(`kart_step`'s wall-collision branch), gets pinned there (`lat` clamped
+to `wall_half`), and the guardrail's own per-frame speed decay
+(originally `1 - 2.5*dt`) bleeds speed toward zero while pinned. As v
+shrinks, `yaw_cap` (grip-limited turn rate) grows without bound, since
+nothing physically stops a `1/v` term from diverging — so the car reads
+as spinning faster and faster the slower it gets, which is exactly
+what an ever-tightening, out-of-control spin looks like, with no
+"spin" mechanic involved at all. Two independent fixes were both
+needed: the guardrail decay softened to `1 - 1.2*dt` (still a real
+penalty, not a runaway one), and `yaw_cap`'s divisor floored at 6 m/s
+instead of 0.5 (below a walking pace, steering geometry — not grip — is
+what actually limits a real car's turn radius, so letting the "grip
+cap" keep growing there was never physical to begin with). Test with a
+scratch harness that holds an adversarial input for *several* seconds,
+not one frame — a one-frame check would never have caught this, since
+the divergence only shows up once the car has had time to actually
+scrub down.
+
+**A power curve with a hard floor needs the floor high enough to
+launch, or "more realistic" reads as "broken."** The first cut of
+`gear_power_scale_rpm` (v1.25.0) used a floor of 0.05 and a narrow
+peak window (`width = ... * 0.6`/`0.55`) around `nominal_frac`. That
+technically satisfied "falls off precipitously," but it also meant a
+car starting from a dead stop — `rev_frac` near 0, far from
+`nominal_frac` — made only 5% power, and every AI car's launch,
+`test_gearboxes_sane`'s "does the automatic climb the box" check, and
+the AWD-vs-RWD traction-ratio test all broke at once, none of them
+about gears on their own. The tell was a debug harness showing a car's
+speed rising for a while under full throttle, then suddenly collapsing
+and settling into a permanent ~2.5 m/s crawl — the same guardrail-pin
+spiral above, just triggered by the engine being too weak to actually
+climb through its gears before running off the road. The fix was two
+changes together: raise the floor to a value that still lets a car
+launch and limp (0.22, roughly what a real idling engine still makes),
+and — the one that actually mattered most — make `width` span
+`nominal_frac`'s *entire* distance to idle (0) or redline (1) rather
+than a fraction of it, so the curve is one continuous parabola with no
+flat "dead zone" pinned at the floor across a wide low-RPM range. Both
+were needed: floor alone still left a wide, weak plateau; width alone
+would have let the floor go to zero. When tuning any curve like this,
+check it against a full launch-from-a-stop, not just a few isolated
+sample points — a curve that looks right sampled at 0.3/0.7/0.97 can
+still be unworkable at the one point (a dead stop) every race actually
+starts from.
 
 ---
 

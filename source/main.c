@@ -28,6 +28,13 @@
 
 #define DEFAULT_FIFO_SIZE (256 * 1024)
 
+/* every on-screen speed reads in mph — the sim itself stays in m/s, and
+ * spec_top_speed_with_settings (game.c) still returns km/h internally */
+#define MPS_TO_MPH 2.23694f
+#define KPH_TO_MPH 0.621371f
+#define M_TO_FT 3.28084f
+#define KG_TO_LB 2.20462f
+
 /* If tilt steering feels inverted on your remote, flip this to -1.
  * (Steering polarity itself lives in game.h: STEER_LEFT/STEER_RIGHT.) */
 #define TILT_SIGN (+1.0f)
@@ -1976,7 +1983,7 @@ static void draw_finish_marker(int p, float vx, float vy, float vw,
                  v, v, v, (u8)(235.0f * a));
     }
 
-    snprintf(buf, sizeof(buf), "%d M", (int)to_line);
+    snprintf(buf, sizeof(buf), "%d FT", (int)(to_line * M_TO_FT));
     hud_text(x + 26.0f, y - 1.0f, 10.0f, 17.0f, buf,
              final_lap ? 255 : 225, final_lap ? 225 : 230,
              final_lap ? 90 : 240, (u8)(240.0f * a));
@@ -2153,8 +2160,8 @@ static void draw_player_hud(int p)
     hud_text(vx + vw - 60.0f, vy + 12.0f, 13.0f, 22.0f, buf,
              255, 220, 60, 240);
 
-    /* speed, km/h — red while the marshal has cut the power */
-    snprintf(buf, sizeof(buf), "%d", (int)(fabsf(k->speed) * 3.6f));
+    /* speed, mph — red while the marshal has cut the power */
+    snprintf(buf, sizeof(buf), "%d", (int)(fabsf(k->speed) * MPS_TO_MPH));
     if (k->wrong_way)
         hud_text(vx + 14.0f, vy + vh - 40.0f, 13.0f, 24.0f, buf,
                  245, 75, 65, 235);
@@ -2211,19 +2218,22 @@ static void draw_player_hud(int p)
     {
         const KartSpec *sp = &kart_specs[k->spec];
         float rev = game_clampf(k->rev_frac, 0.0f, 1.0f);
-        float bog = game.settings.bog_fraction;
+        float nominal_frac = game_clampf(sp->nominal_rpm /
+                                         game.settings.tacho_redline_rpm,
+                                         0.05f, 0.95f);
         u8 rr = 90, rg = 210, rb = 120;
         int rpm;
 
         /*
          * The band is read at a glance, so its colours are the four
          * things that matter rather than a gradient: grey while the
-         * engine is bogging below its torque band, green through the
+         * engine is bogging below its nominal RPM, green through the
          * useful range, amber in the shift window, red at the limiter.
          */
         if (k->rev_frac > 0.94f)      { rr = 255; rg =  80; rb =  65; }
         else if (k->rev_frac > 0.86f) { rr = 245; rg = 200; rb =  70; }
-        else if (k->rev_frac < bog)   { rr = 140; rg = 150; rb = 165; }
+        else if (k->rev_frac < nominal_frac * 0.6f)
+            { rr = 140; rg = 150; rb = 165; }
 
         snprintf(buf, sizeof(buf), "%d", k->gear + 1);
         hud_text(vx + 118.0f, vy + vh - 44.0f, 15.0f, 28.0f, buf,
@@ -2662,11 +2672,12 @@ static void menu_update_track_preview(void)
 enum {
     RK_PLAYERS = 0, RK_TRACK, RK_LAPS, RK_GARAGE, RK_DESIGN, RK_CONFIG,
     RK_START, RK_EXIT,                                        /* setup   */
-    RK_CAR, RK_PAINT, RK_GEARBOX, RK_TIRES, RK_DONE,          /* garage  */
+    RK_CAR, RK_PAINT, RK_GEARBOX, RK_TIRES, RK_EDIT_CAR, RK_DONE,
+                                                               /* garage  */
     RK_DES_NAME, RK_DES_POWER, RK_DES_BRAKE, RK_DES_GRIP,
-    RK_DES_DRAG, RK_DES_OFFROAD, RK_DES_DRIVETRAIN, RK_DES_AWD_BIAS,
-    RK_DES_GEARCOUNT, RK_DES_GEAR_SEL, RK_DES_GEAR_TOP, RK_DES_GEAR_UP,
-    RK_DES_GEAR_DOWN,
+    RK_DES_DRAG, RK_DES_OFFROAD, RK_DES_ASPIRATION, RK_DES_DRIVETRAIN,
+    RK_DES_AWD_BIAS,
+    RK_DES_GEARCOUNT, RK_DES_GEAR_SEL, RK_DES_GEAR_TOP, RK_DES_NOMINAL_RPM,
     RK_DES_SAVE, RK_DES_CANCEL                                /* designer */
 };
 
@@ -2709,12 +2720,28 @@ static void menu_notice(const char *text)
  * push it up and the car gets both stronger and heavier, same as a
  * bigger engine really would.
  *
+ * Grip is not exposed either, for the same reason: a lighter, less
+ * draggy car corners differently than a heavy, draggy one whether or
+ * not a player asked it to. designer_grip() derives lat_g from the
+ * mass the power trade-off already settled on (lighter is grippier)
+ * and from drag (a car built with more aero surface — more cd_a — is
+ * assumed to be running some of that as downforce, not pure drag, so
+ * it gets some grip back for the privilege of a lower top speed). The
+ * GRIP row still shows the number; it just cannot be dragged around on
+ * its own any more.
+ *
  * Wheelbase is still derived from mass, the same way it always was.
- * Gearing is not: gear count, each gear's top speed, and each gear's
- * own upshift/downshift point are all directly editable — GEAR_SEL
- * pages through whichever gear GEAR_TOP/GEAR_UP/GEAR_DOWN are currently
- * pointed at, rather than showing every gear as its own row, so the
- * row count stays fixed regardless of how many gears the car has.
+ * Gearing only exposes what a driver can actually feel: gear count and
+ * each gear's own top speed (ratio) are directly editable — GEAR_SEL
+ * pages through whichever gear GEAR_TOP is currently pointed at, so the
+ * row count stays fixed regardless of how many gears the car has — plus
+ * one nominal RPM shared by every gear (real engines have one power
+ * curve, not one per gear; see the KartSpec comment in game.h). There
+ * is deliberately no separate upshift/downshift dial any more: where
+ * the automatic box actually changes gear now follows straight from
+ * nominal RPM (kart_step), the same way a real driver picks a shift
+ * point off where the engine actually makes power, not off a number
+ * with no engine behind it.
  */
 static const char *designer_names[] = {
     "PROTOTYPE", "HOMEBREW", "BLUEPRINT", "MAVERICK", "RENEGADE",
@@ -2729,9 +2756,44 @@ static const char *designer_names[] = {
 #define DESIGNER_MASS_BASE    500.0f
 #define DESIGNER_MASS_PER_HP    1.8f
 
+/* the grip trade-off: lighter (so, less powerful) cars corner better,
+ * and a car built with more drag area gets some of that back as
+ * assumed downforce — see the comment above */
+#define DESIGNER_GRIP_BASE       1.15f
+#define DESIGNER_GRIP_MASS_REF 1000.0f
+#define DESIGNER_GRIP_PER_1000KG 0.30f
+#define DESIGNER_GRIP_CDA_REF     0.62f
+#define DESIGNER_GRIP_PER_CDA     0.35f
+#define DESIGNER_GRIP_MIN         0.85f
+#define DESIGNER_GRIP_MAX         1.85f
+
 static KartSpec designer_car;
 static int designer_name_idx;
-static int designer_gear_sel;   /* 0-indexed gear GEAR_TOP/UP/DOWN edit */
+static int designer_gear_sel;   /* 0-indexed gear GEAR_TOP edit         */
+/* >= 0: SAVE patches kart_specs[designer_editing_idx] in place instead
+ * of adding a new car (see designer_apply_edit) — session only, never
+ * written to disk. -1: the ordinary new-car path (designer_save). */
+static int designer_editing_idx = -1;
+static int designer_return_screen;   /* where CANCEL/SAVE goes back to */
+
+/* mass, then grip from that mass and the current drag figure — the
+ * same two derived numbers designer_finalize commits to a real spec,
+ * kept in one place so the live preview (row_value) can never show a
+ * different number than SAVE actually uses */
+static float designer_mass(void)
+{
+    return DESIGNER_MASS_BASE + designer_car.power_hp * DESIGNER_MASS_PER_HP;
+}
+
+static float designer_grip(void)
+{
+    float g = DESIGNER_GRIP_BASE -
+              (designer_mass() - DESIGNER_GRIP_MASS_REF) / 1000.0f *
+                  DESIGNER_GRIP_PER_1000KG +
+              (designer_car.cd_a - DESIGNER_GRIP_CDA_REF) *
+                  DESIGNER_GRIP_PER_CDA;
+    return game_clampf(g, DESIGNER_GRIP_MIN, DESIGNER_GRIP_MAX);
+}
 
 static void designer_reset(void)
 {
@@ -2742,30 +2804,45 @@ static void designer_reset(void)
     memset(&designer_car, 0, sizeof(designer_car));
     designer_name_idx = 0;
     designer_gear_sel = 0;
+    designer_editing_idx = -1;
     snprintf(designer_car.name, sizeof(designer_car.name), "%s",
              designer_names[designer_name_idx]);
     designer_car.power_hp = 220.0f;
     designer_car.brake_dist_100 = 35.0f;
-    designer_car.lat_g = 1.15f;
     designer_car.cd_a = 0.62f;
     designer_car.offroad_grip = 0.40f;
     designer_car.drivetrain = DRIVETRAIN_RWD;
     designer_car.awd_front_bias = 0.5f;
+    designer_car.aspiration = ASPIRATION_NA;
     designer_car.n_gears = 5;
     for (g = 0; g < 5; g++)
         designer_car.gear_top[g] = base_gears[g];
-    kart_spec_default_shifts(&designer_car);
+    kart_spec_default_gearing(&designer_car);
 }
 
-/* Fill in the one field the designer still derives outright rather
- * than exposing: wheelbase, from whatever mass the power trade-off
- * settled on. Producing the complete KartSpec that both the live
- * preview and SAVE itself work from. */
+/* Load an existing car for a session-only edit (the garage's EDIT CAR
+ * row) rather than building a new one. Its name is kept as-is — see
+ * designer_apply_edit — everything else becomes editable exactly like
+ * a car under construction, including mass and grip re-deriving from
+ * whatever power/drag it is edited to (which may not match the number
+ * that shipped with it, if it predates those trade-offs — see
+ * docs/HANDOFF.md). */
+static void designer_load_existing(int idx)
+{
+    designer_car = kart_specs[idx];
+    designer_editing_idx = idx;
+    designer_gear_sel = 0;
+}
+
+/* Fill in the fields the designer still derives outright rather than
+ * exposing: mass and grip (see the comment above), and wheelbase from
+ * whatever mass that settled on. Producing the complete KartSpec that
+ * both the live preview and SAVE itself work from. */
 static void designer_finalize(KartSpec *out)
 {
     *out = designer_car;
-    out->mass_kg = DESIGNER_MASS_BASE +
-                   out->power_hp * DESIGNER_MASS_PER_HP;
+    out->mass_kg = designer_mass();
+    out->lat_g = designer_grip();
     out->wheelbase = 2.0f + out->mass_kg / 2500.0f;
 }
 
@@ -2799,7 +2876,8 @@ static void build_rows(void)
     } else if (menu_screen == SCREEN_DESIGNER) {
         static const int rows[] = {
             RK_DES_NAME, RK_DES_POWER, RK_DES_BRAKE,
-            RK_DES_GRIP, RK_DES_DRAG, RK_DES_OFFROAD, RK_DES_DRIVETRAIN
+            RK_DES_GRIP, RK_DES_DRAG, RK_DES_OFFROAD, RK_DES_ASPIRATION,
+            RK_DES_DRIVETRAIN
         };
         int i;
         for (i = 0; i < (int)(sizeof(rows) / sizeof(rows[0])); i++) {
@@ -2813,7 +2891,7 @@ static void build_rows(void)
         {
             static const int gear_rows[] = {
                 RK_DES_GEARCOUNT, RK_DES_GEAR_SEL, RK_DES_GEAR_TOP,
-                RK_DES_GEAR_UP, RK_DES_GEAR_DOWN
+                RK_DES_NOMINAL_RPM
             };
             for (i = 0; i < (int)(sizeof(gear_rows) / sizeof(gear_rows[0]));
                  i++) {
@@ -2833,6 +2911,8 @@ static void build_rows(void)
         menu_rows[n_menu_rows].kind = RK_GEARBOX;
         menu_rows[n_menu_rows++].player = garage_player;
         menu_rows[n_menu_rows].kind = RK_TIRES;
+        menu_rows[n_menu_rows++].player = garage_player;
+        menu_rows[n_menu_rows].kind = RK_EDIT_CAR;
         menu_rows[n_menu_rows++].player = garage_player;
         menu_rows[n_menu_rows].kind = RK_DONE;
         menu_rows[n_menu_rows++].player = garage_player;
@@ -2857,6 +2937,7 @@ static void row_label(const MenuRow *r, char *out, int cap)
     case RK_PAINT:   snprintf(out, cap, "PAINT");              break;
     case RK_GEARBOX: snprintf(out, cap, "GEARS");              break;
     case RK_TIRES:   snprintf(out, cap, "TIRES");              break;
+    case RK_EDIT_CAR: snprintf(out, cap, "EDIT CAR");          break;
     case RK_DESIGN:  snprintf(out, cap, "DESIGN A CAR");       break;
     case RK_DES_NAME:       snprintf(out, cap, "NAME");        break;
     case RK_DES_POWER:      snprintf(out, cap, "POWER");       break;
@@ -2864,14 +2945,17 @@ static void row_label(const MenuRow *r, char *out, int cap)
     case RK_DES_GRIP:       snprintf(out, cap, "GRIP");        break;
     case RK_DES_DRAG:       snprintf(out, cap, "AERO");        break;
     case RK_DES_OFFROAD:    snprintf(out, cap, "DIRT GRIP");   break;
+    case RK_DES_ASPIRATION: snprintf(out, cap, "ASPIRATION");  break;
     case RK_DES_DRIVETRAIN: snprintf(out, cap, "DRIVE");       break;
     case RK_DES_AWD_BIAS:   snprintf(out, cap, "AWD BIAS");    break;
     case RK_DES_GEARCOUNT:  snprintf(out, cap, "GEARS");       break;
     case RK_DES_GEAR_SEL:   snprintf(out, cap, "EDIT GEAR");   break;
     case RK_DES_GEAR_TOP:   snprintf(out, cap, "GEAR TOP SPEED"); break;
-    case RK_DES_GEAR_UP:    snprintf(out, cap, "GEAR UPSHIFT");  break;
-    case RK_DES_GEAR_DOWN:  snprintf(out, cap, "GEAR DOWNSHIFT"); break;
-    case RK_DES_SAVE:       snprintf(out, cap, "SAVE");        break;
+    case RK_DES_NOMINAL_RPM: snprintf(out, cap, "NOMINAL RPM"); break;
+    case RK_DES_SAVE:
+        snprintf(out, cap, "%s",
+                designer_editing_idx >= 0 ? "APPLY (SESSION ONLY)" : "SAVE");
+        break;
     case RK_DES_CANCEL:     snprintf(out, cap, "CANCEL");      break;
     default:         snprintf(out, cap, "DONE");               break;
     }
@@ -2900,18 +2984,25 @@ static void row_value(const MenuRow *r, char *out, int cap)
                               paint_names[sel_paint[p] % PAINT_COUNT]);     break;
     case RK_GEARBOX: snprintf(out, cap, "%s", gearbox_name(sel_gearbox[p])); break;
     case RK_TIRES:   snprintf(out, cap, "%s", tire_name(sel_tire[p]));      break;
+    case RK_EDIT_CAR: snprintf(out, cap, "%s",
+                              kart_specs[sel_spec[p] % kart_spec_count].name); break;
     case RK_DES_NAME:
-        snprintf(out, cap, "%s", designer_names[designer_name_idx]); break;
+        snprintf(out, cap, "%s", designer_car.name); break;
     case RK_DES_POWER:
         snprintf(out, cap, "%d HP", (int)designer_car.power_hp);     break;
     case RK_DES_BRAKE:
-        snprintf(out, cap, "%d M", (int)designer_car.brake_dist_100); break;
+        snprintf(out, cap, "%d FT",
+                (int)(designer_car.brake_dist_100 * M_TO_FT));
+        break;
     case RK_DES_GRIP:
-        snprintf(out, cap, "%.2f G", (double)designer_car.lat_g);    break;
+        snprintf(out, cap, "%.2f G", (double)designer_grip());       break;
     case RK_DES_DRAG:
         snprintf(out, cap, "%.2f", (double)designer_car.cd_a);       break;
     case RK_DES_OFFROAD:
         snprintf(out, cap, "%d", (int)(designer_car.offroad_grip * 100.0f));
+        break;
+    case RK_DES_ASPIRATION:
+        snprintf(out, cap, "%s", aspiration_name(designer_car.aspiration));
         break;
     case RK_DES_DRIVETRAIN:
         snprintf(out, cap, "%s", drivetrain_name(designer_car.drivetrain));
@@ -2927,16 +3018,11 @@ static void row_value(const MenuRow *r, char *out, int cap)
                 designer_car.n_gears);
         break;
     case RK_DES_GEAR_TOP:
-        snprintf(out, cap, "%d KM/H",
-                (int)(designer_car.gear_top[designer_gear_sel] * 3.6f));
+        snprintf(out, cap, "%d MPH",
+                (int)(designer_car.gear_top[designer_gear_sel] * MPS_TO_MPH));
         break;
-    case RK_DES_GEAR_UP:
-        snprintf(out, cap, "%d%%",
-                (int)(designer_car.auto_up[designer_gear_sel] * 100.0f));
-        break;
-    case RK_DES_GEAR_DOWN:
-        snprintf(out, cap, "%d%%",
-                (int)(designer_car.auto_down[designer_gear_sel] * 100.0f));
+    case RK_DES_NOMINAL_RPM:
+        snprintf(out, cap, "%d RPM", (int)designer_car.nominal_rpm);
         break;
     default:         out[0] = 0;                                            break;
     }
@@ -2948,13 +3034,15 @@ static int row_has_value(const MenuRow *r)
             r->kind == RK_LAPS ||
             r->kind == RK_CAR || r->kind == RK_PAINT ||
             r->kind == RK_GEARBOX || r->kind == RK_TIRES ||
+            r->kind == RK_EDIT_CAR ||
             r->kind == RK_DES_NAME ||
             r->kind == RK_DES_POWER || r->kind == RK_DES_BRAKE ||
             r->kind == RK_DES_GRIP || r->kind == RK_DES_DRAG ||
-            r->kind == RK_DES_OFFROAD || r->kind == RK_DES_DRIVETRAIN ||
+            r->kind == RK_DES_OFFROAD || r->kind == RK_DES_ASPIRATION ||
+            r->kind == RK_DES_DRIVETRAIN ||
             r->kind == RK_DES_AWD_BIAS || r->kind == RK_DES_GEARCOUNT ||
             r->kind == RK_DES_GEAR_SEL || r->kind == RK_DES_GEAR_TOP ||
-            r->kind == RK_DES_GEAR_UP || r->kind == RK_DES_GEAR_DOWN);
+            r->kind == RK_DES_NOMINAL_RPM);
 }
 
 static void row_change(const MenuRow *r, int d)
@@ -2993,6 +3081,11 @@ static void row_change(const MenuRow *r, int d)
                       % TIRE_COMPOUNDS;
         break;
     case RK_DES_NAME:
+        /* locked while editing an existing car — its identity is not
+         * one of the things being edited, only its numbers are (see
+         * designer_load_existing/designer_apply_edit) */
+        if (designer_editing_idx >= 0)
+            break;
         designer_name_idx = ((designer_name_idx + d) % DESIGNER_NAME_COUNT +
                              DESIGNER_NAME_COUNT) % DESIGNER_NAME_COUNT;
         snprintf(designer_car.name, sizeof(designer_car.name), "%s",
@@ -3010,10 +3103,9 @@ static void row_change(const MenuRow *r, int d)
         designer_car.brake_dist_100 = game_clampf(
             designer_car.brake_dist_100 - (float)d, 26.0f, 50.0f);
         break;
-    case RK_DES_GRIP:
-        designer_car.lat_g = game_clampf(designer_car.lat_g +
-                                         (float)d * 0.05f, 0.85f, 1.85f);
-        break;
+    /* GRIP has no case here on purpose — see designer_grip(). It is
+     * derived from mass (itself derived from power) and drag, not an
+     * independent dial; the row shows the number without changing it. */
     case RK_DES_DRAG:
         /* same less-is-better convention as brakes, for drag */
         designer_car.cd_a = game_clampf(designer_car.cd_a -
@@ -3023,6 +3115,11 @@ static void row_change(const MenuRow *r, int d)
         designer_car.offroad_grip = game_clampf(designer_car.offroad_grip +
                                                 (float)d * 0.05f, 0.10f,
                                                 0.90f);
+        break;
+    case RK_DES_ASPIRATION:
+        designer_car.aspiration = ((designer_car.aspiration + d) %
+                                   ASPIRATION_COUNT + ASPIRATION_COUNT) %
+                                  ASPIRATION_COUNT;
         break;
     case RK_DES_DRIVETRAIN:
         designer_car.drivetrain = ((designer_car.drivetrain + d) % 3 + 3)
@@ -3046,7 +3143,7 @@ static void row_change(const MenuRow *r, int d)
                     designer_car.gear_top[g] = fminf(
                         designer_car.gear_top[g - 1] + 8.0f, 140.0f);
             designer_car.n_gears = new_n;
-            kart_spec_default_shifts(&designer_car);
+            kart_spec_default_gearing(&designer_car);
         } else {
             designer_car.n_gears = new_n;
         }
@@ -3062,29 +3159,24 @@ static void row_change(const MenuRow *r, int d)
         int sel = designer_gear_sel;
         /* stays strictly between its neighbors — kart_spec_validate
          * would reject a ladder that did not, and there is no reason
-         * to make a player discover that at SAVE instead of here */
+         * to make a player discover that at SAVE instead of here.
+         * Step is exactly 1 mph, now that the row displays in mph. */
         float lo = (sel > 0) ? designer_car.gear_top[sel - 1] + 0.5f
                               : 2.0f;
         float hi = (sel < designer_car.n_gears - 1)
                        ? designer_car.gear_top[sel + 1] - 0.5f : 140.0f;
         designer_car.gear_top[sel] = game_clampf(
-            designer_car.gear_top[sel] + (float)d * 0.833f, lo, hi);
+            designer_car.gear_top[sel] + (float)d / MPS_TO_MPH, lo, hi);
         break;
     }
-    case RK_DES_GEAR_UP: {
-        int sel = designer_gear_sel;
-        float lo = fmaxf(0.30f, designer_car.auto_down[sel] + 0.20f);
-        designer_car.auto_up[sel] = game_clampf(
-            designer_car.auto_up[sel] + (float)d * 0.02f, lo, 1.20f);
+    case RK_DES_NOMINAL_RPM:
+        /* the one gearing dial left: where the engine itself peaks,
+         * shared by every gear (see the KartSpec comment in game.h) —
+         * shift points follow automatically from this in kart_step,
+         * they are not a separate thing to tune here */
+        designer_car.nominal_rpm = game_clampf(
+            designer_car.nominal_rpm + (float)d * 100.0f, 1500.0f, 9500.0f);
         break;
-    }
-    case RK_DES_GEAR_DOWN: {
-        int sel = designer_gear_sel;
-        float hi = fminf(0.90f, designer_car.auto_up[sel] - 0.20f);
-        designer_car.auto_down[sel] = game_clampf(
-            designer_car.auto_down[sel] + (float)d * 0.02f, 0.05f, hi);
-        break;
-    }
     default:
         break;
     }
@@ -3214,7 +3306,38 @@ static void designer_save(void)
         menu_notice(notice);
         audio_beep(920.0f, 70, 150);
     }
-    menu_screen = SCREEN_SETUP;
+    menu_screen = designer_return_screen;
+    menu_row = 0;
+}
+
+/*
+ * APPLY: patch kart_specs[designer_editing_idx] in place with whatever
+ * the designer currently holds — session only, never written to disk,
+ * so a bad edit or a experiment costs nothing beyond this race meeting.
+ * The name is locked to whatever it already was (row_change refuses to
+ * touch it in this mode), so there is no duplicate-name case to reject
+ * here the way a brand new car has to check for.
+ */
+static void designer_apply_edit(void)
+{
+    KartSpec finalized;
+    char error[128];
+    char notice[44];
+
+    designer_finalize(&finalized);
+    snprintf(finalized.name, sizeof(finalized.name), "%s",
+            kart_specs[designer_editing_idx].name);
+    if (!kart_spec_validate(&finalized, error, (int)sizeof(error))) {
+        menu_notice(error);
+        audio_beep(150.0f, 240, 175);
+        return;
+    }
+    kart_specs[designer_editing_idx] = finalized;
+    snprintf(notice, sizeof(notice), "%s UPDATED FOR THIS SESSION",
+            finalized.name);
+    menu_notice(notice);
+    audio_beep(920.0f, 70, 150);
+    menu_screen = designer_return_screen;
     menu_row = 0;
 }
 
@@ -3227,6 +3350,13 @@ static void activate_row(const MenuRow *r)
         menu_row = 0;
         audio_beep(880.0f, 60, 140);
         break;
+    case RK_EDIT_CAR:
+        designer_load_existing(sel_spec[r->player] % kart_spec_count);
+        designer_return_screen = SCREEN_GARAGE;
+        menu_screen = SCREEN_DESIGNER;
+        menu_row = 0;
+        audio_beep(880.0f, 60, 140);
+        break;
     case RK_CONFIG:
         menu_screen = SCREEN_CONFIG;
         menu_row = 0;
@@ -3234,15 +3364,19 @@ static void activate_row(const MenuRow *r)
         break;
     case RK_DESIGN:
         designer_reset();
+        designer_return_screen = SCREEN_SETUP;
         menu_screen = SCREEN_DESIGNER;
         menu_row = 0;
         audio_beep(880.0f, 60, 140);
         break;
     case RK_DES_SAVE:
-        designer_save();
+        if (designer_editing_idx >= 0)
+            designer_apply_edit();
+        else
+            designer_save();
         break;
     case RK_DES_CANCEL:
-        menu_screen = SCREEN_SETUP;
+        menu_screen = designer_return_screen;
         menu_row = 0;
         audio_beep(660.0f, 60, 130);
         break;
@@ -3389,15 +3523,17 @@ static void draw_designer_screen(void)
     y = 104.0f;
     snprintf(buf, sizeof(buf), "HP    %d", (int)sp.power_hp);
     hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
-    snprintf(buf, sizeof(buf), "CURB  %d", (int)sp.mass_kg);
+    snprintf(buf, sizeof(buf), "CURB  %dLB", (int)(sp.mass_kg * KG_TO_LB));
     hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
-    snprintf(buf, sizeof(buf), "0-100 %.1fS",
+    snprintf(buf, sizeof(buf), "0-62  %.1fS",
              (double)spec_accel_time_with_settings(&sp, &app_settings));
     hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
     snprintf(buf, sizeof(buf), "TOP   %d",
-             (int)spec_top_speed_with_settings(&sp, &app_settings));
+             (int)(spec_top_speed_with_settings(&sp, &app_settings) *
+                   KPH_TO_MPH));
     hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
-    snprintf(buf, sizeof(buf), "100-0 %d", (int)sp.brake_dist_100);
+    snprintf(buf, sizeof(buf), "62-0  %dFT",
+             (int)(sp.brake_dist_100 * M_TO_FT));
     hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
     snprintf(buf, sizeof(buf), "GRIP  %.2fG", (double)sp.lat_g);
     hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
@@ -3462,10 +3598,10 @@ static void draw_setup_screen(void)
     /* track card */
     snprintf(buf, sizeof(buf), "%d LAPS", menu_track.laps);
     hud_text(W - 236.0f, 100.0f, 10.0f, 17.0f, buf, 210, 215, 225, 240);
-    snprintf(buf, sizeof(buf), "%d N", (int)menu_track.total_len);
+    snprintf(buf, sizeof(buf), "%d FT", (int)(menu_track.total_len * M_TO_FT));
     hud_text(W - 236.0f, 124.0f, 10.0f, 17.0f, buf, 200, 205, 215, 235);
-    snprintf(buf, sizeof(buf), "RISE %d", (int)(menu_track.max_y -
-                                                menu_track.min_y));
+    snprintf(buf, sizeof(buf), "RISE %d",
+             (int)((menu_track.max_y - menu_track.min_y) * M_TO_FT));
     hud_text(W - 236.0f, 148.0f, 10.0f, 17.0f, buf, 200, 205, 215, 235);
     hud_text(W - 236.0f, 172.0f, 10.0f, 17.0f,
              menu_track.has_walls ? "RAILS" : "NO RAILS",
@@ -3521,15 +3657,17 @@ static void draw_garage_overlay(int p)
     y = 224.0f;
     snprintf(buf, sizeof(buf), "HP    %d", (int)sp->power_hp);
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
-    snprintf(buf, sizeof(buf), "CURB  %d", (int)sp->mass_kg);
+    snprintf(buf, sizeof(buf), "CURB  %dLB", (int)(sp->mass_kg * KG_TO_LB));
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
-    snprintf(buf, sizeof(buf), "0-100 %.1fS",
+    snprintf(buf, sizeof(buf), "0-62  %.1fS",
              spec_accel_time_with_settings(sp, &app_settings));
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
     snprintf(buf, sizeof(buf), "TOP   %d",
-             (int)spec_top_speed_with_settings(sp, &app_settings));
+             (int)(spec_top_speed_with_settings(sp, &app_settings) *
+                   KPH_TO_MPH));
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
-    snprintf(buf, sizeof(buf), "100-0 %d", (int)sp->brake_dist_100);
+    snprintf(buf, sizeof(buf), "62-0  %dFT",
+             (int)(sp->brake_dist_100 * M_TO_FT));
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
     snprintf(buf, sizeof(buf), "GRIP  %.2fG",
              sp->lat_g *

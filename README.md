@@ -197,6 +197,25 @@ for the hairpins.
   `has_walls` flag always claimed they had — the drawing code lived
   entirely inside an alpine-only branch, and neither track is alpine, so
   the flag never actually drew anything.
+- **v1.25.0** — the v1.20.0 power-oversteer/forced-spin mechanic is
+  gone: grip now just holds, progressively scrubbing if you push past
+  it, until you deliberately break it loose with the handbrake — no
+  more surprise escalation or a forced spin from steering alone. Gears
+  are RPM-based now: one engine curve per car, peaking at a single
+  nominal RPM shared by every gear, falling away sharply to either
+  side; automatic shifts follow straight from that instead of a
+  separate shift-point dial. Cars can be naturally aspirated,
+  turbocharged, or supercharged (aspiration returns as a concept, in a
+  new form — it changes how the existing automatic turbo spool builds
+  and bleeds rather than being the old rechargeable push-to-pass
+  button v1.15.0 had and v1.16.0 retired). Grip is no longer a free
+  dial in the car designer either, deriving from mass and drag the
+  same way mass derives from power. The garage can now edit any car,
+  including a built-in, for the session (never saved to disk). A
+  finished car eases to a ~30 mph cruise and holds it, instead of
+  braking all the way to a stop. Every on-screen speed, distance and
+  weight is imperial now — mph, feet, pounds — with the simulation
+  itself unchanged underneath.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -238,10 +257,11 @@ for the hairpins.
   cornering is limited by lateral grip (v²/r ≤ μg, boosted by road
   banking where a circuit has it) — push a little past it and the tires
   have a shoulder, holding a tighter line than the nominal limit before
-  it truly gives way; push a lot past it, or lean hard on a rear-driven
-  car's throttle in a tight turn, and it spins instead of just running
-  wide. Gravity acts along the road grade: climbs cost speed, descents
-  give it back.
+  it truly gives way; push further and it's progressive understeer, not
+  a surprise. Grip holds until you deliberately break it loose with the
+  handbrake — that's drifting, and it's the only way a car spins on
+  purpose. Gravity acts along the road grade: climbs cost speed,
+  descents give it back.
 - **Thirteen cars, and no two drive alike.** RACER (a 260 kg superkart) and
   TRUCK (a 2100 kg pickup) sit at opposite ends of the roster; between
   them are a hot hatch (RUBY), a rally car (RALLY) and a dune buggy
@@ -252,11 +272,14 @@ for the hairpins.
   match it, and two oval specialists built for BULLRING (below) — STOCKER
   and its lower-drag sibling SLIPSTREAM. Every one is defined by
   horsepower, curb weight, stopping distance, lateral g, drag area,
-  wheelbase, dirt grip and per-gear limiter speeds — the menu derives
-  0-100 time and top speed from the same equations the physics uses. The
-  roster comes from `cars.json`, so another car is an added JSON object,
-  not a C surgery — or design one from the garage menu's in-game car
-  designer, which saves straight back into that same file.
+  wheelbase, dirt grip, per-gear limiter speeds, a nominal RPM and an
+  aspiration — the menu derives 0-62 mph time and top speed from the
+  same equations the physics uses. The roster comes from `cars.json`,
+  so another car is an added JSON object, not a C surgery — design one
+  from the garage menu's in-game car designer, which saves straight
+  back into that same file, or edit any existing car, built-in
+  included, for the rest of the session without touching the file at
+  all.
 - **Nine circuits**, all measured rather than guessed. Lap counts are set
   per circuit so every race covers a similar distance:
 
@@ -289,11 +312,13 @@ for the hairpins.
   of gravity now pointing toward the apex instead of straight down, the
   same reason a real banked turn lets you carry more speed through it.
 - **Gearboxes.** Every car has a real gearbox — 4 to 6 gears, each with a
-  road speed at the limiter. Where you are in the band decides your power:
-  bog it below a third of the band and it pulls badly, sit on the limiter
-  and it stops pulling at all, and a shift cuts drive for a moment, so
-  short-shifting out of a hairpin is a genuine decision. Pick **AUTO** or
-  **SHIFT** (manual) per player in the garage.
+  road speed at the limiter — and one engine curve behind all of them,
+  peaking at a single nominal RPM shared by every gear, exactly like a
+  real engine has one torque curve mapped through different ratios.
+  Wander far from that peak, in either direction, and power falls away
+  fast; sit on the limiter and it stops pulling entirely. A shift cuts
+  drive for a moment, so short-shifting out of a hairpin is a genuine
+  decision. Pick **AUTO** or **SHIFT** (manual) per player in the garage.
 - **Cliffs and checkpoints.** On the unguarded passes the shoulder is the
   edge: go over it and the car drops away, then gets set back down at the
   last checkpoint it passed without handing out any free progress. A
@@ -318,9 +343,14 @@ for the hairpins.
   2, quadrants for 3-4), with view culling so a full field still runs at
   frame rate in four-way split.
 - **No collectible power-ups, ever** — no roadside panel, no random
-  pickup. A car's turbo is its own: it spools up and bleeds off
-  automatically with real throttle and revs, no button required, and
-  applies straight to engine power for as long as it stays lit. The
+  pickup. Every car is naturally aspirated, turbocharged, or
+  supercharged. A turbo spools up and bleeds off automatically with
+  real throttle and revs, no button required — genuine lag building up
+  and bleeding off, for the biggest bonus of the three; a supercharger
+  is driven straight off the engine, so its (smaller) bonus is there
+  the instant the revs are, with no lag in either direction; naturally
+  aspirated cars make no forced-induction bonus at all. Whatever a car
+  has applies straight to engine power for as long as it's there. The
   "use" button is an instantaneous full-throttle stab instead of a
   resource to spend. Tires only ever wear over a race, with no mid-lap
   refresh; picking a compound is a bet on the whole distance, not a
@@ -334,7 +364,7 @@ for the hairpins.
   grip limit, countdown beeps — synthesized at runtime via ASND, no
   sound assets.
 - Chase cameras with terrain avoidance, minimap, 7-segment HUD with
-  km/h speedo, rumble on every supported controller.
+  an mph speedo, rumble on every supported controller.
 
 ## Running it in Dolphin
 

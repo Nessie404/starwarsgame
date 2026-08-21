@@ -167,11 +167,19 @@ int track_weather_at(const Track *t, int seg, float race_t,
 
 /*
  * Gearing. Each car has a gearbox whose ratios are expressed as the road
- * speed at which that gear hits the rev limiter. Engine output then
- * depends on where in the gear you are: bogging below the torque band
- * costs power, so does bouncing off the limiter, and the limiter itself
- * caps speed until you shift up. Shifting takes a moment during which
- * drive is cut, so short-shifting a hairpin exit is a real decision.
+ * speed at which that gear hits the rev limiter (gear_top), same as a
+ * real gear ratio expressed against a fixed redline: rev_frac (game.c) —
+ * how far a gear is into its own band — is a direct stand-in for engine
+ * RPM as a fraction of redline, since the two are proportional at fixed
+ * gearing. The engine itself has one power curve regardless of which
+ * gear puts it there: nominal_rpm is the RPM (as a fraction of the
+ * shared redline, GameSettings.tacho_redline_rpm) where it makes the
+ * most power, with output falling off sharply to either side of it
+ * (gear_power_scale_rpm) — precisely, not gently, the way a real,
+ * highly tuned engine does more than a lazy, torquey one. The shape of
+ * that falloff is fixed; only where its peak sits is a car's own
+ * choice. Shifting takes a moment during which drive is cut, so
+ * short-shifting a hairpin exit is a real decision.
  */
 typedef struct {
     char  name[KART_NAME_LEN]; /* short uppercase garage label          */
@@ -198,27 +206,43 @@ typedef struct {
     float awd_front_bias;    /* AWD only: 0 = rear-biased .. 1 = front-biased */
     int   n_gears;
     float gear_top[MAX_GEARS];  /* m/s at the limiter in each gear      */
-    /*
-     * Where the automatic box changes gear, as a fraction of the gear it
-     * is in. One pair per gear, so a car can short-shift out of first and
-     * hold second to the limiter; cars.json may set them per car or per
-     * gear, and anything it leaves out keeps the defaults.
-     */
-    float auto_up[MAX_GEARS];
-    float auto_down[MAX_GEARS];
+    float nominal_rpm;       /* engine RPM of peak power, shared by every
+                              * gear (see the struct comment above)     */
+    int   aspiration;        /* ASPIRATION_* — see below                */
 } KartSpec;
 
 enum { DRIVETRAIN_FWD = 0, DRIVETRAIN_RWD = 1, DRIVETRAIN_AWD = 2 };
 
-#define COOLDOWN_SECONDS 11.0f /* slowing-down lap: flag to a standstill */
-#define SHIFT_TIME    0.18f   /* seconds of cut drive while shifting    */
-#define AUTO_UP_FRAC   0.95f  /* default automatic upshift point        */
-#define AUTO_DOWN_FRAC 0.38f  /* default automatic downshift point      */
-#define BOG_FRACTION  0.34f   /* below this much of the gear, it bogs   */
+/*
+ * Forced induction. Naturally aspirated makes whatever power_hp says,
+ * on its own, the instant the revs are there — no meter, nothing to
+ * spool. A turbo makes real extra power on top of that (the biggest
+ * bonus of the three) but only once its exhaust-driven spool has built
+ * up over real time (kart_step's existing turbo_spool), and that spool
+ * bleeds off just as gradually off the throttle — genuine lag, in both
+ * directions. A supercharger is driven straight off the engine, not
+ * exhaust, so its boost is instant and proportional to revs right now
+ * — no lag building up or bleeding off — in exchange for a smaller
+ * bonus than a turbo's, the real trade-off between the two.
+ */
+enum { ASPIRATION_NA = 0, ASPIRATION_TURBO = 1, ASPIRATION_SUPERCHARGED = 2,
+       ASPIRATION_COUNT = 3 };
+const char *aspiration_name(int aspiration);
 
-/* engine output multiplier for being at `frac` of the current gear's
- * band; shared by the simulation, the AI and the tests */
-float gear_power_scale(float frac);
+#define COOLDOWN_SECONDS 11.0f /* slowing-down lap: ramps to cruise over this */
+#define COOLDOWN_CRUISE_MPS 13.41f /* ~30 mph — the marshal keeps the
+                                    * car circulating at this pace
+                                    * afterward, never to a dead stop */
+#define SHIFT_TIME    0.18f   /* seconds of cut drive while shifting    */
+#define DEFAULT_NOMINAL_RPM 5500.0f /* default peak-power RPM           */
+
+/*
+ * Engine output multiplier at rev_frac (0..1, this gear's own fraction
+ * of the way to redline — see the KartSpec comment above) given where
+ * nominal_frac (nominal_rpm expressed the same way) puts the power
+ * peak. Shared by the simulation, the AI and the tests.
+ */
+float gear_power_scale_rpm(float rev_frac, float nominal_frac);
 
 /* customisation the player picks in the garage */
 enum { GEARBOX_AUTO = 0, GEARBOX_MANUAL = 1, GEARBOX_MODES = 2 };
@@ -247,8 +271,8 @@ extern KartSpec kart_specs[MAX_KART_SPECS];
 extern int kart_spec_count;
 void kart_specs_reset_defaults(void);
 
-/* fill in any shift point a car did not specify */
-void kart_spec_default_shifts(KartSpec *s);
+/* fill in nominal_rpm/aspiration if a car did not specify them */
+void kart_spec_default_gearing(KartSpec *s);
 
 /* Is this a car that could actually race — same bounds cars.json is
  * held to. error/error_cap may be NULL/0 to skip the message. */
@@ -320,7 +344,6 @@ struct GameSettings {
     float rolling_resistance;
     float drivetrain_efficiency;
     float shift_seconds;
-    float bog_fraction;
     float steer_rate_on;
     float steer_rate_center;
     float steer_speed_fade;
@@ -394,23 +417,6 @@ struct GameSettings {
     float understeer_scrub;        /* base speed loss per second of slip */
     float understeer_scrub_curve;  /* extra loss at slip = 1.0, on top   */
 
-    /*
-     * Power oversteer: a rear-driven car committing hard to a corner on
-     * the throttle can rotate faster than its own grip alone would
-     * allow — the rear stepping out — for as long as the driver keeps
-     * asking for more than the car can grip. Ease off before it goes
-     * too far and it settles back down for free (the reward: extra
-     * rotation, no speed lost getting it); keep pushing past
-     * oversteer_spin_seconds and it spins.
-     */
-    float oversteer_grow_rate;     /* extra yaw fraction per second held */
-    float oversteer_max_bonus;     /* cap on that extra fraction         */
-    float oversteer_catch_decay;   /* how fast easing off settles it     */
-    float oversteer_spin_seconds;  /* uncaught duration before it spins  */
-    float spin_seconds;            /* how long a spin holds control away */
-    float spin_yaw_mult;           /* spin yaw rate, x the car's own cap */
-    float spin_speed_loss;         /* speed lost per second of spinning  */
-
     /* AI. overcommit_chance is checked once on each sufficiently tight,
      * unguarded corner and is scaled by the strategy's attack rating. */
     float ai_skill_mult;
@@ -459,8 +465,12 @@ struct GameSettings {
     float grade_gravity_mult;
     float grade_load_effect;     /* 0 = ignore load loss, 1 = full cos  */
 
-    /* instruments: the sim has no crankshaft, so the tachometer maps
-     * where the car is in its gear onto a readable rev range */
+    /* instruments, and the redline every car's gearing is built against:
+     * the sim has no crankshaft, so rev_frac (0..1, this gear's own
+     * fraction of the way to its own limiter — see KartSpec) stands in
+     * for real RPM, scaled onto this idle..redline range for the
+     * tachometer and to turn KartSpec.nominal_rpm into the fraction
+     * gear_power_scale_rpm actually reads (see kart_step). */
     float tacho_idle_rpm;
     float tacho_redline_rpm;
 
@@ -634,14 +644,6 @@ typedef struct {
     int   respawned;      /* one-frame flag for the platform layer      */
     int   falls;          /* completed cliff falls (AI telemetry/tests) */
     int   drifting;       /* handbrake locked in, +1/-1 = direction     */
-    /* power oversteer: builds while a rear-driven car commits hard
-     * under throttle near the grip limit, decays fast if the driver
-     * countersteers to catch it, and forces a spin if it isn't caught
-     * in time — see kart_step */
-    float oversteer_t;    /* seconds building toward a spin, 0 = none   */
-    float spin_t;         /* >0 while a spin has taken control away     */
-    float spin_yaw;       /* signed yaw rate set at spin onset, decays
-                           * to 0 over spin_t                          */
     float tire_wear;      /* 0 = fresh, 1 = worn out                    */
     float tire_temp;      /* degrees C                                  */
     float tire_grip_now;  /* what the rubber is actually worth, 0..1+   */
@@ -682,7 +684,6 @@ typedef struct {
     /* the slowing-down lap after the flag */
     float cooldown_t;     /* seconds since the chequered flag           */
     float cooldown_v0;    /* speed it crossed the line at               */
-    int   parked;         /* stopped after the flag, holding on the brake */
 
     /*
      * Going the wrong way. `wrong_way_t` counts how long the car has been

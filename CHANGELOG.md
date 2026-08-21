@@ -4,6 +4,54 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.25.0] - 2026-08-25
+
+### Changed
+
+- **Oversteer, reworked: grip holds until you deliberately let it go.**
+  The escalating power-oversteer/forced-spin mechanic from v1.20.0 is
+  gone — holding the wheel over used to boost cornering grip by up to
+  40% over about a second and then force an uncontrollable spin if it
+  wasn't "caught," which read as the car suddenly turning far harder
+  than commanded and then snapping off the road. Understeer scrub and
+  the tire "shoulder" (v1.24.0) still apply; the only deliberate way to
+  break the rear loose now is the handbrake. The cornering grip cap's
+  low-speed floor also moved from 0.5 to 6 m/s, and the guardrail
+  collision penalty from 2.5/s to 1.2/s, so a car that does scrub down
+  hard no longer spirals into an ever-tightening, self-reinforcing spin.
+- **Gears are RPM-based now, not a percentage of each gear's own span.**
+  Every car has one engine curve — a single nominal RPM shared by every
+  gear, exactly like a real engine — that peaks there and falls away
+  steeply, not gently, to both idle and redline. Automatic shifts now
+  follow straight from where that nominal RPM sits relative to redline;
+  there is no separate shift-point dial to tune any more.
+- **Aspiration: naturally aspirated, turbocharged, or supercharged.**
+  Naturally aspirated cars make no forced-induction bonus at all. A
+  turbo keeps the existing spool mechanic — real lag building up and
+  bleeding off — for the biggest bonus of the three. A supercharger is
+  driven off the engine directly: instant, proportional to revs right
+  now, no lag in either direction, for a smaller bonus than a turbo's.
+- **Grip is no longer a free dial in the car designer.** It now derives
+  from the mass the power trade-off already settled on (lighter is
+  grippier) and from drag (more assumed downforce, not just more drag),
+  the same treatment mass itself got in v1.24.0.
+- **The slowing-down lap no longer ends in a dead stop.** A finished car
+  ramps down to a steady ~30 mph cruise and holds it indefinitely,
+  actively driven the whole way, rather than being braked to a
+  standstill and left there.
+- **Every in-game speed, distance and weight reads in imperial units**
+  now — mph, feet, pounds — on the HUD and throughout the garage and car
+  designer. The simulation itself is unchanged underneath; only the
+  display layer converts.
+
+### Added
+
+- **Edit any car from the garage, not just new ones.** A new EDIT CAR
+  row opens any car — including a built-in — in the same designer view
+  used to build one from scratch, with every stat editable. Saving
+  patches that car for the rest of the session without touching disk;
+  restarting the game restores the original.
+
 ## [1.24.1] - 2026-08-24
 
 ### Fixed

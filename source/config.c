@@ -513,48 +513,37 @@ static int read_drivetrain(const char *json, const JsonToken *tokens,
 }
 
 /*
- * Automatic shift points: "automatic_upshift_fraction" sets every gear,
- * "automatic_upshift_per_gear" sets them one at a time, and a car that
- * mentions neither keeps the defaults. Fractions are of the gear's own
- * limiter speed, so 0.95 means "change at 95% of this gear".
+ * Engine character: "nominal_rpm" is the RPM (shared by every gear —
+ * see the KartSpec comment in game.h) where the engine makes the most
+ * power, and "aspiration" is "na" (default), "turbo" or "supercharged".
+ * A car that mentions neither keeps the defaults.
  */
-static int read_shift_points(const char *json, const JsonToken *tokens,
-                             int count, int obj, KartSpec *s,
-                             char *error, int error_cap)
+static int read_gearing(const char *json, const JsonToken *tokens,
+                        int count, int obj, KartSpec *s,
+                        char *error, int error_cap)
 {
-    static const char *one[2] = { "automatic_upshift_fraction",
-                                  "automatic_downshift_fraction" };
-    static const char *per[2] = { "automatic_upshift_per_gear",
-                                  "automatic_downshift_per_gear" };
-    int which;
+    int at;
 
-    kart_spec_default_shifts(s);
-    for (which = 0; which < 2; which++) {
-        float *dst = which == 0 ? s->auto_up : s->auto_down;
-        int at = object_get(json, tokens, count, obj, one[which]);
-        int g;
+    kart_spec_default_gearing(s);
+    if (!optional_float(json, tokens, count, obj, "nominal_rpm",
+                        &s->nominal_rpm, error, error_cap))
+        return 0;
 
-        if (at >= 0) {
-            float v;
-            if (!token_float(json, &tokens[at], &v))
-                return set_error(error, error_cap, "BAD SHIFT POINT");
-            for (g = 0; g < MAX_GEARS; g++)
-                dst[g] = v;
-        }
-        at = object_get(json, tokens, count, obj, per[which]);
-        if (at >= 0) {
-            int ng = array_length(tokens, count, at);
-            if (ng != s->n_gears)
-                return set_error(error, error_cap,
-                                 "SHIFT LIST MUST MATCH GEARS");
-            for (g = 0; g < ng; g++) {
-                float v;
-                int item = array_item(tokens, count, at, g);
-                if (item < 0 || !token_float(json, &tokens[item], &v))
-                    return set_error(error, error_cap, "BAD SHIFT POINT");
-                dst[g] = v;
-            }
-        }
+    at = object_get(json, tokens, count, obj, "aspiration");
+    s->aspiration = ASPIRATION_NA;
+    if (at >= 0) {
+        char aspiration[16];
+        if (!token_string(json, &tokens[at], aspiration,
+                          (int)sizeof(aspiration)))
+            return set_error(error, error_cap, "BAD ASPIRATION");
+        if (strcmp(aspiration, "na") == 0)
+            s->aspiration = ASPIRATION_NA;
+        else if (strcmp(aspiration, "turbo") == 0)
+            s->aspiration = ASPIRATION_TURBO;
+        else if (strcmp(aspiration, "supercharged") == 0)
+            s->aspiration = ASPIRATION_SUPERCHARGED;
+        else
+            return set_error(error, error_cap, "UNKNOWN ASPIRATION");
     }
     return 1;
 }
@@ -629,8 +618,8 @@ int config_load_cars_text(const char *json, char *error, int error_cap)
             }
             s->gear_top[g] = kph / 3.6f;
         }
-        if (!read_shift_points(json, tokens, count, obj, s, error,
-                               error_cap)) {
+        if (!read_gearing(json, tokens, count, obj, s, error,
+                          error_cap)) {
             free(tokens);
             return 0;
         }
@@ -672,9 +661,9 @@ int config_load_cars_file(const char *path, char *error, int error_cap)
  * The save half of the pair above: serialize a kart spec array back
  * into a cars.json document, field for field, so config_load_cars_text
  * reads back exactly what was meant, not just something close to it.
- * The upshift/downshift fraction is always written out explicitly
- * (never omitted to fall back on the compiled default) because some
- * shipped cars — FORMULA, TRUCK — are deliberately tuned away from
+ * nominal_rpm and aspiration are always written out explicitly (never
+ * omitted to fall back on the compiled default) because some shipped
+ * cars — FORMULA, TRUCK, MUSCLE — are deliberately tuned away from
  * that default and a round trip must not quietly flatten them back to
  * it. Returns the number of bytes written, or 0 if the roster didn't
  * fit in buf_cap.
@@ -723,12 +712,15 @@ int config_write_cars_text(const KartSpec *specs, int count,
         for (g = 0; g < s->n_gears; g++)
             EMIT("%s%.3f", g ? ", " : "", (double)(s->gear_top[g] * 3.6f));
         EMIT("],\n"
-             "      \"automatic_upshift_fraction\": %.3f,\n"
-             "      \"automatic_downshift_fraction\": %.3f,\n"
+             "      \"nominal_rpm\": %.1f,\n"
+             "      \"aspiration\": \"%s\",\n"
              "      \"drivetrain\": %s\n"
              "    }%s\n",
-             (double)s->auto_up[0], (double)s->auto_down[0], dt,
-             (i + 1 < count) ? "," : "");
+             (double)s->nominal_rpm,
+             s->aspiration == ASPIRATION_TURBO ? "turbo" :
+             s->aspiration == ASPIRATION_SUPERCHARGED ? "supercharged" :
+             "na",
+             dt, (i + 1 < count) ? "," : "");
     }
     EMIT("  ]\n}\n");
 #undef EMIT
@@ -843,9 +835,7 @@ int config_load_settings_text(GameSettings *settings, const char *json,
                          "drivetrain_efficiency", &s.drivetrain_efficiency,
                          error, error_cap) ||
          !optional_float(json, tokens, count, obj, "shift_seconds",
-                         &s.shift_seconds, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "bog_fraction",
-                         &s.bog_fraction, error, error_cap))) goto fail;
+                         &s.shift_seconds, error, error_cap))) goto fail;
 
     obj = object_get(json, tokens, count, 0, "steering");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
@@ -974,27 +964,6 @@ int config_load_settings_text(GameSettings *settings, const char *json,
          !optional_float(json, tokens, count, obj, "scrub_curve",
                          &s.understeer_scrub_curve, error,
                          error_cap))) goto fail;
-
-    obj = object_get(json, tokens, count, 0, "oversteer");
-    if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
-        set_error(error, error_cap, "OVERSTEER NEEDS OBJECT");
-        goto fail;
-    }
-    if (obj >= 0 &&
-        (!optional_float(json, tokens, count, obj, "grow_rate_per_second",
-                         &s.oversteer_grow_rate, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "max_bonus",
-                         &s.oversteer_max_bonus, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "catch_decay_per_second",
-                         &s.oversteer_catch_decay, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "spin_after_seconds",
-                         &s.oversteer_spin_seconds, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "spin_seconds",
-                         &s.spin_seconds, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "spin_yaw_multiplier",
-                         &s.spin_yaw_mult, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "spin_speed_loss",
-                         &s.spin_speed_loss, error, error_cap))) goto fail;
 
     obj = object_get(json, tokens, count, 0, "ai");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
