@@ -1270,6 +1270,16 @@ void game_init(Game *g, const GameConfig *cfg)
     else if (dp->guardrails == DIFFICULTY_GUARDRAILS_OFF)
         g->track.has_walls = 0;
 
+    /* weather: track_init always builds every circuit's zones, but a
+     * race only actually sees them with the toggle on — off (including
+     * the zero-init default) blanks them back out so track_weather_at
+     * has nothing to find anywhere on the lap */
+    if (g->cfg.weather != WEATHER_TOGGLE_ON) {
+        g->track.n_weather_zones = 0;
+        for (i = 0; i < g->track.n; i++)
+            g->track.weather_zone[i] = -1;
+    }
+
     grid_slot_assign(g->cfg.n_humans, g->cfg.career, kart_slot);
 
     for (i = 0; i < NUM_KARTS; i++) {
@@ -1441,6 +1451,22 @@ static int nearest_rival(const Game *g, const Kart *k, int ahead,
  * sees a lookahead driver reading closer to only the near apex like
  * everyone else; a fast, flowing circuit sees the full anticipation.
  */
+/*
+ * Normalized 0..1 read of an AI's effective skill (Kart.ai_skill, which
+ * already folds in the driver's own rating, the settings.json-wide
+ * ai_skill_mult, and the difficulty preset's aggressiveness), spanning
+ * the practical range across every driver on the roster and every
+ * difficulty preset: roughly 0.70 at the weakest driver on EASY to 1.25
+ * at the strongest on HARD. Used anywhere skill should show up as line
+ * precision or execution quality — not just how much grip a driver
+ * dares to use — so two drivers on the same strategy sheet feel like
+ * different levels of the same style rather than identical robots.
+ */
+static float ai_skill01(float ai_skill)
+{
+    return game_clampf((ai_skill - 0.70f) / 0.55f, 0.0f, 1.0f);
+}
+
 float ai_line_curvature(const Track *t, int seg, float lookahead_m)
 {
     int ahead = seg;
@@ -1484,7 +1510,12 @@ float ai_line_curvature(const Track *t, int seg, float lookahead_m)
  *
  * On top of that, a driver being chased by a human covers the side that
  * human keeps passing on (learned in ai_observe_humans), and a driver
- * hunting a car ahead picks the opposite side to set up a run at it.
+ * hunting a car ahead picks the opposite side to set up a run at it. Both
+ * of those tactical moves are scaled by `capitalize` (see ai_skill01):
+ * the strategy sheet decides who WANTS to cover or attack, skill decides
+ * how fully they actually pull it off — a low-skill DEFENDER still tries
+ * to cover the door, just half-heartedly, while a high-skill one shuts
+ * it properly.
  */
 static float ai_tactical_line(const Game *g, const Kart *k)
 {
@@ -1492,6 +1523,7 @@ static float ai_tactical_line(const Game *g, const Kart *k)
     const AIStrategy *st = &ai_strategies[k->strategy];
     float line;
     float room = track_road_half(t, k->seg) * 0.70f;
+    float capitalize = 0.55f + 0.65f * ai_skill01(k->ai_skill); /* 0.55..1.20 */
     float gap;
     int who;
 
@@ -1515,7 +1547,7 @@ static float ai_tactical_line(const Game *g, const Kart *k)
         if (fabsf(side) < 0.15f)                  /* no read yet: cover the
                                                    * side they are on now */
             side = (g->karts[who].lat > k->lat) ? 1.0f : -1.0f;
-        line += side * st->defend * close * room;
+        line += side * st->defend * close * room * capitalize;
     }
 
     /* hunting: line up on the opposite side of the car ahead */
@@ -1524,7 +1556,7 @@ static float ai_tactical_line(const Game *g, const Kart *k)
         float side = (g->karts[who].lat > k->lat) ? -1.0f : 1.0f;
         float close = 1.0f - gap / AI_ATTACK_RANGE;
         line += side * (st->attack * 0.4f + k->aggression * 0.6f) *
-                close * room;
+                close * room * capitalize;
     }
 
     return game_clampf(line, -room, room);
@@ -2579,6 +2611,13 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
             /* ease onto the tactical line rather than darting sideways,
              * and give more room to a human who has been leaning on us */
             float want = ai_tactical_line(g, k);
+            /* how tightly this driver actually tracks their own ideal
+             * line: skill is what turns "knows the racing line exists"
+             * into "adheres to it" — a low-skill driver still eases
+             * toward the same apex ai_tactical_line found, just more
+             * slowly, so it is measurably still settling into a corner
+             * a sharper driver already committed to */
+            float line_ease = 1.1f + 1.5f * ai_skill01(k->ai_skill);
             int h;
             for (h = 0; h < g->cfg.n_humans; h++) {
                 if (g->pmodel[h].contacts > 6) {
@@ -2589,7 +2628,7 @@ void game_update(Game *g, const Input inputs[MAX_HUMANS], float dt)
                 }
             }
             k->line_target += (want - k->line_target) *
-                              game_clampf(dt * 1.8f, 0.0f, 1.0f);
+                              game_clampf(dt * line_ease, 0.0f, 1.0f);
             ai_control(g, k, &in, dt);
             scale = ai_power_scale(g, k);
         }

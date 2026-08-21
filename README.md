@@ -216,6 +216,15 @@ for the hairpins.
   braking all the way to a stop. Every on-screen speed, distance and
   weight is imperial now — mph, feet, pounds — with the simulation
   itself unchanged underneath.
+- **v1.26.0** — weather is no longer CLASSIC-only: every circuit gets
+  the same snow-to-ice-to-puddle zones, behind a new WEATHER toggle in
+  race setup that's off by default. AI skill now also shows up as line
+  quality rather than just cornering speed: how tightly a driver eases
+  onto their own ideal racing line, and how fully they commit to a
+  cover or attack line once one is called for. The racing line itself
+  is unchanged — every driver already read the track's own curvature
+  rather than a hardcoded line — this is skill determining how well
+  that read gets carried out.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -235,7 +244,13 @@ for the hairpins.
   torque; LATE hangs on to the limiter and pays for it in shift time.
   On unguarded corners the attack-minded sheets also have a small,
   deterministic chance to overcommit to the outside line. Sometimes they
-  save it. Sometimes gravity files the protest.
+  save it. Sometimes gravity files the protest. The racing line itself
+  comes from the track's own geometry, not a fixed offset — every
+  driver leans toward whichever way the road actually bends up ahead —
+  and skill decides how well that read gets executed: how tightly a
+  driver actually holds that line and how fully they commit to a cover
+  or an attack once one is called for, not just how much grip they
+  dare to carry into the corner.
 - **They learn from their mistakes.** Every driver keeps its own nerve
   rating for each corner on the track. Run wide, clip a barrier, or spin
   and that corner's rating drops, so it arrives slower next lap; take it
@@ -311,6 +326,13 @@ for the hairpins.
   tilt to look at: a banked corner genuinely adds cornering grip, part
   of gravity now pointing toward the apex instead of straight down, the
   same reason a real banked turn lets you carry more speed through it.
+- **Weather, on any circuit, if you turn it on.** Every one of the nine
+  tracks carries the same three-patch layout: a stretch of road that
+  starts as fresh snow, melts into ice, and finally into a puddle,
+  each stage handing an advantage to a different tire compound — soft
+  in the snow and on ice, hard once it's standing water. A WEATHER row
+  in race setup turns it on or off for the field; off by default, so a
+  race stays bone dry until you ask for it.
 - **Gearboxes.** Every car has a real gearbox — the shipped roster runs
   4 to 6 gears, and the car designer/`cars.json` allow up to 12 — each
   with a road speed at the limiter, and one engine curve behind all of
@@ -650,6 +672,5 @@ circuit it never drops below its ground clearance, never aims more than
 
 - Open-road mode down the passes with traffic to overtake
 - Ghost laps and lap-time records
-- Weather (rain lowers μ; snow on the passes)
 - More passes (Independence, Pikes Peak hill climb)
 - Online time-trial leaderboards

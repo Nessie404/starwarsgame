@@ -78,6 +78,7 @@ static int menu_screen;              /* SCREEN_SETUP / SCREEN_GARAGE     */
 static int sel_players = 1;
 static int sel_track = 0;
 static int sel_laps = 0;             /* 0 = the circuit's own lap count */
+static int sel_weather = WEATHER_TOGGLE_OFF; /* off by default, see game.h */
 static int sel_spec[MAX_HUMANS] = { 1, 1, 1, 1 };
 static int sel_paint[MAX_HUMANS] = { 0, 1, 2, 3 };
 static int sel_gearbox[MAX_HUMANS] = { GEARBOX_AUTO, GEARBOX_AUTO,
@@ -1131,9 +1132,10 @@ static void draw_track(const Track *t, int viewer_seg, float race_t)
         } else {
             r = 85; g = 85; b = 90;
         }
-        /* weather (CLASSIC only): a patch reads as bright fresh snow,
-         * pale blue-grey ice once it has melted, and a dark wet puddle
-         * once that has melted too — see track_weather_at */
+        /* weather (any circuit, if this race turned it on): a patch
+         * reads as bright fresh snow, pale blue-grey ice once it has
+         * melted, and a dark wet puddle once that has melted too —
+         * see track_weather_at */
         switch (track_weather_at(t, i, race_t, &game.settings)) {
         case WEATHER_SNOW:   r = 235; g = 235; b = 240; break;
         case WEATHER_ICE:    r = 175; g = 205; b = 220; break;
@@ -2186,11 +2188,12 @@ static void draw_player_hud(int p)
         }
     }
 
-    /* what's coming up: only ever true on CLASSIC (every other track's
-     * weather_zone is all -1, so this never finds anything), and only
-     * worth a line where there's room for the rest of the lap detail
-     * too. Reads the same track_weather_at the road-surface tint and
-     * the AI's own cornering speed already use — no new mechanic. */
+    /* what's coming up: only ever finds anything when this race turned
+     * weather on (otherwise weather_zone is all -1 for the whole track,
+     * see game_init), and only worth a line where there's room for the
+     * rest of the lap detail too. Reads the same track_weather_at the
+     * road-surface tint and the AI's own cornering speed already use —
+     * no new mechanic. */
     if (game.cfg.n_humans <= 2 && game.state == STATE_RACING) {
         const Track *t = &game.track;
         int seg = k->seg, j, weather = WEATHER_CLEAR;
@@ -2674,8 +2677,8 @@ static void menu_update_track_preview(void)
  * button. Nothing is a one-way door.
  */
 enum {
-    RK_PLAYERS = 0, RK_TRACK, RK_LAPS, RK_GARAGE, RK_DESIGN, RK_CONFIG,
-    RK_START, RK_EXIT,                                        /* setup   */
+    RK_PLAYERS = 0, RK_TRACK, RK_LAPS, RK_WEATHER, RK_GARAGE, RK_DESIGN,
+    RK_CONFIG, RK_START, RK_EXIT,                              /* setup   */
     RK_CAR, RK_PAINT, RK_GEARBOX, RK_TIRES, RK_EDIT_CAR, RK_DONE,
                                                                /* garage  */
     RK_DES_NAME, RK_DES_POWER, RK_DES_BRAKE, RK_DES_GRIP,
@@ -2862,6 +2865,8 @@ static void build_rows(void)
         menu_rows[n_menu_rows++].player = 0;
         menu_rows[n_menu_rows].kind = RK_LAPS;
         menu_rows[n_menu_rows++].player = 0;
+        menu_rows[n_menu_rows].kind = RK_WEATHER;
+        menu_rows[n_menu_rows++].player = 0;
         for (p = 0; p < sel_players; p++) {
             menu_rows[n_menu_rows].kind = RK_GARAGE;
             menu_rows[n_menu_rows++].player = p;
@@ -2933,6 +2938,7 @@ static void row_label(const MenuRow *r, char *out, int cap)
     case RK_PLAYERS: snprintf(out, cap, "PLAYERS");            break;
     case RK_TRACK:   snprintf(out, cap, "TRACH");              break;
     case RK_LAPS:    snprintf(out, cap, "LAPS");               break;
+    case RK_WEATHER: snprintf(out, cap, "WEATHER");            break;
     case RK_CONFIG:  snprintf(out, cap, "JSON CONFIG");        break;
     case RK_GARAGE:  snprintf(out, cap, "P%d GARAGE", r->player + 1); break;
     case RK_START:   snprintf(out, cap, "GO");                 break;
@@ -2976,6 +2982,10 @@ static void row_value(const MenuRow *r, char *out, int cap)
             snprintf(out, cap, "AUTO %d", menu_track_laps());
         else
             snprintf(out, cap, "%d", sel_laps);
+        break;
+    case RK_WEATHER:
+        snprintf(out, cap, "%s",
+                sel_weather == WEATHER_TOGGLE_ON ? "ON" : "OFF");
         break;
     case RK_CONFIG:  snprintf(out, cap, "%s", config_banner[0]
                                              ? config_banner
@@ -3035,7 +3045,7 @@ static void row_value(const MenuRow *r, char *out, int cap)
 static int row_has_value(const MenuRow *r)
 {
     return (r->kind == RK_PLAYERS || r->kind == RK_TRACK ||
-            r->kind == RK_LAPS ||
+            r->kind == RK_LAPS || r->kind == RK_WEATHER ||
             r->kind == RK_CAR || r->kind == RK_PAINT ||
             r->kind == RK_GEARBOX || r->kind == RK_TIRES ||
             r->kind == RK_EDIT_CAR ||
@@ -3066,6 +3076,9 @@ static void row_change(const MenuRow *r, int d)
         sel_laps += d;
         if (sel_laps < 0) sel_laps = 9;
         if (sel_laps > 9) sel_laps = 0;
+        break;
+    case RK_WEATHER:
+        sel_weather = ((sel_weather + d) % 2 + 2) % 2;
         break;
     case RK_GARAGE:
     case RK_CAR:
@@ -3222,6 +3235,7 @@ static void start_race(void)
     cfg.n_humans = sel_players;
     cfg.settings = &app_settings;
     cfg.laps_override = sel_laps;
+    cfg.weather = sel_weather;
     for (p = 0; p < MAX_HUMANS; p++) {
         cfg.spec[p] = sel_spec[p] % kart_spec_count;
         cfg.paint[p] = sel_paint[p] % PAINT_COUNT;

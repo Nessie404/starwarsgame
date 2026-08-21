@@ -112,12 +112,16 @@ typedef struct {
 
     float min_x, max_x, min_z, max_z, min_y, max_y;
 
-    /* Weather zones (CLASSIC only — see track_init). weather_zone[i] is
-     * which zone sample i sits in, or -1 for bare pavement. Each zone
-     * starts as snow at the green flag and melts through ice into a
-     * puddle at its own pace, offset by weather_zone_offset so patches
-     * don't all turn over in lockstep; track_weather_at resolves a
-     * segment + race clock into the weather actually under the car. */
+    /* Weather zones — every circuit gets some (see track_init).
+     * weather_zone[i] is which zone sample i sits in, or -1 for bare
+     * pavement. Each zone starts as snow at the green flag and melts
+     * through ice into a puddle at its own pace, offset by
+     * weather_zone_offset so patches don't all turn over in lockstep;
+     * track_weather_at resolves a segment + race clock into the weather
+     * actually under the car. Whether any of this is actually live for a
+     * given race is a separate question — see GameConfig.weather — so a
+     * Track built straight off track_init always carries its zones even
+     * when a race chooses to ignore them. */
     int   weather_zone[TRACK_MAX_POINTS];
     int   n_weather_zones;
     float weather_zone_offset[TRACK_MAX_WEATHER_ZONES];
@@ -258,14 +262,26 @@ float tire_drag_mult(int compound);
  * Weather: patches of the road surface that start as snow, melt into
  * ice, and finally melt again into a puddle, each stage handing a
  * different tire compound the advantage — see track_weather_at and
- * weather_tire_grip_mult in game.c. Only CLASSIC carries any zones;
- * every other track's weather_zone entries stay -1 (clear) forever.
+ * weather_tire_grip_mult in game.c. Every circuit carries its own set of
+ * zones now (see track_init), not just CLASSIC; whether they are
+ * actually live for a given race is GameConfig.weather, below.
  */
 enum { WEATHER_CLEAR = 0, WEATHER_SNOW = 1, WEATHER_ICE = 2,
        WEATHER_PUDDLE = 3 };
 const char *weather_name(int weather);
 float weather_tire_grip_mult(const GameSettings *settings, int weather,
                              int compound);
+
+/*
+ * Whether a race actually sees the weather zones its track was built
+ * with. OFF (0, the zero-init default — every existing race that never
+ * mentions this field stays exactly as dry as before) leaves every
+ * segment reading WEATHER_CLEAR regardless of what track_init laid
+ * down; ON lets each circuit's own zones run on the settings.json melt
+ * schedule. See game_init, which blanks Track.weather_zone out entirely
+ * when this is OFF, so track_weather_at never has anything to find.
+ */
+enum { WEATHER_TOGGLE_OFF = 0, WEATHER_TOGGLE_ON = 1 };
 
 extern KartSpec kart_specs[MAX_KART_SPECS];
 extern int kart_spec_count;
@@ -831,6 +847,10 @@ typedef struct {
     int team[MAX_HUMANS];         /* TEAM_* per human, if team_mode     */
     /* Career/campaign mode — see CareerState above. */
     CareerState career[MAX_HUMANS];
+    /* Weather — WEATHER_TOGGLE_OFF/ON, see the enum above. 0 (the
+     * zero-init default) is OFF: every circuit races bone dry unless a
+     * race opts in. */
+    int weather;
 } GameConfig;
 
 typedef struct {

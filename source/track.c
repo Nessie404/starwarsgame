@@ -723,15 +723,19 @@ void track_init_with_settings(Track *t, int track_id,
         t->checkpoint_seg[t->n_checkpoints++] = i;
 
     /*
-     * Weather: three patches spread evenly around CLASSIC's lap, each on
-     * its own melt schedule (see the offsets below) so the whole track
-     * is never in lockstep — snow in one zone, ice in the next, already
-     * a puddle in the third. No other circuit gets any.
+     * Weather: three patches spread evenly around every circuit's lap,
+     * each on its own melt schedule (see the offsets below) so the whole
+     * track is never in lockstep — snow in one zone, ice in the next,
+     * already a puddle in the third. Every track gets this, derived from
+     * nothing but its own point count, so a longer or shorter lap simply
+     * spreads the same three zones over more or less road; whether any
+     * of it actually shows up in a race is GameConfig.weather, not
+     * anything decided here (see game_init).
      */
     for (i = 0; i < t->n; i++)
         t->weather_zone[i] = -1;
     t->n_weather_zones = 0;
-    if (track_id == TRACK_CLASSIC) {
+    {
         int zone_start[3];
         int zone_len = t->n / 9;
         int z;

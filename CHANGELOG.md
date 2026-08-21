@@ -4,6 +4,29 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.26.0] - 2026-08-26
+
+### Added
+
+- **Weather on every circuit, behind a toggle.** `track_init` now builds
+  the same three-zone snow → ice → puddle layout for all nine circuits,
+  not just CLASSIC, scaled by each track's own length. A new WEATHER row
+  in the race setup menu turns it on or off for the whole race (off by
+  default); the HUD's road tint and "what's coming up" readout work on
+  any circuit once it's on, with no changes of their own.
+
+### Changed
+
+- **AI skill now shows up as line quality, not just cornering speed.**
+  Every AI already read its track's own signed curvature to find a real
+  racing line rather than driving a fixed lateral offset (v1.13.0/
+  v1.21.0). Skill now scales how well that read gets executed: how
+  tightly a driver eases onto their own ideal line (a low-skill driver
+  is still visibly settling into a corner a sharp one already
+  committed to), and how fully they commit to a tactical cover or
+  attack line once one is called for. The racing line itself is
+  unchanged — this is execution quality, not a new line source.
+
 ## [1.25.0] - 2026-08-25
 
 ### Changed

@@ -45,10 +45,18 @@ batching unrelated work to make a bigger changelog.
 
 ### Small releases — ship alone, batch two or three before pushing
 
-Nothing queued right now — the three that were here (session-best lap,
-the weather-ahead HUD readout, camera corner lead-in) shipped together in
-v1.21.1; see the shipped-history section below. Roughly the order to work
-through whatever lands here next: cheapest/most self-contained first.
+- **Weather depth.** Every circuit now runs the same three-zone layout
+  (v1.26.0 — see below), reusing CLASSIC's original snow → ice → puddle
+  schedule scaled by each track's own point count rather than a bespoke
+  pass over each circuit's geometry. Left for later, once there's reason
+  to revisit it: hand-placed zones that actually respect each pass's own
+  hairpins and straights instead of three evenly-spaced patches; a
+  deliberate dry/snow/ice tire trade beyond today's single grip
+  multiplier (rolling resistance, durability); a visible zone
+  boundary/texture in `draw_track` beyond the flat color tint.
+
+Roughly the order to work through whatever lands here next: cheapest/most
+self-contained first.
 
 ### Big releases — bundle before shipping, roughly in priority order
 
@@ -72,28 +80,7 @@ away from their zero/off defaults. Concretely:
     and a "next race" menu flow that actually strings races together as
     one campaign.
 
-**2. Winter, for real, across the roster.** The weather system has been
-CLASSIC-only by design since v1.19.0; this is the release where that
-becomes deliberate rather than just unfinished. Bundled because all three
-depend on and inform each other — extending zones to new circuits is the
-first real test of whether the tire compounds' snow/ice/puddle grip
-numbers hold up outside the one track they were tuned on, and the visual
-work only pays off once there's more than one circuit's worth of zone to
-actually notice:
-  - add zones (snow → ice → puddle, `track_weather_at`) to some or all of
-    the seven mountain passes — its own pass over each circuit's own
-    geometry, not a copy-paste of CLASSIC's three-zone layout;
-  - define dry/snow/ice tire performance deliberately instead of only the
-    grip-multiplier trade that exists today: investigate whether harder
-    compounds should also gain lower rolling resistance or durability on
-    dry pavement, whether winter-oriented/softer compounds should gain
-    something beyond grip in the cold, and keep watching for a compound
-    winning on label alone rather than on the modeled trade;
-  - give weather zones a visible boundary/texture in `draw_track` beyond
-    today's flat color tint, now that there is reason to actually notice
-    a zone's edge on more than one circuit.
-
-**3. Player history, and an AI that learns from it.** Both items are about
+**2. Player history, and an AI that learns from it.** Both items are about
 capturing and persisting player performance over time, and the first is
 close to a prerequisite for the second (you need a place to keep lap data
 before you can mine it):
@@ -106,7 +93,7 @@ before you can mine it):
     controls so a heroic accident does not become mandatory curriculum
     forever.
 
-**4. A presentation pass: camera modes and pass scenery.** Lowest priority
+**3. A presentation pass: camera modes and pass scenery.** Lowest priority
 of the four — both items are about how the game looks rather than how it
 races, which has consistently been this project's second priority behind
 simulation depth (see Overall direction, below). Bundled because both are
@@ -128,6 +115,32 @@ A rolling window, newest first — see "How this list is organized" above.
 Any patch release that followed a minor release is folded into that
 release's entry rather than getting its own. For anything older,
 `CHANGELOG.md` and `docs/release-notes/` have the full record back to v1.0.
+
+### v1.26.0 — weather everywhere (with a toggle), and skill that shows up on track
+
+- [x] Weather is no longer CLASSIC-only. `track_init` builds the same
+  three-zone snow → ice → puddle layout for every circuit, scaled by
+  each track's own point count instead of a fixed segment count, so a
+  longer or shorter lap just spreads the same three patches over more
+  or less road. A new `GameConfig.weather` toggle (`WEATHER_TOGGLE_OFF`/
+  `_ON`, off by default) decides whether a race actually sees any of
+  it: `game_init` blanks every zone back to bare pavement when it's
+  off, so `track_weather_at` never finds anything regardless of what
+  `track_init` built. Wired into the setup menu as a WEATHER row next
+  to LAPS.
+- [x] AI skill now visibly shows up as line quality, not just cornering
+  speed. `ai_skill01()` normalizes `Kart.ai_skill` (already folding in
+  the driver's own rating, `ai_skill_mult`, and the difficulty preset)
+  to 0..1 across the roster's practical range, and two places now read
+  it: the rate `k->line_target` eases onto `ai_tactical_line`'s ideal
+  apex line (1.1..2.6 /s — a low-skill driver is still visibly settling
+  into a corner a sharp one already committed to), and the `capitalize`
+  multiplier (0.55..1.20) on the defend/attack tactical-line
+  contributions (a low-skill DEFENDER still tries to cover the door,
+  just half-heartedly). The base racing line itself is unchanged: every
+  driver already read the track's own signed curvature rather than a
+  hardcoded line (see v1.21.0's `ai_line_curvature`) — this is skill
+  determining how well that read gets executed, not a new line source.
 
 ### v1.25.0 — grip until it lets go, real gear physics, editable cars, imperial units
 
@@ -297,39 +310,6 @@ release's entry rather than getting its own. For anything older,
   sets any of these `GameConfig` fields away from their defaults. See
   Bundle 1 above for what's still open (the garage menu itself, a
   per-team HUD element, and `CareerState` save/load).
-
-### v1.21.0 — automatic turbo, two more challenging drivers, AI racing lines, and a follow-up patch
-
-- [x] Reworked boost into a fully automatic turbo. `Kart.turbo_spool`
-  builds and bleeds off on its own from real throttle and revs — no
-  button — and applies straight to engine power every frame, tapered by
-  how much grip is already spent cornering so it can't destabilize a car
-  mid-corner. The "use" button is now an instantaneous full-throttle
-  override instead of a resource to spend. Tunable in the `turbo` block
-  of `settings.json` (was `boost`).
-- [x] Added two more HOLT-tier drivers, KESSLER and DUARTE, replacing
-  RENARD and SOLANO after checking which roster tests each removed
-  driver was load-bearing for. See `docs/HANDOFF.md` §6 before growing
-  the roster past eleven — the array-index scheme silently makes
-  anything past `NUM_KARTS - 1` entries unreachable in a normal race.
-- [x] Some AI drivers (OSEI, NORDLI, DUARTE) now genuinely hunt the
-  racing line: `ai_line_curvature` blends in a second, farther curvature
-  sample per driver's `AIDriver.line_lookahead_m`, so they set up for
-  the corner after the one they're in, each reading a different
-  distance ahead. That anticipation fades toward nothing the tighter
-  the near corner already is — both realistic and needed, since an
-  early, untapered cut of this briefly broke the same fragile
-  TRUCK/AI_YOLO pairing noted below on Monarch and Berthoud Pass 2.0.
-- [x] *(v1.21.1 patch)* Three small, self-contained additions landed
-  together: a session-best lap per circuit that survives a `game_init`
-  (in-memory only, not persisted between process runs —
-  `session_best_lap_get`/`_record` in `game.c`, shown next to the
-  in-race best on the HUD); a HUD readout of the next weather zone's
-  condition on the approach to it, reusing `track_weather_at` with no
-  new mechanic; and the chase camera leaning its aim point toward the
-  signed curvature of an upcoming bend (new `cam_corner_lean` setting),
-  fading out the more the view has swung round for a reverse and
-  hard-clamped so a hairpin can't send it somewhere absurd.
 
 ## Overall direction
 
