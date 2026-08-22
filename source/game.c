@@ -835,14 +835,22 @@ void career_record_result(CareerState *cs, int final_rank)
  */
 static const AIDriver ai_drivers[] = {
     /* the sharp end: quick and willing, IBARRA is quick and wild, and
-     * KESSLER/DUARTE are the two who are hardest to actually beat */
-    { "HOLT",    AI_LATE,      1.05f, 0.86f, 0.90f, 1.15f, 0, "ATTACKER",   0.0f },
-    { "KESSLER", AI_LATE,      1.04f, 0.89f, 0.85f, 1.05f, 1, "RUTHLESS",   0.0f },
-    { "IBARRA",  AI_CHARGER,   1.02f, 0.55f, 1.00f, 1.30f, 5, "WILD",       0.0f },
-    { "DUARTE",  AI_INSIDE,    1.03f, 0.93f, 0.75f, 1.00f, 4, "SURGICAL",  34.0f },
-    /* the dependable middle */
-    { "BASTIEN", AI_DEFENDER,  0.99f, 0.90f, 0.60f, 0.95f, 2, "STUBBORN",   0.0f },
-    { "OSEI",    AI_INSIDE,    0.98f, 0.92f, 0.50f, 0.90f, 3, "TIDY",      16.0f },
+     * KESSLER/DUARTE are the two who are hardest to actually beat. All
+     * four nudged a little more toward TANAKA/VOSS's commitment as of
+     * v1.26.1 (aggression up, consistency down a touch) — see the note
+     * by VOSS below for the field-wide pass this belongs to. */
+    { "HOLT",    AI_LATE,      1.05f, 0.82f, 0.93f, 1.15f, 0, "ATTACKER",   0.0f },
+    { "KESSLER", AI_LATE,      1.04f, 0.85f, 0.88f, 1.05f, 1, "RUTHLESS",   0.0f },
+    { "IBARRA",  AI_CHARGER,   1.02f, 0.52f, 1.00f, 1.30f, 5, "WILD",       0.0f },
+    { "DUARTE",  AI_INSIDE,    1.03f, 0.89f, 0.78f, 1.00f, 4, "SURGICAL",  34.0f },
+    /* the dependable middle. BASTIEN and OSEI are the only two drivers
+     * that ever land in test_driver_field_has_characters' "dependable"
+     * bin (consistency >= 0.90 and aggression in [0.40, 0.70]) — their
+     * aggression still crept up a little for v1.26.1, just carefully
+     * short of that 0.70 ceiling, and their consistency was left alone
+     * rather than risk it below the bin's 0.90 floor. */
+    { "BASTIEN", AI_DEFENDER,  0.99f, 0.90f, 0.64f, 0.95f, 2, "STUBBORN",   0.0f },
+    { "OSEI",    AI_INSIDE,    0.98f, 0.92f, 0.55f, 0.90f, 3, "TIDY",      16.0f },
     { "NORDLI",  AI_CRUISER,   0.96f, 0.97f, 0.25f, 0.72f, 6, "SMOOTH",    24.0f },
     /* the back: one who overdrives, one who under-drives, two learners —
      * still the tail of the field, but no longer plain slow */
@@ -850,8 +858,19 @@ static const AIDriver ai_drivers[] = {
      * every gear to the limiter — see the YOLO sheet */
     { "TANAKA",  AI_YOLO,      0.95f, 0.48f, 0.95f, 1.35f, 7, "RAGGED",     0.0f },
     { "DELGADO", AI_CRUISER,   0.93f, 0.95f, 0.15f, 0.75f, 2, "TIMID",      0.0f },
-    { "CROSS",   AI_YOLO,      0.92f, 0.60f, 0.80f, 1.20f, 5, "OVERDRIVES", 0.0f },
-    { "PETRAN",  AI_BALANCED,  0.87f, 0.82f, 0.40f, 0.98f, 4, "STEADY",     0.0f }
+    /* CROSS's own skill nudged down slightly (0.92 -> 0.89) alongside
+     * the v1.26.1 pass below, purely to keep the field's skill spread
+     * (test_driver_field_has_characters requires >= 0.15) once PETRAN —
+     * the previous low anchor — was gone; fits its "OVERDRIVES" trait
+     * (rides ahead of its own ability) even better than before. */
+    { "CROSS",   AI_YOLO,      0.89f, 0.57f, 0.84f, 1.20f, 5, "OVERDRIVES", 0.0f },
+    /* v1.26.1: PETRAN (BALANCED, the field's plainest sheet, no test
+     * depended on it) replaced with a second TANAKA-like recruit — same
+     * no-guts-no-glory commitment, but pitched as genuinely quick
+     * (skill on par with DUARTE/IBARRA, well above TANAKA's own 0.95)
+     * and deliberately sloppier than TANAKA (consistency 0.40 vs 0.48):
+     * goes for every apex anyway and pays for it in falls more often. */
+    { "VOSS",    AI_YOLO,      1.03f, 0.40f, 0.98f, 1.30f, 1, "HEADLONG",   0.0f }
 };
 
 int ai_driver_count(void)

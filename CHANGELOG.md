@@ -4,6 +4,28 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.26.1] - 2026-08-27
+
+### Added
+
+- **VOSS, a second no-guts-no-glory driver.** Replaces PETRAN (BALANCED,
+  the field's plainest sheet, with no test relying on it) with a new
+  YOLO-strategy recruit: genuinely quick (skill on par with DUARTE and
+  IBARRA, well above TANAKA's own), but deliberately sloppier than
+  TANAKA (lower consistency) — commits to every apex regardless and
+  pays for it in falls more often than TANAKA does.
+
+### Changed
+
+- **The field leans a little more toward TANAKA's commitment overall.**
+  HOLT, KESSLER, IBARRA, DUARTE and CROSS all got a small aggression-up,
+  consistency-down nudge. BASTIEN and OSEI — the only two drivers that
+  ever land in the "dependable" bin
+  (`test_driver_field_has_characters`) — still moved, just carefully
+  short of the bin's aggression ceiling, and their consistency was left
+  untouched rather than risk it below the bin's floor. NORDLI and
+  DELGADO, the field's two cautious CRUISERs, are unchanged.
+
 ## [1.26.0] - 2026-08-26
 
 ### Added

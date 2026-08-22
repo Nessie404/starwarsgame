@@ -116,7 +116,7 @@ Any patch release that followed a minor release is folded into that
 release's entry rather than getting its own. For anything older,
 `CHANGELOG.md` and `docs/release-notes/` have the full record back to v1.0.
 
-### v1.26.0 — weather everywhere (with a toggle), and skill that shows up on track
+### v1.26.0 — weather everywhere (with a toggle), and skill that shows up on track (plus a v1.26.1 follow-up patch)
 
 - [x] Weather is no longer CLASSIC-only. `track_init` builds the same
   three-zone snow → ice → puddle layout for every circuit, scaled by
@@ -141,6 +141,16 @@ release's entry rather than getting its own. For anything older,
   driver already read the track's own signed curvature rather than a
   hardcoded line (see v1.21.0's `ai_line_curvature`) — this is skill
   determining how well that read gets executed, not a new line source.
+- [x] *(v1.26.1 patch)* A second no-guts-no-glory driver, VOSS, replaces
+  PETRAN (BALANCED, no test depended on it): same YOLO commitment as
+  TANAKA, genuinely quick (skill on par with DUARTE/IBARRA), but
+  deliberately sloppier (lower consistency) — falls more, sends it
+  anyway. HOLT, KESSLER, IBARRA, DUARTE and CROSS all nudged a little
+  more toward that same commitment (aggression up, consistency down);
+  BASTIEN and OSEI — the roster's only two `test_driver_field_has_characters`
+  "dependable" drivers — moved too, just short of that bin's aggression
+  ceiling and with consistency left alone to protect its floor. NORDLI
+  and DELGADO, the field's two cautious CRUISERs, are untouched.
 
 ### v1.25.0 — grip until it lets go, real gear physics, editable cars, imperial units
 

@@ -225,6 +225,11 @@ for the hairpins.
   is unchanged — every driver already read the track's own curvature
   rather than a hardcoded line — this is skill determining how well
   that read gets carried out.
+- **v1.26.1** — a second no-guts-no-glory driver, VOSS, joins TANAKA:
+  genuinely quick, but sloppier — commits to every apex anyway and pays
+  for it in falls more often. HOLT, KESSLER, IBARRA, DUARTE and CROSS
+  all lean a little more toward that same commitment; NORDLI and
+  DELGADO, the field's two cautious CRUISERs, are untouched.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -233,11 +238,14 @@ for the hairpins.
 ## Features
 
 - **A grid of twelve, and nobody drives like anyone else.** Eleven AI
-  rivals share out seven strategy sheets — BALANCED, LATE (brakes far too
+  rivals share out eight strategy sheets — BALANCED, LATE (brakes far too
   late), INSIDE (tight and defensive), DEFENDER (covers your favourite
   passing side), CHARGER (dives for every gap, brakes late), DRAFTER
   (sits in your mirrors, waits to pounce), CRUISER (cautious, wide,
-  smooth). Each sheet sets its racing line, how it brakes, how it
+  smooth), and YOLO — no guts, no glory, three drivers strong — which
+  clips every apex, never bothers covering a line, and rides every gear
+  to the limiter regardless of the cost. Each sheet sets its racing
+  line, how it brakes, how it
   overtakes, **and how it shifts** — where in the rev band it changes up,
   how early it comes down the box under
   braking, and how crisply it does it. CRUISER short-shifts and rides the

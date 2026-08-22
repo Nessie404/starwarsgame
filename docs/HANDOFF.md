@@ -325,6 +325,25 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   the roster's practical range. See §6 for why the ranges on both of
   those ended up wide rather than subtle — a narrower attempt broke a
   second, unrelated test.
+- **v1.26.1**: a second no-guts-no-glory driver, VOSS (`ai_drivers[]`,
+  `game.c`), replaces PETRAN (`AI_BALANCED`, the field's plainest sheet
+  and the only one with zero test dependency — see the "replace, don't
+  append" note in §6). Same `AI_YOLO` commitment as TANAKA, skill
+  pitched on par with DUARTE/IBARRA (well above TANAKA's own 0.95), but
+  a lower consistency than TANAKA's 0.48 (0.40) — sends every apex
+  anyway and pays for it in falls more often. HOLT, KESSLER, IBARRA,
+  DUARTE and CROSS all got a small aggression-up/consistency-down nudge
+  toward the same commitment; CROSS's own skill dropped slightly
+  (0.92 → 0.89) purely to keep `test_driver_field_has_characters`'s
+  skill-spread check (>= 0.15) satisfied once PETRAN — the previous low
+  anchor — was gone. BASTIEN and OSEI, the only two drivers that land
+  in that same test's "dependable" bin (consistency >= 0.90, aggression
+  in [0.40, 0.70]), still moved a little, just kept carefully inside
+  both edges of that bin rather than risk falling out of it. NORDLI and
+  DELGADO, the field's two cautious CRUISERs, are untouched by design —
+  see the "let me pick" exchange in the commit that shipped this: the
+  whole batch came from a short back-and-forth about exactly this kind
+  of roster call, not a one-shot judgment.
 
 ---
 
