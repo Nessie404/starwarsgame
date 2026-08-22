@@ -207,8 +207,7 @@ int kart_spec_validate(const KartSpec *s, char *error, int error_cap)
     }
     if (s->nominal_rpm < 1500.0f || s->nominal_rpm > 9500.0f)
         return kart_spec_error(error, error_cap, "BAD NOMINAL RPM");
-    if (s->aspiration != ASPIRATION_NA && s->aspiration != ASPIRATION_TURBO &&
-        s->aspiration != ASPIRATION_SUPERCHARGED)
+    if (s->aspiration < ASPIRATION_NA || s->aspiration >= ASPIRATION_COUNT)
         return kart_spec_error(error, error_cap, "BAD ASPIRATION");
     return 1;
 }
@@ -277,6 +276,12 @@ void game_settings_defaults(GameSettings *s)
     s->tire_grip_mult[TIRE_MEDIUM] = 1.00f;
     s->tire_grip_mult[TIRE_SOFT] = 1.08f;
     s->tire_grip_mult[TIRE_HARD] = 0.96f;
+    /* the straight-line counterpart to the cornering numbers above: hard
+     * is the dry accel/braking specialist, soft gives some of that back
+     * for its cornering bite — see the GameSettings comment in game.h */
+    s->tire_traction_mult[TIRE_MEDIUM] = 1.00f;
+    s->tire_traction_mult[TIRE_SOFT] = 0.92f;
+    s->tire_traction_mult[TIRE_HARD] = 1.08f;
     s->tire_drag_mult[TIRE_MEDIUM] = 1.00f;
     s->tire_drag_mult[TIRE_SOFT] = 1.04f;
     s->tire_drag_mult[TIRE_HARD] = 0.97f;
@@ -313,24 +318,36 @@ void game_settings_defaults(GameSettings *s)
     s->tire_ambient_c = 18.0f;
     s->weather_snow_to_ice_s = 40.0f;
     s->weather_ice_to_puddle_s = 90.0f;
-    /* soft: best rubber for snow and ice, worst for standing water */
+    /* soft: best rubber for snow, ice AND standing water — the dry-road
+     * traction the hard compound owns (tire_traction_mult) is worth
+     * nothing once the road isn't dry, and soft has the most tread bite
+     * left over of the three to fall back on */
     s->weather_snow_grip[TIRE_SOFT]   = 0.92f;
     s->weather_ice_grip[TIRE_SOFT]    = 0.85f;
-    s->weather_puddle_grip[TIRE_SOFT] = 0.55f;
+    s->weather_puddle_grip[TIRE_SOFT] = 0.90f;
     /* medium: never the best or the worst tire on the lot */
     s->weather_snow_grip[TIRE_MEDIUM]   = 0.80f;
     s->weather_ice_grip[TIRE_MEDIUM]    = 0.72f;
-    s->weather_puddle_grip[TIRE_MEDIUM] = 0.80f;
-    /* hard: the puddle tire, and the wrong choice for snow and ice */
+    s->weather_puddle_grip[TIRE_MEDIUM] = 0.75f;
+    /* hard: the dry-road accel/braking specialist, and the wrong choice
+     * for absolutely anything wet, icy or snowed over — no tread to
+     * bite in with, so it skates and fishtails where the other two
+     * compounds would still be finding grip */
     s->weather_snow_grip[TIRE_HARD]   = 0.55f;
     s->weather_ice_grip[TIRE_HARD]    = 0.50f;
-    s->weather_puddle_grip[TIRE_HARD] = 0.92f;
+    s->weather_puddle_grip[TIRE_HARD] = 0.50f;
     s->weather_puddle_drag_mult = 1.12f;
     s->turbo_spool_rate = 0.90f;
     s->turbo_spool_decay_rate = 1.50f;
     s->turbo_max_power_bonus = 0.35f;
+    s->twin_turbo_power_bonus_mult = 1.45f;
+    s->boost_kickdown_spool_thresh = 0.20f;
     s->understeer_scrub = 0.22f;
     s->understeer_scrub_curve = 0.60f;
+    s->engine_brake_decel = 2.2f;
+    s->tc_strength = 0.55f;
+    s->friction_circle_strength = 0.60f;
+    s->chassis_settle_rate = 8.0f;
     s->ai_skill_mult = 1.06f;
     s->ai_brake_mult = 0.76f;
     s->ai_unguarded_line_room = 0.72f;
@@ -413,6 +430,8 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
     FINITE_RANGE(s->steer_curve, 0.2f, 4.0f, "BAD STEER CURVE");
     for (i = 0; i < TIRE_COMPOUNDS; i++) {
         FINITE_RANGE(s->tire_grip_mult[i], 0.30f, 2.0f, "BAD TIRE GRIP");
+        FINITE_RANGE(s->tire_traction_mult[i], 0.30f, 2.0f,
+                     "BAD TIRE TRACTION");
         FINITE_RANGE(s->tire_drag_mult[i], 0.50f, 2.0f, "BAD TIRE DRAG");
         FINITE_RANGE(s->tire_rolling_mult[i], 0.50f, 2.0f, "BAD TIRE ROLL");
         FINITE_RANGE(s->tire_wear_rate[i], 0.0f, 0.5f, "BAD TIRE WEAR");
@@ -442,8 +461,17 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
     FINITE_RANGE(s->turbo_spool_decay_rate, 0.02f, 20.0f,
                  "BAD TURBO DECAY RATE");
     FINITE_RANGE(s->turbo_max_power_bonus, 0.0f, 2.0f, "BAD TURBO BONUS");
+    FINITE_RANGE(s->twin_turbo_power_bonus_mult, 1.0f, 3.0f,
+                 "BAD TWIN-TURBO BONUS");
+    FINITE_RANGE(s->boost_kickdown_spool_thresh, 0.0f, 1.0f,
+                 "BAD KICKDOWN THRESHOLD");
     FINITE_RANGE(s->understeer_scrub, 0.0f, 3.0f, "BAD UNDERSTEER SCRUB");
     FINITE_RANGE(s->understeer_scrub_curve, 0.0f, 5.0f, "BAD UNDERSTEER CURVE");
+    FINITE_RANGE(s->engine_brake_decel, 0.0f, 15.0f, "BAD ENGINE BRAKING");
+    FINITE_RANGE(s->tc_strength, 0.0f, 1.0f, "BAD TC STRENGTH");
+    FINITE_RANGE(s->friction_circle_strength, 0.0f, 1.0f,
+                 "BAD FRICTION CIRCLE");
+    FINITE_RANGE(s->chassis_settle_rate, 0.5f, 60.0f, "BAD CHASSIS RATE");
     FINITE_RANGE(s->grade_gravity_mult, 0.0f, 3.0f, "BAD GRADE GRAUITY");
     FINITE_RANGE(s->grade_load_effect, 0.0f, 1.0f, "BAD GRADE LOAD");
     FINITE_RANGE(s->tacho_idle_rpm, 0.0f, 20000.0f, "BAD IDLE RPM");
@@ -544,6 +572,7 @@ const char *aspiration_name(int aspiration)
     switch (aspiration) {
     case ASPIRATION_TURBO:        return "TURBO";
     case ASPIRATION_SUPERCHARGED: return "SUPERCHARGED";
+    case ASPIRATION_TWIN_TURBO:   return "TWIN-TURBO";
     default:                      return "N/A";
     }
 }
@@ -597,7 +626,8 @@ float weather_tire_grip_mult(const GameSettings *settings, int weather,
 }
 
 /* Softer rubber grips harder and drags a little more; hard rubber gives
- * some grip back for a slipperier, faster car. */
+ * some grip back for a slipperier, faster car. This is cornering grip —
+ * see tire_traction_mult below for the separate straight-line number. */
 float tire_grip_mult(int compound)
 {
     switch (compound) {
@@ -618,24 +648,45 @@ float tire_grip_mult_with_settings(const GameSettings *settings,
 }
 
 /*
+ * The straight-line counterpart to tire_grip_mult: a harder compound
+ * puts down a cleaner, more consistent bite under acceleration and
+ * braking on dry pavement than a soft one does — see the
+ * GameSettings.tire_traction_mult comment in game.h for the reasoning
+ * and how this differs from cornering grip.
+ */
+float tire_traction_mult(int compound)
+{
+    switch (compound) {
+    case TIRE_SOFT: return 0.92f;
+    case TIRE_HARD: return 1.08f;
+    default:        return 1.00f;
+    }
+}
+
+float tire_traction_mult_with_settings(const GameSettings *settings,
+                                       int compound)
+{
+    if (!settings)
+        return tire_traction_mult(compound);
+    if (compound < 0 || compound >= TIRE_COMPOUNDS)
+        compound = TIRE_MEDIUM;
+    return settings->tire_traction_mult[compound];
+}
+
+/*
  * Grip is peak grip scaled by two things: how far the rubber is from the
  * temperature it wants, and how worn it is. The temperature term is a
  * parabola across the window — cold rubber and overheated rubber are both
  * short of grip — flattening out at the compound's off-window value so a
- * cold tire is poor rather than useless.
+ * cold tire is poor rather than useless. Shared by the cornering and
+ * straight-line readings, which differ only in which peak they start from.
  */
-float tire_condition_grip(const GameSettings *settings, int compound,
-                          float temp_c, float wear)
+static float tire_condition_factor(const GameSettings *settings,
+                                   int compound, float peak,
+                                   float temp_c, float wear)
 {
-    float peak, off, opt, window, d, temp_factor, wear_factor;
+    float off, opt, window, d, temp_factor, wear_factor;
 
-    if (compound < 0 || compound >= TIRE_COMPOUNDS)
-        compound = TIRE_MEDIUM;
-    if (!settings) {
-        peak = tire_grip_mult(compound);
-        return peak;
-    }
-    peak = settings->tire_grip_mult[compound];
     off = settings->tire_off_window_grip[compound];
     opt = settings->tire_temp_optimal[compound];
     window = settings->tire_temp_window[compound];
@@ -653,6 +704,30 @@ float tire_condition_grip(const GameSettings *settings, int compound,
     wear_factor = 1.0f - settings->tire_wear_grip_loss[compound] * wear;
 
     return peak * temp_factor * wear_factor;
+}
+
+float tire_condition_grip(const GameSettings *settings, int compound,
+                          float temp_c, float wear)
+{
+    if (compound < 0 || compound >= TIRE_COMPOUNDS)
+        compound = TIRE_MEDIUM;
+    if (!settings)
+        return tire_grip_mult(compound);
+    return tire_condition_factor(settings, compound,
+                                 settings->tire_grip_mult[compound],
+                                 temp_c, wear);
+}
+
+float tire_traction_condition(const GameSettings *settings, int compound,
+                              float temp_c, float wear)
+{
+    if (compound < 0 || compound >= TIRE_COMPOUNDS)
+        compound = TIRE_MEDIUM;
+    if (!settings)
+        return tire_traction_mult(compound);
+    return tire_condition_factor(settings, compound,
+                                 settings->tire_traction_mult[compound],
+                                 temp_c, wear);
 }
 
 float tire_drag_mult(int compound)
@@ -1039,6 +1114,27 @@ float spec_accel_time(const KartSpec *s)
     return spec_accel_time_with_settings(s, NULL);
 }
 
+/*
+ * 100-0 braking distance, the same simplified way spec_accel_time_with_
+ * settings estimates 0-100: lat_g at face value, no tire compound or
+ * weather (both are a race-time choice, not a car spec). kart_step's
+ * real braking is traction-limited off mu_trac now (KartSpec.
+ * brake_dist_100 is no longer read for it at all), so this is the
+ * estimate that actually matches what the car does on track instead of
+ * a number a designer could set independently of everything else.
+ */
+float spec_brake_dist_100_with_settings(const KartSpec *s,
+                                        const GameSettings *settings)
+{
+    (void)settings;
+    return (V100 * V100) / (2.0f * s->lat_g * GRAVITY);
+}
+
+float spec_brake_dist_100(const KartSpec *s)
+{
+    return spec_brake_dist_100_with_settings(s, NULL);
+}
+
 /* ------------------------------------------------------------------ */
 
 /*
@@ -1389,6 +1485,8 @@ void game_init(Game *g, const GameConfig *cfg)
                                                              * paddock */
         k->tire_grip_now = tire_condition_grip(&g->settings, k->tire,
                                                k->tire_temp, 0.0f);
+        k->tire_traction_now = tire_traction_condition(&g->settings, k->tire,
+                                                       k->tire_temp, 0.0f);
         k->last_checkpoint = 0;
         k->risk_corner = -1;
         k->rng_state = 0x9e3779b9u ^ (unsigned int)(i + 1) * 0x85ebca6bu ^
@@ -2034,7 +2132,27 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
      * care which way the driver is actually sliding, and every banked
      * corner in the game is banked to help the turn the road itself
      * makes, never the other way. */
-    mu_a += GRAVITY * tanf(fabsf(t->bank[k->seg]));
+    /* rudimentary shocks: the chassis's own sense of bank catches up to
+     * the road's actual bank rather than snapping to it — see the
+     * Kart.bank_filt comment in game.h */
+    k->bank_filt += (t->bank[k->seg] - k->bank_filt) *
+                    game_clampf(g->settings.chassis_settle_rate * dt,
+                               0.0f, 1.0f);
+    mu_a += GRAVITY * tanf(fabsf(k->bank_filt));
+    /*
+     * The same grip budget, read for straight-line traction instead of
+     * cornering: same lat_g and road/weather conditions, but through
+     * tire_traction_now (hard tire favored dry, soft favored anywhere
+     * wet) instead of tire_grip_now, and with no banking term — banking
+     * helps a car turn, not accelerate or stop in a straight line. This
+     * is what the acceleration traction cap and braking below read; it
+     * replaces KartSpec.brake_dist_100 as the thing that actually
+     * decides how hard a car can stop, so braking distance is no longer
+     * an unconstrained dial a designer can just set arbitrarily short —
+     * it falls out of the same grip a car had to earn for cornering.
+     */
+    float mu_trac = s->lat_g * GRAVITY * grip * weather_grip *
+                    k->tire_traction_now;
     float cd_a = s->cd_a *
                  tire_drag_mult_with_settings(&g->settings, k->tire) *
                  (weather == WEATHER_PUDDLE
@@ -2048,19 +2166,24 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     float dt_front = (s->drivetrain == DRIVETRAIN_FWD) ? 1.0f :
                       (s->drivetrain == DRIVETRAIN_RWD) ? 0.0f :
                       s->awd_front_bias;
-    /* "use" is an instantaneous full-throttle stab, not a resource to
-     * spend: for this one frame it is exactly as if the driver planted
-     * the gas pedal on the floor and came off the brake, whatever they
-     * were actually holding. It does not add power on its own — see
-     * the automatic turbo spool below for that — it just guarantees
-     * the engine gets the wide-open throttle it needs to use whatever
-     * spool is already built. */
+    /* "use"/FLOOR IT is an instantaneous full-throttle stab, not a
+     * resource to spend: for this one frame it is exactly as if the
+     * driver planted the gas pedal on the floor and came off the brake,
+     * whatever they were actually holding. It does not add power on its
+     * own — see the automatic turbo spool below for that — it just
+     * guarantees the engine gets the wide-open throttle it needs to use
+     * whatever spool is already built, and (see the gearbox block
+     * below) gives an automatic transmission a reason to kick down when
+     * there is nothing built to use instead. */
     int accel = in->accel;
     int brake = in->brake;
     if (in->boost) {
         accel = 1;
         brake = 0;
     }
+    /* what a brake light should read: the pedal, not engine braking off
+     * the throttle, and not while FLOOR IT has just overridden it */
+    k->braking = brake;
 
     /* the marshal helicopter has arrived: hold most of the engine back
      * until the driver turns around */
@@ -2104,6 +2227,9 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
 
         k->tire_grip_now = tire_condition_grip(&g->settings, c,
                                                k->tire_temp, k->tire_wear);
+        k->tire_traction_now = tire_traction_condition(&g->settings, c,
+                                                       k->tire_temp,
+                                                       k->tire_wear);
     }
 
     k->hit_wall = 0;
@@ -2176,6 +2302,24 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
                              gear_power_scale_rpm(next_frac, nominal_frac) >
                                  0.25f);
                 want_down = (k->rev_frac < down_thresh && low_frac < 0.92f);
+
+                /*
+                 * FLOOR IT kickdown: with nothing already spooled to
+                 * lean on (NA, or a turbo/supercharger that hasn't built
+                 * up yet), planting the pedal is instead a request for
+                 * an automatic to drop a gear right now for the extra
+                 * pull, the same "passing gear" a real kickdown gives —
+                 * but only into a gear that genuinely makes more power
+                 * at the current road speed, not into one that would
+                 * just bounce off the limiter.
+                 */
+                if (in->boost && k->gear > 0 &&
+                    k->turbo_spool < g->settings.boost_kickdown_spool_thresh &&
+                    low_frac < 0.98f &&
+                    gear_power_scale_rpm(low_frac, nominal_frac) >
+                        gear_power_scale_rpm(k->rev_frac, nominal_frac) +
+                            0.05f)
+                    want_down = 1;
             }
 
             if (want_up && k->gear < s->n_gears - 1) {
@@ -2241,6 +2385,8 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         {
             float aspiration_bonus_mult =
                 (s->aspiration == ASPIRATION_TURBO) ? 1.0f :
+                (s->aspiration == ASPIRATION_TWIN_TURBO) ?
+                    g->settings.twin_turbo_power_bonus_mult :
                 (s->aspiration == ASPIRATION_SUPERCHARGED) ? 0.6f : 0.0f;
             P *= 1.0f + k->turbo_spool * g->settings.turbo_max_power_bonus *
                         aspiration_bonus_mult * (1.0f - k->slip);
@@ -2257,7 +2403,13 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
      * grip as well as speed.
      */
     {
-        float theta = atanf(t->slope[k->seg]);
+        /* rudimentary shocks: same damped catch-up as the bank filter
+         * above, for grade — the load term below is the "vertical
+         * axis" this is meant to stand in for */
+        k->grade_filt += (atanf(t->slope[k->seg]) - k->grade_filt) *
+                         game_clampf(g->settings.chassis_settle_rate * dt,
+                                    0.0f, 1.0f);
+        float theta = k->grade_filt;
         float dirdot = cosf(k->heading) * t->dx[k->seg] +
                        sinf(k->heading) * t->dz[k->seg];
         float load = 1.0f - g->settings.grade_load_effect *
@@ -2265,7 +2417,18 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         a += -GRAVITY * sinf(theta) * dirdot *
              g->settings.grade_gravity_mult;
         mu_a *= load;
+        mu_trac *= load;
     }
+    /* how much of this frame's longitudinal acceleration or braking is
+     * actually asking the tires for grip — fed to the combined friction
+     * circle below, so a driver who brakes hard while still asking for
+     * a lot of yaw finds less cornering grip left over, the same way a
+     * real tire's total grip is one shared budget rather than a
+     * separate allowance for turning and for slowing down. Drag and
+     * rolling resistance are not tire-limited (aerodynamic drag is not
+     * a friction-circle force at all, and rolling resistance is a small,
+     * constant loss) so neither counts here. */
+    float a_long_use = 0.0f;
     if (accel && !brake) {
         float a_drive = P / (s->mass_kg * (fabsf(v) > 3.0f ? fabsf(v) : 3.0f));
         /* two driven axles share the traction demand between them, so
@@ -2273,9 +2436,30 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
          * either one individually breaking loose */
         float traction_frac = (s->drivetrain == DRIVETRAIN_AWD) ? 1.00f
                                                                  : 0.90f;
-        float cap = traction_frac * mu_a;
+        /* traction control: trims how much of the engine's power
+         * actually reaches the road while the tires are already sliding
+         * from last frame's reading, easing back in as the slide clears
+         * rather than piling more torque onto wheels already spinning
+         * past their grip */
+        float cap = traction_frac * mu_trac * (1.0f - g->settings.tc_strength *
+                                                       k->slip);
         if (a_drive > cap) a_drive = cap;
         a += a_drive;
+        a_long_use = a_drive;
+    } else if (!accel) {
+        /* Engine braking: off the throttle, a real engine is still
+         * turning with the wheels through a closed throttle plate, so
+         * it holds the car back on its own rather than letting it
+         * coast like a golf cart — more so the higher the revs, same as
+         * a real engine, which is why a downshift before a descent
+         * genuinely helps hold speed without ever touching the brake.
+         * Applies whether or not the brake is also held. */
+        float a_engine_brake = g->settings.engine_brake_decel *
+                               game_clampf(k->rev_frac, 0.0f, 1.0f);
+        if (fabsf(v) > 0.3f) {
+            a += (v > 0.0f) ? -a_engine_brake : a_engine_brake;
+            a_long_use = a_engine_brake;
+        }
     }
     /* drag + rolling resistance oppose motion */
     if (fabsf(v) > 0.2f) {
@@ -2288,7 +2472,14 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     }
     if (brake) {
         if (v > 0.3f) {
-            a -= grip * (V100 * V100) / (2.0f * s->brake_dist_100);
+            /* traction-limited, not a per-car settable distance: the
+             * same mu_trac budget every straight-line force reads
+             * (see its comment above), so there is no free dial a
+             * designer can just shorten arbitrarily — a car stops
+             * exactly as hard as its own grip, weather and tires
+             * actually allow, same as everything else here. */
+            a -= mu_trac;
+            a_long_use = mu_trac;
         } else if (!accel) {
             /* reverse gear, gently */
             v += (-6.0f - v) * 1.2f * dt;
@@ -2340,8 +2531,22 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
          * against a guardrail under sustained understeer), which read
          * as the car spinning faster and faster the slower it got. A
          * 6 m/s floor keeps the cap from ever running away like that.
+         *
+         * Combined friction circle: a_long_use (set above, whichever of
+         * driving, braking or engine-braking this frame actually asked
+         * the tires for) eats into the same mu_a budget cornering reads,
+         * scaled by friction_circle_strength so it can be tuned rather
+         * than only ever the full textbook circle. This is the piece
+         * that actually makes brake-in/power-out technique pay off: get
+         * the braking done before the wheel is still turned in hard and
+         * the full mu_a is there to lean on; carry the brake to the
+         * apex instead, still asking for real yaw, and there is
+         * measurably less of it left.
          */
-        float yaw_cap = mu_a / (fabsf(v) > 6.0f ? fabsf(v) : 6.0f);
+        float a_long_circle = a_long_use * g->settings.friction_circle_strength;
+        float mu_lat_sq = mu_a * mu_a - a_long_circle * a_long_circle;
+        float mu_lat = (mu_lat_sq > 0.0f) ? sqrtf(mu_lat_sq) : 0.0f;
+        float yaw_cap = mu_lat / (fabsf(v) > 6.0f ? fabsf(v) : 6.0f);
         float yaw;
 
         /* the driven axle spends some of its own grip on traction rather

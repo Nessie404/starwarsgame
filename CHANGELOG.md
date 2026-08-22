@@ -4,6 +4,71 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.27.0] - 2026-08-28
+
+### Added
+
+- **A combined friction circle.** Braking or accelerating hard while
+  still asking for a lot of steering angle now costs cornering grip —
+  the same shared tire budget a real car has for turning versus
+  everything else, instead of full braking and full cornering grip
+  being available at once with no interaction at all. This is what
+  actually rewards braking in a straight line (or easing off
+  progressively as a corner opens out) over carrying the brake to the
+  apex, for AI drivers as much as for a human — the same physics
+  applies to everyone. Tunable via `friction_circle_strength`.
+- **Real engine braking.** Off the throttle, a car now holds itself
+  back — more so the higher the revs — instead of coasting like a golf
+  cart until the brake is pressed. Useful downhill, and everywhere else
+  a driver lifts.
+- **Traction control.** A simple, always-on aid that trims engine power
+  back the instant the tires are already sliding under acceleration,
+  easing back in as the slide clears, instead of piling more torque
+  onto wheels already spinning past their grip.
+- **Twin-turbo.** A fourth aspiration choice: the biggest power bonus of
+  the four and the heaviest weight penalty, same spool/lag behavior as
+  a single turbo.
+- **Brake lights**, lit whenever the brake is actually applied (not for
+  engine braking, and not while FLOOR IT has just overridden a held
+  brake).
+- **FLOOR IT does more with an automatic.** With nothing already
+  spooled to lean on, planting the pedal now kicks an automatic
+  transmission down a gear if a lower one genuinely makes more power at
+  the current road speed — a real kickdown, not just flooring the
+  existing gear's throttle.
+
+### Changed
+
+- **Forced induction costs real weight now.** A turbo, supercharger or
+  twin-turbo adds curb mass on top of whatever `power_hp` already
+  costs — the hardware itself, not free. A naturally aspirated engine
+  pays none of it, which is what makes "build it bigger instead of
+  bolting on a turbo" a genuine, competitive choice rather than a
+  strictly worse one.
+- **Grip no longer rewards more drag.** The car designer used to treat
+  extra drag area as assumed downforce (more grip for more drag) —
+  defensible for an open-wheel racer, backwards for the road cars and
+  karts this roster actually is. Less drag now means more grip; mass
+  still works the way it did (lighter is grippier — real tires measurably
+  lose peak coefficient of friction as the load on the contact patch
+  grows, a documented property called tire load sensitivity, not a
+  game-only rule).
+- **Braking distance is no longer a free designer dial.** `kart_step`
+  doesn't even read `KartSpec.brake_dist_100` for the physics any
+  more — braking is traction-limited off the same lateral grip
+  everything else reads (mass-independent, the way real braking
+  deceleration actually is: braking force and inertia both scale with
+  mass and cancel out). The designer and every stat panel now show the
+  real, computed number instead of a stale or arbitrarily short one.
+- **Hard tires are the dry-road specialists, and pay for it everywhere
+  else.** A new `tire_traction_mult` governs straight-line
+  acceleration and braking specifically (separate from
+  `tire_grip_mult`'s cornering number): hard is now the best
+  accelerating and braking tire on dry pavement. In exchange, hard is
+  now the worst tire in every wet, icy or snowed-over condition,
+  standing water included (previously the one condition it was best
+  in) — no tread to fall back on the moment the road isn't dry.
+
 ## [1.26.1] - 2026-08-27
 
 ### Added

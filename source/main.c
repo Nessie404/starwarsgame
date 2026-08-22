@@ -1394,7 +1394,8 @@ static void draw_track(const Track *t, int viewer_seg, float race_t)
  * itself cants beneath it on a banked section. 0 on flat ground. */
 static void draw_car_model(float cx, float cy, float cz, float yaw,
                            float pitch, float roll, float steer_vis,
-                           const u8 col[3], const KartSpec *spec)
+                           const u8 col[3], const KartSpec *spec,
+                           int braking)
 {
     float fx = cosf(yaw), fz = sinf(yaw);
     float lx = -fz, lz = fx;
@@ -1430,6 +1431,27 @@ static void draw_car_model(float cx, float cy, float cz, float yaw,
         draw_box(cx + fx * wheel_fw * s_f + lx * track * s_l, wy,
                  cz + fz * wheel_fw * s_f + lz * track * s_l,
                  wyaw, 0.0f, roll, wheel_r, wheel_r, 0.14f, 25, 25, 28);
+    }
+
+    /* brake lights: a pair of small rear-facing quads, lit bright red on
+     * the brake pedal (k->braking — off-throttle engine braking and a
+     * FLOOR IT override that cancelled a held brake don't count, same
+     * as a real car) and a dim, unlit red the rest of the time. */
+    {
+        float rx = cx - fx * 1.06f * len, rz = cz - fz * 1.06f * len;
+        float ry = cy + 0.42f * hgt;
+        u8 lr = braking ? 255 : 60, lg = braking ? 35 : 12, lb = lg;
+        int side;
+        for (side = 0; side < 2; side++) {
+            float s_l = side ? 1.0f : -1.0f;
+            float ox = lx * 0.42f * wid * s_l, oz = lz * 0.42f * wid * s_l;
+            float wx = lx * 0.09f * wid, wz = lz * 0.09f * wid;
+            quad(rx + ox - wx, ry - 0.07f * hgt, rz + oz - wz,
+                 rx + ox + wx, ry - 0.07f * hgt, rz + oz + wz,
+                 rx + ox + wx, ry + 0.07f * hgt, rz + oz + wz,
+                 rx + ox - wx, ry + 0.07f * hgt, rz + oz - wz,
+                 lr, lg, lb, 235);
+        }
     }
 }
 
@@ -1467,7 +1489,7 @@ static void draw_kart(const Track *t, const Kart *k)
          0, 0, 0, 90);
 
     draw_car_model(k->x, by, k->z, yaw, pitch, roll, k->steer_vis, col,
-                   &kart_specs[k->spec]);
+                   &kart_specs[k->spec], k->braking);
 
     /* tire smoke when sliding hard */
     if (k->slip > 0.35f && fabsf(k->speed) > 5.0f) {
@@ -2651,7 +2673,7 @@ static void draw_garage_scene(int paint_idx, const KartSpec *spec)
     quad(-1.6f, 0.19f, -1.1f,  1.6f, 0.19f, -1.1f,
           1.6f, 0.19f,  1.1f, -1.6f, 0.19f,  1.1f, 0, 0, 0, 90);
     draw_car_model(0.0f, 0.18f, 0.0f, turn, 0.0f, 0.0f, 0.0f,
-                   paint_palette[paint_idx % PAINT_COUNT], spec);
+                   paint_palette[paint_idx % PAINT_COUNT], spec, 0);
 }
 
 static void menu_update_track_preview(void)
@@ -2762,10 +2784,41 @@ static const char *designer_names[] = {
  * light car and a powerful car are no longer independent choices */
 #define DESIGNER_MASS_BASE    500.0f
 #define DESIGNER_MASS_PER_HP    1.8f
+/* Forced induction costs curb weight too, on top of power_hp's own —
+ * the hardware itself (intercooler and plumbing for a turbo; the blower
+ * and its drive for a supercharger; two of everything for twin-turbo)
+ * is real mass that isn't there on a naturally aspirated engine. This
+ * is what makes "build a bigger NA engine instead" a genuine choice
+ * rather than strictly worse than bolting on a turbo: an NA car gets
+ * to spend its whole power_hp-to-mass budget on displacement, nothing
+ * held back for hardware it doesn't have. */
+#define DESIGNER_MASS_TURBO_KG      35.0f
+#define DESIGNER_MASS_SUPERCHARGED_KG 28.0f
+#define DESIGNER_MASS_TWIN_TURBO_KG  65.0f
 
-/* the grip trade-off: lighter (so, less powerful) cars corner better,
- * and a car built with more drag area gets some of that back as
- * assumed downforce — see the comment above */
+/*
+ * The grip trade-off. Lighter cars corner better: real tires get
+ * measurably less coefficient of friction out of a heavier normal load
+ * on the contact patch (tire load sensitivity — a well documented
+ * property of rubber, not a game-only rule), so two cars on
+ * similarly-sized tires see the lighter one able to pull more lateral
+ * g even before anything else about them differs. That's the mass
+ * term below, unchanged from when grip first stopped being a free
+ * dial.
+ *
+ * Drag is the other input, and it now goes the other way: LESS drag
+ * area buys MORE grip, not less. Earlier this treated extra cd_a as
+ * assumed downforce (an open-wheel racer's big wing costs drag and
+ * buys grip at the same time) — defensible for a car built purely to
+ * corner, but backwards for the kind of road cars and karts this
+ * roster actually is. Without a separate downforce stat, cd_a here is
+ * just "how much blunt, turbulent frontal area this car presents," and
+ * that same bluntness disturbs the airflow around the contact patches
+ * as much as it costs top speed — a low, clean, low-drag shape (RACER,
+ * FORMULA) is also the more aerodynamically planted one, while a tall,
+ * high-drag shape (TRUCK, WAGON) is dirty air both ways. So: less drag
+ * area, more grip.
+ */
 #define DESIGNER_GRIP_BASE       1.15f
 #define DESIGNER_GRIP_MASS_REF 1000.0f
 #define DESIGNER_GRIP_PER_1000KG 0.30f
@@ -2773,6 +2826,18 @@ static const char *designer_names[] = {
 #define DESIGNER_GRIP_PER_CDA     0.35f
 #define DESIGNER_GRIP_MIN         0.85f
 #define DESIGNER_GRIP_MAX         1.85f
+
+/* the braking trade-off: stopping distance is no longer a free dial
+ * either (see designer_brake_dist below). kart_step no longer even
+ * reads KartSpec.brake_dist_100 for the actual physics — braking is
+ * traction-limited now (v^2 <= 2 * mu_trac * d), the same grip budget
+ * every other straight-line force reads, see mu_trac in kart_step —
+ * so this recomputes the exact same 100-0 distance that grip budget
+ * actually produces, rather than a separately-tunable estimate that
+ * could drift from what the car really does on track. 100 km/h is
+ * V100 in game.c's own units, duplicated here rather than exposed
+ * across the module boundary for one constant. */
+#define DESIGNER_BRAKE_V100_MPS   27.78f
 
 static KartSpec designer_car;
 static int designer_name_idx;
@@ -2783,23 +2848,39 @@ static int designer_gear_sel;   /* 0-indexed gear GEAR_TOP edit         */
 static int designer_editing_idx = -1;
 static int designer_return_screen;   /* where CANCEL/SAVE goes back to */
 
-/* mass, then grip from that mass and the current drag figure — the
- * same two derived numbers designer_finalize commits to a real spec,
- * kept in one place so the live preview (row_value) can never show a
- * different number than SAVE actually uses */
+/* mass, then grip and an estimated braking distance from that mass and
+ * the current drag figure — the same derived numbers designer_finalize
+ * commits to a real spec, kept in one place so the live preview
+ * (row_value) can never show a different number than SAVE actually uses */
 static float designer_mass(void)
 {
-    return DESIGNER_MASS_BASE + designer_car.power_hp * DESIGNER_MASS_PER_HP;
+    float m = DESIGNER_MASS_BASE + designer_car.power_hp * DESIGNER_MASS_PER_HP;
+    switch (designer_car.aspiration) {
+    case ASPIRATION_TURBO:        m += DESIGNER_MASS_TURBO_KG;        break;
+    case ASPIRATION_SUPERCHARGED: m += DESIGNER_MASS_SUPERCHARGED_KG; break;
+    case ASPIRATION_TWIN_TURBO:   m += DESIGNER_MASS_TWIN_TURBO_KG;   break;
+    default: break;
+    }
+    return m;
 }
 
 static float designer_grip(void)
 {
     float g = DESIGNER_GRIP_BASE -
               (designer_mass() - DESIGNER_GRIP_MASS_REF) / 1000.0f *
-                  DESIGNER_GRIP_PER_1000KG +
+                  DESIGNER_GRIP_PER_1000KG -
               (designer_car.cd_a - DESIGNER_GRIP_CDA_REF) *
                   DESIGNER_GRIP_PER_CDA;
     return game_clampf(g, DESIGNER_GRIP_MIN, DESIGNER_GRIP_MAX);
+}
+
+/* see the comment above designer_brake_dist's constant: this is exactly
+ * kart_step's own traction-limited braking, using the same grip figure
+ * designer_grip() already derived (mass and drag, not a free number). */
+static float designer_brake_dist(void)
+{
+    return (DESIGNER_BRAKE_V100_MPS * DESIGNER_BRAKE_V100_MPS) /
+           (2.0f * designer_grip() * GRAVITY);
 }
 
 static void designer_reset(void)
@@ -2815,7 +2896,6 @@ static void designer_reset(void)
     snprintf(designer_car.name, sizeof(designer_car.name), "%s",
              designer_names[designer_name_idx]);
     designer_car.power_hp = 220.0f;
-    designer_car.brake_dist_100 = 35.0f;
     designer_car.cd_a = 0.62f;
     designer_car.offroad_grip = 0.40f;
     designer_car.drivetrain = DRIVETRAIN_RWD;
@@ -2842,14 +2922,16 @@ static void designer_load_existing(int idx)
 }
 
 /* Fill in the fields the designer still derives outright rather than
- * exposing: mass and grip (see the comment above), and wheelbase from
- * whatever mass that settled on. Producing the complete KartSpec that
- * both the live preview and SAVE itself work from. */
+ * exposing: mass, grip and braking distance (see the comments above),
+ * and wheelbase from whatever mass that settled on. Producing the
+ * complete KartSpec that both the live preview and SAVE itself work
+ * from. */
 static void designer_finalize(KartSpec *out)
 {
     *out = designer_car;
     out->mass_kg = designer_mass();
     out->lat_g = designer_grip();
+    out->brake_dist_100 = designer_brake_dist();
     out->wheelbase = 2.0f + out->mass_kg / 2500.0f;
 }
 
@@ -3006,7 +3088,7 @@ static void row_value(const MenuRow *r, char *out, int cap)
         snprintf(out, cap, "%d HP", (int)designer_car.power_hp);     break;
     case RK_DES_BRAKE:
         snprintf(out, cap, "%d FT",
-                (int)(designer_car.brake_dist_100 * M_TO_FT));
+                (int)(designer_brake_dist() * M_TO_FT));
         break;
     case RK_DES_GRIP:
         snprintf(out, cap, "%.2f G", (double)designer_grip());       break;
@@ -3112,14 +3194,10 @@ static void row_change(const MenuRow *r, int d)
         designer_car.power_hp = game_clampf(designer_car.power_hp +
                                             (float)d * 20.0f, 60.0f, 650.0f);
         break;
-    case RK_DES_BRAKE:
-        /* lower is a shorter, better stop, so a "right/increase" press
-         * makes it worse — same left-is-less, right-is-more convention
-         * as every other row, just applied to a stat where less is
-         * better */
-        designer_car.brake_dist_100 = game_clampf(
-            designer_car.brake_dist_100 - (float)d, 26.0f, 50.0f);
-        break;
+    /* BRAKES has no case here on purpose any more, same reason as GRIP
+     * just below — see designer_brake_dist(). It is derived from grip
+     * (itself derived from mass and drag), not an independent dial;
+     * the row shows the number without changing it. */
     /* GRIP has no case here on purpose — see designer_grip(). It is
      * derived from mass (itself derived from power) and drag, not an
      * independent dial; the row shows the number without changing it. */
@@ -3551,7 +3629,8 @@ static void draw_designer_screen(void)
                    KPH_TO_MPH));
     hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
     snprintf(buf, sizeof(buf), "62-0  %dFT",
-             (int)(sp.brake_dist_100 * M_TO_FT));
+             (int)(spec_brake_dist_100_with_settings(&sp, &app_settings) *
+                   M_TO_FT));
     hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
     snprintf(buf, sizeof(buf), "GRIP  %.2fG", (double)sp.lat_g);
     hud_text(panel_x, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
@@ -3685,7 +3764,8 @@ static void draw_garage_overlay(int p)
                    KPH_TO_MPH));
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
     snprintf(buf, sizeof(buf), "62-0  %dFT",
-             (int)(sp->brake_dist_100 * M_TO_FT));
+             (int)(spec_brake_dist_100_with_settings(sp, &app_settings) *
+                   M_TO_FT));
     hud_text(30.0f, y, 9.0f, 15.0f, buf, 205, 210, 220, 250); y += 20.0f;
     snprintf(buf, sizeof(buf), "GRIP  %.2fG",
              sp->lat_g *

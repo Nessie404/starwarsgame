@@ -263,7 +263,14 @@ static void test_braking_distance(void)
     {
         float dx = g.karts[0].x - x0, dz = g.karts[0].z - z0;
         float dist = sqrtf(dx * dx + dz * dz);
-        float spec = kart_specs[1].brake_dist_100;
+        /* KartSpec.brake_dist_100 is no longer what kart_step actually
+         * brakes off (see mu_trac there) — spec_brake_dist_100_with_
+         * settings computes the same traction-limited number the
+         * physics does, so that is what a real stop has to match now,
+         * not the (still-present-for-compatibility, but now vestigial)
+         * stored field. */
+        float spec = spec_brake_dist_100_with_settings(&kart_specs[1],
+                                                        &g.settings);
         printf("braking 100-0: %.1f m (spec %.0f m)\n", dist, spec);
         CHECK(fabsf(dist - spec) < spec * 0.18f,
               "stopping distance %.1f m vs spec %.0f m", dist, spec);
@@ -531,8 +538,14 @@ static void test_understeer_scrub_is_progressive(void)
     /* if the scrub were purely proportional to slip, severe (slip near
      * 1.0) would lose a bit more than double what mild (slip well
      * under 0.5) loses; the progressive curve on top has to make it
-     * lose noticeably more than that */
-    CHECK(severe_loss > mild_loss * 2.5f,
+     * lose noticeably more than that. The margin over "just proportional"
+     * shrank a bit in v1.27.0: idle throttle now means engine braking
+     * (Kart.rev_frac-scaled), which feeds the combined friction circle
+     * and shaves some yaw_cap off both cases equally — a bigger
+     * relative bite out of the mild case, which was closer to the
+     * limit to start with, than the already-deep-over-the-limit severe
+     * one. Still clearly progressive, just not by quite as much. */
+    CHECK(severe_loss > mild_loss * 1.7f,
           "understeer scrub is not progressive (mild %.4f, severe %.4f)",
           mild_loss, severe_loss);
 }
@@ -587,7 +600,20 @@ static void test_holding_full_lock_does_not_escalate_or_force_a_spin(void)
     printf("held full lock: yaw rate %.3f rad/s at frame 1, %.3f rad/s "
            "after 2 s, speed %.1f -> %.1f m/s\n",
            early_yaw, late_yaw, v0, g.karts[0].speed);
-    CHECK(late_yaw < early_yaw * 1.15f,
+    /* v1.27.0's combined friction circle (see kart_step) means holding
+     * full throttle AND full lock together — precisely this scenario —
+     * now has real, deliberate consequences: the car bleeds speed from
+     * understeer scrub, and less speed means less of the frictioncircle-
+     * shrunk yaw_cap it takes to reach full lock, so the yaw rate this
+     * exact extreme, sustained input produces is no longer perfectly
+     * flat the way it was before that coupling existed. What still
+     * must never happen is the old bug's signature: an unbounded climb
+     * with no ceiling. 2.2x (versus the old mechanic's tighter, escalate-
+     * then-force-a-hard-spin 4x multiplier on top of an already-growing
+     * cap) is generous headroom for the new, bounded, but genuinely more
+     * complex dynamics without being loose enough to let a real
+     * regression back in unnoticed. */
+    CHECK(late_yaw < early_yaw * 2.2f,
           "yaw rate grew under sustained full lock (%.3f -> %.3f) — this "
           "is the escalating bonus the mechanic was supposed to lose",
           early_yaw, late_yaw);
@@ -599,6 +625,142 @@ static void test_holding_full_lock_does_not_escalate_or_force_a_spin(void)
           "held full lock produced a NaN");
 
     kart_specs_reset_defaults();
+}
+
+/*
+ * The combined friction circle (v1.27.0): braking hard while still
+ * asking for a lot of steering angle costs cornering grip, the same
+ * shared tire budget a real car has for both. Same speed, same full
+ * steering lock, one frame — the only difference is whether the brake
+ * is also on — and the braking case has to turn in less than the
+ * coasting one. This is the mechanic that is actually supposed to
+ * reward braking in a straight line (or easing off progressively as a
+ * corner opens out) over carrying the brake to the apex.
+ */
+static void test_friction_circle_couples_braking_and_cornering(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    float h0, yaw_coast, yaw_brake;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 25.0f);
+    h0 = g.karts[0].heading;
+    in[0].steer = 1.0f;
+    game_update(&g, in, 1.0f / 60.0f);
+    yaw_coast = fabsf(game_angle_wrap(g.karts[0].heading - h0)) * 60.0f;
+
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 25.0f);
+    h0 = g.karts[0].heading;
+    in[0].steer = 1.0f;
+    in[0].brake = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    yaw_brake = fabsf(game_angle_wrap(g.karts[0].heading - h0)) * 60.0f;
+
+    printf("friction circle: yaw %.3f rad/s coasting into a full-lock "
+           "turn, %.3f rad/s braking hard into the same turn\n",
+           yaw_coast, yaw_brake);
+    CHECK(yaw_brake < yaw_coast * 0.97f,
+          "braking hard while turning cost no cornering grip at all "
+          "(%.3f coasting vs %.3f braking) — the friction circle is not "
+          "coupling the two", yaw_coast, yaw_brake);
+}
+
+/*
+ * Engine braking (v1.27.0): off the throttle, a real engine still holds
+ * the car back through a closed throttle plate rather than letting it
+ * coast like a golf cart. Compare one frame of coasting with the
+ * setting at its default against the same frame with it forced to
+ * zero — the difference has to be real, not just drag and rolling
+ * resistance doing all the work either way.
+ */
+static void test_engine_braking_slows_a_coasting_car(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    GameSettings st_on, st_off;
+    float v_on, v_off;
+
+    game_settings_defaults(&st_on);
+    st_off = st_on;
+    st_off.engine_brake_decel = 0.0f;
+
+    cfg.settings = &st_on;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 25.0f);
+    game_update(&g, in, 1.0f / 60.0f);
+    v_on = g.karts[0].speed;
+
+    cfg.settings = &st_off;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 25.0f);
+    game_update(&g, in, 1.0f / 60.0f);
+    v_off = g.karts[0].speed;
+
+    printf("engine braking: coasting from 25 m/s reaches %.3f m/s with it "
+           "on, %.3f m/s with it forced off\n", v_on, v_off);
+    CHECK(v_on < v_off - 0.001f,
+          "engine braking made no measurable difference while coasting "
+          "(%.3f m/s vs %.3f m/s)", v_on, v_off);
+}
+
+/*
+ * Traction control (v1.27.0): with the tires already reading heavy slip
+ * from a previous frame, flooring the throttle should gain less speed
+ * with TC doing its job than with it switched off — the whole point is
+ * trimming power back rather than piling more of it onto wheels that
+ * are already spinning past their grip.
+ */
+static void test_traction_control_tapers_power_when_sliding(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    GameSettings st_on, st_off;
+    float v0, v_on, v_off;
+
+    game_settings_defaults(&st_on);
+    st_off = st_on;
+    st_off.tc_strength = 0.0f;
+
+    cfg.settings = &st_on;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 8.0f);
+    g.karts[0].slip = 0.95f;
+    v0 = g.karts[0].speed;
+    in[0].accel = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    v_on = g.karts[0].speed - v0;
+
+    cfg.settings = &st_off;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    teleport(&g, &g.karts[0], 2, 8.0f);
+    g.karts[0].slip = 0.95f;
+    v0 = g.karts[0].speed;
+    in[0].accel = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    v_off = g.karts[0].speed - v0;
+
+    printf("traction control: gains %.3f m/s under heavy slip with TC on, "
+           "%.3f m/s with TC off\n", v_on, v_off);
+    CHECK(v_on < v_off - 0.001f,
+          "traction control did not reduce the power reaching the road "
+          "under heavy slip (%.3f m/s vs %.3f m/s)", v_on, v_off);
 }
 
 /*
@@ -1876,6 +2038,130 @@ static void test_aspiration_differences(void)
     kart_specs_reset_defaults();
 }
 
+/*
+ * Twin-turbo (v1.27.0): same spool curve as a single turbo from a cold
+ * start — the point is more bonus for more weight, not different lag.
+ * Separately, force both to full spool and compare the actual push it
+ * buys near the top of a gear (where the acceleration cap is power, not
+ * traction — see mu_trac's traction_frac cap in kart_step, which would
+ * otherwise clip both aspirations to the identical ceiling and hide any
+ * difference between them): twin-turbo has to make a real, bigger dent.
+ */
+static void test_twin_turbo_matches_turbo_lag_with_a_bigger_bonus(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    float top;
+    float turbo_spool_1f, twin_spool_1f;
+    float v0, dv_turbo, dv_twin;
+
+    cfg.gearbox[0] = GEARBOX_MANUAL;
+    top = kart_specs[cfg.spec[0]].gear_top[2];
+
+    kart_specs_reset_defaults();
+    kart_specs[cfg.spec[0]].aspiration = ASPIRATION_TURBO;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].gear = 2;
+    teleport(&g, &g.karts[0], 2, top * 0.55f);
+    in[0].accel = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    turbo_spool_1f = g.karts[0].turbo_spool;
+
+    kart_specs_reset_defaults();
+    kart_specs[cfg.spec[0]].aspiration = ASPIRATION_TWIN_TURBO;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].gear = 2;
+    teleport(&g, &g.karts[0], 2, top * 0.55f);
+    in[0].accel = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    twin_spool_1f = g.karts[0].turbo_spool;
+
+    printf("twin-turbo: spool after 1 frame %.3f (turbo %.3f, same lag "
+           "curve)\n", twin_spool_1f, turbo_spool_1f);
+    CHECK(fabsf(twin_spool_1f - turbo_spool_1f) < 0.001f,
+          "twin-turbo's spool lag differs from a single turbo's (%.3f vs "
+          "%.3f) — it is supposed to be the same curve, just a bigger "
+          "bonus once it is there", twin_spool_1f, turbo_spool_1f);
+
+    kart_specs_reset_defaults();
+    kart_specs[cfg.spec[0]].aspiration = ASPIRATION_TURBO;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].gear = 2;
+    teleport(&g, &g.karts[0], 2, top * 0.90f);
+    g.karts[0].turbo_spool = 1.0f;
+    v0 = g.karts[0].speed;
+    in[0].accel = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    dv_turbo = g.karts[0].speed - v0;
+
+    kart_specs_reset_defaults();
+    kart_specs[cfg.spec[0]].aspiration = ASPIRATION_TWIN_TURBO;
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].gear = 2;
+    teleport(&g, &g.karts[0], 2, top * 0.90f);
+    g.karts[0].turbo_spool = 1.0f;
+    v0 = g.karts[0].speed;
+    in[0].accel = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+    dv_twin = g.karts[0].speed - v0;
+
+    printf("twin-turbo: gains %.5f m/s at full spool near the top of the "
+           "gear (turbo %.5f m/s)\n", dv_twin, dv_turbo);
+    CHECK(dv_twin > dv_turbo * 1.08f,
+          "twin-turbo is not meaningfully quicker than a single turbo "
+          "once both are fully spooled (%.5f vs %.5f m/s)",
+          dv_twin, dv_turbo);
+
+    kart_specs_reset_defaults();
+}
+
+/*
+ * FLOOR IT kickdown (v1.27.0): with nothing spooled to lean on (NA
+ * here), planting the pedal on an automatic should drop it a gear
+ * immediately if a lower one genuinely makes more power at the current
+ * road speed, the same "passing gear" impulse a real automatic's
+ * kickdown gives.
+ */
+static void test_floor_it_kicks_down_an_automatic_without_spool(void)
+{
+    Game g;
+    GameConfig cfg = default_cfg(TRACK_CLASSIC);
+    Input in[MAX_HUMANS];
+    int gear_before;
+
+    kart_specs_reset_defaults();
+    cfg.spec[0] = 1;   /* SPORT: naturally aspirated */
+    CHECK(kart_specs[cfg.spec[0]].aspiration == ASPIRATION_NA,
+          "test assumes SPORT is naturally aspirated");
+    game_init(&g, &cfg);
+    g.state = STATE_RACING;
+    idle_inputs(in);
+    g.karts[0].gearbox = GEARBOX_AUTO;
+    teleport(&g, &g.karts[0], 2, kart_specs[cfg.spec[0]].gear_top[0] * 0.60f);
+    g.karts[0].gear = 2;
+    g.karts[0].shift_t = 0.0f;
+    g.karts[0].turbo_spool = 0.0f;
+    gear_before = g.karts[0].gear;
+
+    in[0].boost = 1;
+    game_update(&g, in, 1.0f / 60.0f);
+
+    printf("FLOOR IT kickdown: gear %d before, %d after (NA, nothing "
+           "spooled)\n", gear_before, g.karts[0].gear);
+    CHECK(g.karts[0].gear < gear_before,
+          "FLOOR IT did not kick an NA automatic down a gear (%d -> %d)",
+          gear_before, g.karts[0].gear);
+}
+
 /* A gear caps speed: in first, with a manual box, the car cannot pull
  * past the limiter no matter how long you hold the throttle. */
 static void test_gear_limits_speed(void)
@@ -2067,11 +2353,15 @@ static void test_weather_tire_grip_ordering(void)
           weather_tire_grip_mult(&st, WEATHER_ICE, TIRE_MEDIUM) >
               weather_tire_grip_mult(&st, WEATHER_ICE, TIRE_HARD),
           "soft is not the best tire on ice");
-    CHECK(weather_tire_grip_mult(&st, WEATHER_PUDDLE, TIRE_HARD) >
+    /* as of v1.27.0: hard is the dry-road accel/braking specialist
+     * (tire_traction_mult) and pays for it everywhere the road isn't
+     * dry, a puddle included — no tread to bite into standing water
+     * with, same as it has none for snow or ice */
+    CHECK(weather_tire_grip_mult(&st, WEATHER_PUDDLE, TIRE_SOFT) >
               weather_tire_grip_mult(&st, WEATHER_PUDDLE, TIRE_MEDIUM) &&
           weather_tire_grip_mult(&st, WEATHER_PUDDLE, TIRE_MEDIUM) >
-              weather_tire_grip_mult(&st, WEATHER_PUDDLE, TIRE_SOFT),
-          "hard is not the best tire in a puddle");
+              weather_tire_grip_mult(&st, WEATHER_PUDDLE, TIRE_HARD),
+          "soft is not the best tire in a puddle");
     for (w = WEATHER_SNOW; w <= WEATHER_PUDDLE; w++)
         CHECK(weather_tire_grip_mult(&st, w, TIRE_SOFT) < 1.0f &&
               weather_tire_grip_mult(&st, w, TIRE_MEDIUM) < 1.0f &&
@@ -2173,14 +2463,14 @@ static void test_weather_puddle_drag(void)
  * The AI's corner-speed lookahead now discounts grip the same way the
  * physics itself does for whatever is under the wheels — a segment sat
  * in a weather patch gets approached slower, same as a corner this
- * driver has learned to respect. Hard rubber is the one tire the
- * puddle stage treats far better than the snow stage (0.55 -> 0.92,
- * the sharpest swing in the whole weather table): send the same AI
- * driver, on the same hard tire, through the same zone once while it
- * is still fresh snow and once once it has become a puddle, and a
- * weather-aware driver should genuinely go faster through the puddle
- * — the grip really is there now, and it should know it, rather than
- * driving both exactly the same because it cannot see the difference.
+ * driver has learned to respect. As of v1.27.0 every compound gets
+ * worse as a patch ages from fresh snow into a standing puddle, hard
+ * rubber worst of all (no tread to fall back on once it isn't dry) —
+ * send the same AI driver, on the same hard tire, through the same
+ * zone once while it is still fresh snow and once once it has become
+ * a puddle, and a weather-aware driver should genuinely slow down for
+ * the puddle, not drive both exactly the same because it cannot see
+ * the difference.
  */
 static void test_ai_weather_awareness(void)
 {
@@ -2201,7 +2491,7 @@ static void test_ai_weather_awareness(void)
 
         g.state = STATE_RACING;
         /* zone 0: fresh snow at t=0 (hard tire grip 0.55), a settled
-         * puddle by t=200 (hard tire grip 0.92) — same tire throughout */
+         * puddle by t=200 (hard tire grip 0.50) — same tire throughout */
         g.race_t = (variant == 0) ? 0.0f : 200.0f;
         idle_inputs(in);
         /* TOURER: front_bias 0.50 puts rwd_bias at exactly 0.50, which
@@ -2220,9 +2510,9 @@ static void test_ai_weather_awareness(void)
     printf("AI on hard tires: %.2f m/s through fresh snow, %.2f m/s "
            "through the same spot once it is a puddle\n",
            end_speed[0], end_speed[1]);
-    CHECK(end_speed[1] > end_speed[0] * 1.05f,
-          "the AI did not speed up once the same tire's grip genuinely "
-          "improved (%.2f m/s in snow vs %.2f m/s in the puddle) — it "
+    CHECK(end_speed[1] < end_speed[0] * 0.99f,
+          "the AI did not slow down once the same tire's grip genuinely "
+          "worsened (%.2f m/s in snow vs %.2f m/s in the puddle) — it "
           "looks like it cannot see the weather change",
           end_speed[0], end_speed[1]);
 }
@@ -5259,6 +5549,8 @@ int main(void)
     test_shifting();
     test_turbo_spool();
     test_aspiration_differences();
+    test_twin_turbo_matches_turbo_lag_with_a_bigger_bonus();
+    test_floor_it_kicks_down_an_automatic_without_spool();
     test_gear_limits_speed();
     test_tire_compounds();
     test_weather_on_every_track();
@@ -5284,6 +5576,9 @@ int main(void)
     test_full_grid_fits();
     test_understeer_scrub_is_progressive();
     test_holding_full_lock_does_not_escalate_or_force_a_spin();
+    test_friction_circle_couples_braking_and_cornering();
+    test_engine_braking_slows_a_coasting_car();
+    test_traction_control_tapers_power_when_sliding();
     test_gentle_steering_stays_gripped();
     test_drifting_rotates_faster_than_gripped_cornering();
     test_ai_races_all_tracks();

@@ -50,10 +50,28 @@ batching unrelated work to make a bigger changelog.
   schedule scaled by each track's own point count rather than a bespoke
   pass over each circuit's geometry. Left for later, once there's reason
   to revisit it: hand-placed zones that actually respect each pass's own
-  hairpins and straights instead of three evenly-spaced patches; a
-  deliberate dry/snow/ice tire trade beyond today's single grip
-  multiplier (rolling resistance, durability); a visible zone
-  boundary/texture in `draw_track` beyond the flat color tint.
+  hairpins and straights instead of three evenly-spaced patches; now that
+  v1.27.0 gave dry-road traction its own compound split (see below), a
+  further wet-weather durability/rolling-resistance trade beyond today's
+  single grip multiplier per condition; a visible zone boundary/texture
+  in `draw_track` beyond the flat color tint.
+- **A real per-wheel suspension model.** v1.27.0's "shocks" (see below)
+  are a single chassis-wide low-pass filter on bank and grade — no
+  vertical wheel travel, no spring rate or damper coefficient, no
+  per-corner weight transfer under braking or turn-in. A genuine
+  suspension model (four independent wheel loads, pitch/roll from
+  weight transfer feeding back into per-tire grip) is a much bigger
+  undertaking than the filter that stands in for it today, and would
+  probably want its own designer stats (spring rate, damping) rather
+  than reusing `chassis_settle_rate`.
+- **A real downforce/aero stat.** `designer_grip()`'s drag term got its
+  sign flipped in v1.27.0 (lower `cd_a` now means more grip, matching a
+  road car's blunt-frontal-area drag rather than a wing), but drag area
+  is still the only aero number a car has. There's no separate downforce
+  stat for a hypothetical open-wheel/wing car that actually wants more
+  drag in exchange for more grip — today every car is implicitly a
+  road car aerodynamically. Worth a dedicated stat only if a future car
+  archetype actually wants that trade-off back.
 
 Roughly the order to work through whatever lands here next: cheapest/most
 self-contained first.
@@ -115,6 +133,93 @@ A rolling window, newest first — see "How this list is organized" above.
 Any patch release that followed a minor release is folded into that
 release's entry rather than getting its own. For anything older,
 `CHANGELOG.md` and `docs/release-notes/` have the full record back to v1.0.
+
+### v1.27.0 — the combined friction circle, engine braking, traction control, and a fourth aspiration
+
+- [x] Braking and cornering now share one grip budget instead of two
+  unlimited ones: `kart_step`'s `yaw_cap` shrinks with however much
+  longitudinal force (braking, accelerating, or engine braking) a car
+  is asking of its tires that same frame (`mu_lat = sqrt(max(0, mu_a² -
+  (a_long_use * friction_circle_strength)²))`). Brake late and turn in
+  hard at the same time and the car pushes wide; get the braking done
+  early and there's more grip left for the corner. One physics change,
+  no AI decision-logic changes — every driver on the grid, human or AI,
+  is subject to it identically.
+- [x] Lifting off the gas now triggers real engine braking
+  (`engine_brake_decel * clamp(rev_frac, 0, 1)`, whenever `!accel`,
+  stacking with the brake pedal) instead of coasting on drag and
+  rolling resistance alone — no more golf-cart coasting down a
+  descent. A simple traction control system rides on the acceleration
+  cap itself (`traction_frac * mu_trac * (1 - tc_strength * slip)`),
+  trimming power automatically the instant the tires read as already
+  sliding.
+- [x] A new `mu_trac` grip budget, parallel to the existing cornering
+  `mu_a`, drives acceleration/braking/engine-braking specifically: it
+  reads the new dry-specialist `tire_traction_now` table instead of
+  `tire_grip_now`, and (unlike `mu_a`) has no banking term, since
+  banking only ever helped cornering.
+- [x] Braking distance is no longer a free designer dial: `kart_step`
+  doesn't read `KartSpec.brake_dist_100` at all any more — braking
+  deceleration is `mu_trac` directly, the same traction figure
+  everything else already uses. Because braking force and inertia both
+  scale with mass and cancel, this makes stopping distance
+  mass-independent, same as a real car's. `spec_brake_dist_100_with_
+  settings` (mirrors the existing `spec_top_speed_with_settings`/
+  `spec_accel_time_with_settings` pattern) derives the number the
+  garage and designer display; `brake_dist_100` stays in `KartSpec`/
+  `cars.json` for backward compatibility only, always overwritten by
+  the derived value.
+- [x] `designer_grip()`'s drag term flipped sign: less drag area now
+  means more grip (previously more `cd_a` read as more assumed
+  downforce). Justification: these are road cars and karts, where drag
+  is just blunt frontal area disturbing the air around the contact
+  patches too, not a wing — the opposite trade would fit an open-wheel
+  car with real downforce, which this roster doesn't have (see the new
+  TODO item above). Mass's side of the grip formula is unchanged:
+  lighter is still grippier, which matches real tire load
+  sensitivity — peak coefficient of friction measurably drops as
+  per-tire normal load rises.
+- [x] Tires now specialize for real: the existing `tire_grip_mult`
+  (cornering) is joined by a new `tire_traction_mult` (dry-road
+  accel/braking) that inverts the ranking — hard is now the best dry
+  tire in a straight line, soft the worst, the genuine trade for less
+  outright cornering stick. Every weather table (`weather_snow_grip`/
+  `weather_ice_grip`/`weather_puddle_grip`) now uniformly favors soft
+  and disfavors hard, including a flip of the puddle table specifically
+  (hard used to be the best standing-water tire; it's now the worst,
+  same as snow and ice — no tread to fall back on once the dry-road
+  advantage stops applying).
+- [x] A fourth aspiration, twin-turbo: shares turbo's exact spool/lag
+  curve but with a bigger bonus multiplier (`twin_turbo_power_bonus_
+  mult`, 1.45x a single turbo's). Every non-NA aspiration now costs
+  curb weight in `designer_mass()` (turbo +35 kg, supercharged +28 kg,
+  twin-turbo +65 kg heaviest of the four) — on top of whatever the
+  underlying horsepower already costs — finally making "build a bigger
+  NA engine instead" a real, competitive choice rather than a strictly
+  worse one.
+- [x] The "use" button now floors the throttle instead of spending a
+  resource: an instant turbo boost if one's already spooled, or — on
+  an automatic gearbox with nothing spooled to lean on
+  (`turbo_spool < boost_kickdown_spool_thresh`) — a genuine kickdown,
+  forcing a downshift only when a lower gear's power-curve position
+  (`gear_power_scale_rpm`) actually makes strictly more power right now
+  than the current gear does, the way a real automatic's passing gear
+  works. Manual-gearbox shift controls already defaulted to the left/
+  right bumpers (GameCube L/R, Xbox-via-Dolphin LB/RB, Classic
+  Controller ZL/ZR) from an earlier session — verified, not changed.
+- [x] Brake lights: a new one-frame `Kart.braking` flag (the resolved
+  brake input, after any FLOOR-IT override cancels it) drives small red
+  rear quads in `draw_car_model` — bright under real braking, dim
+  otherwise, and specifically not lit for engine braking or a
+  kickdown-cancelled brake press.
+- [x] A rudimentary "shocks" system: `Kart.bank_filt`/`grade_filt` now
+  low-pass-filter the track's actual bank/grade at each point
+  (`chassis_settle_rate`, 8.0/s) before either feeds `mu_a`'s banking
+  term or the grade/load calculation, instead of reading the raw
+  track values every frame. Deliberately not a real per-wheel
+  suspension model — no vertical wheel travel, no spring rate, no
+  weight transfer — see the new TODO item above for what a fuller
+  version would need.
 
 ### v1.26.0 — weather everywhere (with a toggle), and skill that shows up on track (plus a v1.26.1 follow-up patch)
 
@@ -289,37 +394,6 @@ release's entry rather than getting its own. For anything older,
   validate-and-append; `config_write_cars_text`/`config_save_cars_file`
   (`config.c`) do the write. `MAX_KART_SPECS` raised 16 → 24 for
   headroom.
-
-### v1.22.0 — difficulty, team and career wired into `game_init`
-
-- [x] `game_init` now reads `GameConfig.difficulty`: a preset sets
-  `laps_override` (when the menu hasn't already), scales AI `aggression`
-  and `ai_skill` together by `DifficultyPreset.ai_aggressiveness`, and
-  overrides `track.has_walls` per `DIFFICULTY_GUARDRAILS_ON`/`OFF`
-  (`TRACK_DEFAULT`, NORMAL's setting, leaves a circuit's own value
-  alone). `DIFFICULTY_NORMAL` is enum value 0 on purpose, so every
-  existing zero-initialized `GameConfig` — every call site today,
-  including every menu path in `main.c` — keeps behaving exactly as it
-  always has.
-- [x] AI car assignment now leans toward `DIFFICULTY_CARS_MATCHED` or
-  `UNDERDOG` once a preset asks for it: `ai_choice_spec` builds a pool of
-  specs judged close to, or weaker than, the human's own power-to-weight,
-  falling back to the full roster if nothing qualifies. `CARS_ANY`
-  (NORMAL) keeps the plain `ai_no % kart_spec_count` untouched.
-- [x] `GameConfig.team_mode`/`team[]` now force each human's `paint_idx`
-  to their chosen team's colour and spread the AI round-robin across the
-  four teams (new `Kart.team` field, `-1` off a team-mode race); a new
-  `game_team_scores` sums a combined per-team total from `final_rank`.
-- [x] `game_init`'s grid placement reads `GameConfig.career[]`: a human
-  with a recorded `last_finish_rank` claims that starting slot instead of
-  always starting at the back; two humans claiming the same slot resolve
-  to adjacent ones instead of overlapping. A human with no result yet —
-  career mode unused, or their first race in it — starts at the back
-  exactly as before.
-- [x] None of the above is reachable in the shipped game yet — no menu
-  sets any of these `GameConfig` fields away from their defaults. See
-  Bundle 1 above for what's still open (the garage menu itself, a
-  per-team HUD element, and `CareerState` save/load).
 
 ## Overall direction
 

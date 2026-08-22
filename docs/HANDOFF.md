@@ -344,6 +344,38 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   see the "let me pick" exchange in the commit that shipped this: the
   whole batch came from a short back-and-forth about exactly this kind
   of roster call, not a one-shot judgment.
+- **v1.27.0**: the biggest physics batch since the oversteer/understeer
+  rework — braking and cornering share one grip budget now (`mu_lat =
+  sqrt(max(0, mu_a² - (a_long_use * friction_circle_strength)²))` in
+  `kart_step`), so braking or accelerating hard while still turning
+  measurably shrinks how much yaw a car can generate that same frame —
+  the physics mechanism that finally rewards trail-braking/exit-speed
+  technique, with zero AI decision-logic changes required. A new,
+  parallel grip budget, `mu_trac` (dry-specialist `tire_traction_now`,
+  no banking term), drives acceleration traction, braking deceleration,
+  and a new engine-braking term (`engine_brake_decel * clamp(rev_frac,
+  0, 1)`, whenever `!accel`) alike; a simple traction control system
+  folds straight into the acceleration cap (`traction_frac * mu_trac *
+  (1 - tc_strength * slip)`). `KartSpec.brake_dist_100` is no longer
+  read by `kart_step` at all — braking deceleration is `mu_trac`
+  directly, which (mass canceling out of both braking force and
+  inertia) makes stopping distance mass-independent like a real car's;
+  `spec_brake_dist_100_with_settings` derives the number the garage/
+  designer show. `designer_grip()`'s drag term flipped sign (less
+  `cd_a` now means more grip — see §6 for the reasoning). Tires now
+  have a genuine dry/wet split: a new `tire_traction_mult` inverts
+  `tire_grip_mult`'s cornering ranking for straight-line accel/braking
+  (hard best dry, worst everywhere else — including a flip of the
+  puddle table, where hard used to be best). A fourth aspiration,
+  twin-turbo, shares turbo's spool/lag curve for a bigger bonus; every
+  non-NA aspiration now costs curb weight in `designer_mass()`, making
+  "build a bigger NA engine instead" a real trade for the first time.
+  The "use" button floors the throttle: an instant boost if spooled, or
+  a genuine power-curve-aware kickdown on an automatic if not. Brake
+  lights (`Kart.braking`) and a rudimentary chassis-settle filter
+  (`bank_filt`/`grade_filt`, explicitly not a real per-wheel suspension
+  model) round out the batch. See §6 for the `tire_traction_now`
+  initialization bug this batch's own new tests caught.
 
 ---
 
@@ -756,6 +788,38 @@ an existing test's tight numeric margin, check whether the qualitative
 claim still holds before either reverting the change or chasing the
 threshold with smaller and smaller magnitudes — on a system this
 interconnected, "smaller" is not reliably "safer."
+
+**A second per-tire condition value needs a second initializer, and
+nothing enforces that at compile time.** v1.27.0 added `mu_trac`
+alongside the existing `mu_a`, reading a new `k->tire_traction_now`
+the same way `mu_a` reads the existing `k->tire_grip_now` — but
+`game_init` only ever initialized the original field at kart-creation
+time; the new one was left at its memset-zero default. The bug was
+self-correcting from frame 2 onward (the per-frame update in
+`kart_step` overwrote it every frame after the first), which is
+exactly why it took this batch's own new tests to surface it:
+`test_friction_circle_couples_braking_and_cornering` showed braking
+producing *more* yaw than coasting — backwards — and
+`test_traction_control_tapers_power_when_sliding` showed zero
+difference between traction-control settings, since a `mu_trac` of 0
+leaves the acceleration cap at 0 regardless of `tc_strength`.
+Root-caused with a 5-frame coast-vs-brake
+scratch harness that showed the two cases diverging from an identical
+frame-0 speed decrease (ruling out most of `kart_step`'s math), then
+confirmed with a temporary `fprintf`-instrumented copy of `game.c`
+(`game_debug.c`) printing `mu_trac`/`mu_a` every frame — `mu_trac` read
+exactly `0.0000` on frame 0 only, then the correct ~10.04 from frame 1
+on, the instant the per-frame `tire_traction_condition` update in
+`kart_step` overwrote the field for the first time. Fixed with one line
+in `game_init`, mirroring the existing `tire_grip_now` init. The
+general lesson: when a new per-tire "condition" value parallels an
+existing one, grep every site that initializes the old one and check
+the new one is initialized at each — the compiler will not tell you a
+struct field silently kept its zero value, and a bug that only shows up
+on a kart's very first simulated frame is exactly the kind existing
+tests (which mostly measure steady-state behavior after a warm-up) can
+miss entirely. It was this batch's own new tests, written to exercise
+the new mechanic directly, that actually caught it.
 
 ---
 

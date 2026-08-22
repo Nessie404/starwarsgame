@@ -230,6 +230,26 @@ for the hairpins.
   for it in falls more often. HOLT, KESSLER, IBARRA, DUARTE and CROSS
   all lean a little more toward that same commitment; NORDLI and
   DELGADO, the field's two cautious CRUISERs, are untouched.
+- **v1.27.0** — a combined friction circle: braking or accelerating
+  hard while still turning now costs cornering grip, the same shared
+  tire budget a real car has, which is what actually rewards braking in
+  a straight line and getting back on the power early over dragging
+  the brake to the apex — for every AI driver, not just a human. Real
+  engine braking (lift off and the car holds itself back instead of
+  coasting) and a simple traction control (trims power the instant the
+  tires are already sliding). Twin-turbo joins turbo/supercharged/NA as
+  a fourth aspiration choice — biggest bonus, heaviest weight penalty —
+  and every forced-induction choice now costs real curb weight, which
+  finally makes building a bigger NA engine a genuine alternative.
+  Grip no longer rewards more drag (less drag now means more grip);
+  braking distance is no longer a free designer dial at all — the
+  physics doesn't even read it any more, deriving stopping power
+  straight from the same grip everything else uses. Hard tires are now
+  the best dry-road accelerating and braking compound and the worst
+  tire the moment the road is wet, icy, or snowed over — standing
+  water included, which used to be its best condition. Brake lights,
+  and FLOOR IT now forces a real kickdown on an automatic gearbox with
+  nothing already spooled to use.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -276,15 +296,22 @@ for the hairpins.
   into start leaving you more room.
 - **Physically-based driving.** Acceleration comes from engine power
   (F = P/v, traction-capped), top speed emerges from aerodynamic drag,
-  braking matches the car's quoted 100-0 km/h stopping distance, and
+  braking is traction-limited off the same grip a car has for
+  cornering (not a separately settable stopping distance), and
   cornering is limited by lateral grip (v²/r ≤ μg, boosted by road
   banking where a circuit has it) — push a little past it and the tires
   have a shoulder, holding a tighter line than the nominal limit before
   it truly gives way; push further and it's progressive understeer, not
-  a surprise. Grip holds until you deliberately break it loose with the
-  handbrake — that's drifting, and it's the only way a car spins on
-  purpose. Gravity acts along the road grade: climbs cost speed,
-  descents give it back.
+  a surprise. Braking and cornering share one combined friction circle:
+  brake hard while still turning in and there is measurably less grip
+  left for the corner, which is what rewards braking in a straight line
+  and getting back on the power early over dragging the brake to the
+  apex. Lift off the throttle and real engine braking holds the car
+  back rather than letting it coast, and a simple traction control
+  trims power the instant the tires are already sliding. Grip holds
+  until you deliberately break it loose with the handbrake — that's
+  drifting, and it's the only way a car spins on purpose. Gravity acts
+  along the road grade: climbs cost speed, descents give it back.
 - **Thirteen cars, and no two drive alike.** RACER (a 260 kg superkart) and
   TRUCK (a 2100 kg pickup) sit at opposite ends of the roster; between
   them are a hot hatch (RUBY), a rally car (RALLY) and a dune buggy
@@ -294,9 +321,9 @@ for the hairpins.
   brakes to match, a MUSCLE car with more horsepower than chassis to
   match it, and two oval specialists built for BULLRING (below) — STOCKER
   and its lower-drag sibling SLIPSTREAM. Every one is defined by
-  horsepower, curb weight, stopping distance, lateral g, drag area,
-  wheelbase, dirt grip, per-gear limiter speeds, a nominal RPM and an
-  aspiration — the menu derives 0-62 mph time and top speed from the
+  horsepower, curb weight, lateral g, drag area, wheelbase, dirt grip,
+  per-gear limiter speeds, a nominal RPM and an aspiration — the menu
+  derives 0-62 mph time, top speed, and stopping distance from the
   same equations the physics uses. The roster comes from `cars.json`,
   so another car is an added JSON object, not a C surgery — design one
   from the garage menu's in-game car designer, which saves straight
@@ -336,11 +363,13 @@ for the hairpins.
   same reason a real banked turn lets you carry more speed through it.
 - **Weather, on any circuit, if you turn it on.** Every one of the nine
   tracks carries the same three-patch layout: a stretch of road that
-  starts as fresh snow, melts into ice, and finally into a puddle,
-  each stage handing an advantage to a different tire compound — soft
-  in the snow and on ice, hard once it's standing water. A WEATHER row
-  in race setup turns it on or off for the field; off by default, so a
-  race stays bone dry until you ask for it.
+  starts as fresh snow, melts into ice, and finally into a puddle. Soft
+  is the tire to have through all three stages — hard's dry-road
+  advantage is exactly what leaves it with no tread to fall back on the
+  moment the road isn't dry, so it's the worst compound in snow, on
+  ice, and in standing water alike. A WEATHER row in race setup turns
+  it on or off for the field; off by default, so a race stays bone dry
+  until you ask for it.
 - **Gearboxes.** Every car has a real gearbox — the shipped roster runs
   4 to 6 gears, and the car designer/`cars.json` allow up to 12 — each
   with a road speed at the limiter, and one engine curve behind all of
@@ -375,18 +404,23 @@ for the hairpins.
   2, quadrants for 3-4), with view culling so a full field still runs at
   frame rate in four-way split.
 - **No collectible power-ups, ever** — no roadside panel, no random
-  pickup. Every car is naturally aspirated, turbocharged, or
-  supercharged. A turbo spools up and bleeds off automatically with
-  real throttle and revs, no button required — genuine lag building up
-  and bleeding off, for the biggest bonus of the three; a supercharger
-  is driven straight off the engine, so its (smaller) bonus is there
-  the instant the revs are, with no lag in either direction; naturally
-  aspirated cars make no forced-induction bonus at all. Whatever a car
-  has applies straight to engine power for as long as it's there. The
-  "use" button is an instantaneous full-throttle stab instead of a
-  resource to spend. Tires only ever wear over a race, with no mid-lap
-  refresh; picking a compound is a bet on the whole distance, not a
-  resource to manage lap to lap.
+  pickup. Every car is naturally aspirated, turbocharged, supercharged,
+  or twin-turbocharged. A turbo spools up and bleeds off automatically
+  with real throttle and revs, no button required — genuine lag
+  building up and bleeding off; a twin-turbo shares that same lag but
+  for the single biggest bonus of the four. A supercharger is driven
+  straight off the engine, so its (smaller) bonus is there the instant
+  the revs are, with no lag in either direction. None of it is free:
+  every kind of forced induction costs curb weight on top of whatever
+  the horsepower already costs, so a naturally aspirated car — free to
+  be built bigger instead, and the only one that pays no weight penalty
+  at all — is a genuine, competitive alternative rather than a strictly
+  worse one. Whatever a car has applies straight to engine power for as
+  long as it's there. The "use" button floors the throttle — an instant
+  turbo boost if one's spooled up, or a real passing-gear kickdown on
+  an automatic if nothing is. Tires only ever wear over a race, with no
+  mid-lap refresh; picking a compound is a bet on the whole distance,
+  not a resource to manage lap to lap.
 - **No arcade cheats.** There is no rubber-banding (a test proves an AI
   left behind gets exactly the same power: 17.05 m/s either way), no
   floor boost pads, and no mini-turbo reward for sliding — the handbrake

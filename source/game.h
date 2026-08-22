@@ -220,17 +220,28 @@ enum { DRIVETRAIN_FWD = 0, DRIVETRAIN_RWD = 1, DRIVETRAIN_AWD = 2 };
 /*
  * Forced induction. Naturally aspirated makes whatever power_hp says,
  * on its own, the instant the revs are there — no meter, nothing to
- * spool. A turbo makes real extra power on top of that (the biggest
- * bonus of the three) but only once its exhaust-driven spool has built
- * up over real time (kart_step's existing turbo_spool), and that spool
- * bleeds off just as gradually off the throttle — genuine lag, in both
- * directions. A supercharger is driven straight off the engine, not
- * exhaust, so its boost is instant and proportional to revs right now
- * — no lag building up or bleeding off — in exchange for a smaller
- * bonus than a turbo's, the real trade-off between the two.
+ * spool, and no weight penalty either, which is what makes "build a
+ * bigger NA engine instead" a real alternative to forced induction
+ * rather than a strictly worse choice — see designer_mass() in main.c,
+ * where every aspiration but NA now costs curb weight (the turbo/
+ * supercharger hardware itself: intercooler, plumbing, a stouter
+ * bottom end to take the extra cylinder pressure).
+ *
+ * A turbo makes real extra power on top of that (a big bonus) but only
+ * once its exhaust-driven spool has built up over real time (kart_step's
+ * existing turbo_spool), and that spool bleeds off just as gradually
+ * off the throttle — genuine lag, in both directions. A supercharger is
+ * driven straight off the engine, not exhaust, so its boost is instant
+ * and proportional to revs right now — no lag building up or bleeding
+ * off — for a smaller bonus than a single turbo's, the trade for having
+ * no lag to manage. Twin-turbo is a single turbo's lag pushed further in
+ * the other direction: the biggest bonus of the four and the heaviest
+ * penalty, two turbos' worth of hardware for two turbos' worth of top
+ * end — same spool/decay behaviour as a single turbo, just a bigger
+ * number at the end of it.
  */
 enum { ASPIRATION_NA = 0, ASPIRATION_TURBO = 1, ASPIRATION_SUPERCHARGED = 2,
-       ASPIRATION_COUNT = 3 };
+       ASPIRATION_TWIN_TURBO = 3, ASPIRATION_COUNT = 4 };
 const char *aspiration_name(int aspiration);
 
 #define COOLDOWN_SECONDS 11.0f /* slowing-down lap: ramps to cruise over this */
@@ -256,6 +267,7 @@ const char *gearbox_name(int mode);
 const char *tire_name(int compound);
 const char *drivetrain_name(int drivetrain);
 float tire_grip_mult(int compound);
+float tire_traction_mult(int compound);
 float tire_drag_mult(int compound);
 
 /*
@@ -367,6 +379,24 @@ struct GameSettings {
     float tire_grip_mult[TIRE_COMPOUNDS];      /* peak grip, when warm    */
     float tire_drag_mult[TIRE_COMPOUNDS];      /* aero/rolling penalty    */
     /*
+     * Straight-line grip is a separate number from cornering grip
+     * (tire_grip_mult, above): a soft compound is the stickiest tire
+     * there is through a corner, but a firmer, harder-wearing compound
+     * actually puts down a cleaner, more consistent straight-line bite
+     * under acceleration and braking on dry pavement — real touring/
+     * endurance rubber is built for exactly that trade, mileage and
+     * straight-line consistency over outright cornering stick. This is
+     * what kart_step's acceleration traction cap and braking deceleration
+     * read; tire_grip_mult is still what yaw_cap (cornering) reads. Once
+     * the road is anything but dry, the advantage flips hard: see
+     * weather_snow_grip/weather_ice_grip/weather_puddle_grip below,
+     * where the hard compound is now the worst tire on the lap in every
+     * one of them — no tread siping, nothing to bite into a soft or
+     * slippery surface with, so it skates and fishtails exactly where a
+     * soft compound would still be finding grip.
+     */
+    float tire_traction_mult[TIRE_COMPOUNDS];  /* dry accel/braking grip  */
+    /*
      * Tires as something that happens over a race rather than a label.
      * A compound has a temperature it wants to be at and a window either
      * side of it, heats up with work and cools with speed, and wears out
@@ -384,10 +414,13 @@ struct GameSettings {
     float tire_ambient_c;
 
     /*
-     * Weather (CLASSIC only). A snow patch is fresh footing for the soft
-     * compound and treacherous for the hard one; by the time it has
-     * melted into a puddle that relationship has flipped. The medium
-     * compound is never the best or the worst tire for any of it.
+     * Weather. Snow, ice and a puddle all cost the hard compound the
+     * most and the soft compound the least — the same dry-weather
+     * traction advantage tire_traction_mult gives the hard tire runs
+     * out the moment the road isn't dry any more, and its lack of tread
+     * siping means it has the least to fall back on of the three. The
+     * medium compound is never the best or the worst tire for any of
+     * them.
      */
     float weather_snow_to_ice_s;
     float weather_ice_to_puddle_s;
@@ -410,9 +443,17 @@ struct GameSettings {
      * it. Whatever is spooled applies straight to engine power, every
      * frame it's on the gas — nothing to spend, nothing to save up for
      * later, unlike the meter-you-fill-and-spend version of this
-     * system before v1.21.0. The "use" button now does something
-     * different and un-tunable: see kart_step for the instantaneous
-     * full-throttle override it applies instead.
+     * system before v1.21.0. The "use"/FLOOR IT button (Input.boost)
+     * always forces the wide-open throttle this needs; on top of that,
+     * kart_step reads it two more ways — if there is meaningful spool
+     * already built, flooring it is exactly what a real driver does to
+     * use that boost right now, so nothing extra is needed. If there is
+     * nothing to use (NA, or the spool is still low), an automatic
+     * gearbox instead treats it as a kickdown: an immediate downshift,
+     * bypassing the normal shift hysteresis, the way a real automatic's
+     * passing gear works when the pedal hits the floor. A manual
+     * gearbox is unaffected either way — that driver already has the
+     * paddles (see the GEAR_UP/GEAR_DOWN default bindings).
      */
     float turbo_spool_rate;        /* spool/second at redline (curve=1) */
     float turbo_spool_decay_rate;  /* spool/second lost off the throttle */
@@ -423,6 +464,12 @@ struct GameSettings {
                                      * already spent cornering, so it is
                                      * a straight-line number, not what
                                      * a car gets mid-slide            */
+    float twin_turbo_power_bonus_mult; /* twin-turbo's own bonus as a
+                                        * multiple of a single turbo's
+                                        * (see turbo_max_power_bonus)   */
+    float boost_kickdown_spool_thresh; /* below this much spool, FLOOR IT
+                                        * kicks an automatic down instead
+                                        * of just using what's built   */
 
     /*
      * Understeer: pushing past the grip limit now costs a lot more the
@@ -432,6 +479,53 @@ struct GameSettings {
      */
     float understeer_scrub;        /* base speed loss per second of slip */
     float understeer_scrub_curve;  /* extra loss at slip = 1.0, on top   */
+
+    /*
+     * Engine braking. Off the throttle, a real engine is still turning
+     * with the wheels through a closed throttle plate — compression and
+     * pumping losses slow the car down on their own, more so the higher
+     * the revs (so more in a low gear than a tall one, for the same
+     * road speed), which is exactly what letting off the gas downhill
+     * should feel like: the car holds back on its own rather than
+     * coasting like a golf cart until the driver reaches for the brake.
+     * Applied whenever the driver is off the accelerator, brake pedal or
+     * not, on top of whatever else is slowing the car down that frame.
+     */
+    float engine_brake_decel;      /* m/s^2 off-throttle at rev_frac 1.0,
+                                    * scaled by rev_frac below that      */
+
+    /*
+     * Traction control. A simple, always-on aid: when the tires are
+     * already sliding under power (k->slip from last frame), it trims
+     * how much engine power actually reaches the road this frame,
+     * tapering it back in as the slide clears rather than piling more
+     * torque onto wheels that are already spinning past their grip —
+     * the same idea as the turbo bonus already being tapered by slip,
+     * generalized to the whole engine rather than just the boost.
+     */
+    float tc_strength;              /* 0 = off, 1 = very aggressive     */
+
+    /*
+     * The combined friction circle: braking or accelerating hard while
+     * still asking for a lot of steering angle leaves less grip for the
+     * turn, the same shared tire budget a real car has for cornering
+     * versus everything else — see kart_step's yaw_cap. 0 would be
+     * today's old behaviour (full braking and full cornering grip
+     * available at once, no interaction at all); 1 is the full
+     * textbook friction circle. This is what actually rewards braking
+     * in a straight line (or easing off progressively as the corner
+     * opens out) over carrying the brake to the apex — a driver who
+     * does that keeps more cornering grip in hand right when the car
+     * needs it, and one who doesn't finds the nose pushing wide at
+     * exactly the moment they most wanted it to turn.
+     */
+    float friction_circle_strength; /* 0..1                             */
+
+    /* Rudimentary shocks — see Kart.bank_filt/grade_filt above. How
+     * quickly the chassis catches up to the road's actual bank and
+     * grade, per second (small = soft and floaty, large = stiff and
+     * almost instant, matching today's un-damped behavior). */
+    float chassis_settle_rate;
 
     /* AI. overcommit_chance is checked once on each sufficiently tight,
      * unguarded corner and is scaled by the strategy's attack rating. */
@@ -509,6 +603,8 @@ int  game_settings_validate(GameSettings *s, char *error, int error_cap);
 
 float tire_grip_mult_with_settings(const GameSettings *settings,
                                    int compound);
+float tire_traction_mult_with_settings(const GameSettings *settings,
+                                       int compound);
 
 /*
  * What a tire is worth right now, given its compound, how hot it is and
@@ -517,6 +613,10 @@ float tire_grip_mult_with_settings(const GameSettings *settings,
  */
 float tire_condition_grip(const GameSettings *settings, int compound,
                           float temp_c, float wear);
+/* Same question, for straight-line traction (tire_traction_mult) rather
+ * than cornering (tire_grip_mult) — see the GameSettings comment. */
+float tire_traction_condition(const GameSettings *settings, int compound,
+                              float temp_c, float wear);
 float tire_drag_mult_with_settings(const GameSettings *settings,
                                    int compound);
 
@@ -652,6 +752,23 @@ typedef struct {
      * automatically off it — see kart_step */
     float turbo_spool;    /* 0..1                                       */
 
+    /*
+     * A rudimentary stand-in for suspension: the chassis's own read of
+     * the road's bank and grade lags the track's actual geometry by a
+     * moment instead of snapping to it, damping the lateral (bank) and
+     * vertical (grade/load) jolt of an abrupt transition — a curb, a
+     * banked corner's edge, a sudden change of slope — the way real
+     * springs and dampers take a moment to settle rather than
+     * transmitting a bump straight to the tire. This is genuinely not a
+     * suspension model — there is no spring rate, no per-wheel travel,
+     * nothing that could actually bottom out or bounce — just enough
+     * damping that the car does not feel like it teleports between grip
+     * states at a track-mesh seam. See kart_step and HANDOFF.md for
+     * what a real suspension model would still need to add.
+     */
+    float bank_filt;       /* smoothed road bank, radians                */
+    float grade_filt;      /* smoothed road grade angle, radians         */
+
     /* going over the edge, and getting put back on the road           */
     int   last_checkpoint;
     float fall_t;         /* >0 while falling off an unguarded edge     */
@@ -662,7 +779,8 @@ typedef struct {
     int   drifting;       /* handbrake locked in, +1/-1 = direction     */
     float tire_wear;      /* 0 = fresh, 1 = worn out                    */
     float tire_temp;      /* degrees C                                  */
-    float tire_grip_now;  /* what the rubber is actually worth, 0..1+   */
+    float tire_grip_now;  /* cornering: what the rubber is worth, 0..1+ */
+    float tire_traction_now; /* straight-line accel/braking, same idea  */
 
     /* role / livery */
     int   human;          /* -1 = AI, else human player index          */
@@ -718,6 +836,9 @@ typedef struct {
 
     /* one-frame event flags for the platform layer */
     int   hit_wall;
+    int   braking;        /* brakes actually applied this frame, after
+                           * FLOOR IT's override cancels them — what a
+                           * brake light should read, human or AI       */
 } Kart;
 
 enum {
@@ -942,13 +1063,20 @@ int ai_driver_count(void);
 float       ai_corner_conf(const Kart *k, const Track *t, int seg);
 float       ai_line_curvature(const Track *t, int seg, float lookahead_m);
 
-/* derived stats for menus: 0-100 km/h time (s) and top speed (km/h) */
+/* derived stats for menus: 0-100 km/h time (s), top speed (km/h), and
+ * 100-0 braking distance (m) — the last of these is an estimate only,
+ * matching what mu_trac in kart_step actually produces rather than a
+ * separately-settable KartSpec.brake_dist_100 (see the comment above
+ * spec_brake_dist_100_with_settings). */
 float spec_accel_time(const KartSpec *s);
 float spec_top_speed(const KartSpec *s);
+float spec_brake_dist_100(const KartSpec *s);
 float spec_accel_time_with_settings(const KartSpec *s,
                                     const GameSettings *settings);
 float spec_top_speed_with_settings(const KartSpec *s,
                                    const GameSettings *settings);
+float spec_brake_dist_100_with_settings(const KartSpec *s,
+                                        const GameSettings *settings);
 
 #ifdef __cplusplus
 }

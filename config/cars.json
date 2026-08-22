@@ -1,5 +1,5 @@
 {
-  "_comment": "All units are shown in field names. Add a new object to this array to add a garage car. Maximum: 24 cars, 6 gears each. nominal_rpm is the RPM (shared by every gear) where the engine makes the most power; aspiration is \"na\" (default), \"turbo\" or \"supercharged\".",
+  "_comment": "All units are shown in field names. Add a new object to this array to add a garage car. Maximum: 24 cars, 12 gears each. nominal_rpm is the RPM (shared by every gear) where the engine makes the most power; aspiration is \"na\" (default), \"turbo\", \"supercharged\" or \"twin_turbo\" (biggest power bonus, heaviest, same spool lag as a single turbo). brake_distance_100_kph_m is kept for compatibility but no longer read by the physics: braking is traction-limited off lateral_grip_g now, the same grip every other straight-line force reads, so there is no separate stopping-distance dial to tune.",
   "cars": [
     {
       "name": "RACER",

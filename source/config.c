@@ -515,8 +515,8 @@ static int read_drivetrain(const char *json, const JsonToken *tokens,
 /*
  * Engine character: "nominal_rpm" is the RPM (shared by every gear —
  * see the KartSpec comment in game.h) where the engine makes the most
- * power, and "aspiration" is "na" (default), "turbo" or "supercharged".
- * A car that mentions neither keeps the defaults.
+ * power, and "aspiration" is "na" (default), "turbo", "supercharged" or
+ * "twin_turbo". A car that mentions neither keeps the defaults.
  */
 static int read_gearing(const char *json, const JsonToken *tokens,
                         int count, int obj, KartSpec *s,
@@ -542,6 +542,8 @@ static int read_gearing(const char *json, const JsonToken *tokens,
             s->aspiration = ASPIRATION_TURBO;
         else if (strcmp(aspiration, "supercharged") == 0)
             s->aspiration = ASPIRATION_SUPERCHARGED;
+        else if (strcmp(aspiration, "twin_turbo") == 0)
+            s->aspiration = ASPIRATION_TWIN_TURBO;
         else
             return set_error(error, error_cap, "UNKNOWN ASPIRATION");
     }
@@ -587,6 +589,11 @@ int config_load_cars_text(const char *json, char *error, int error_cap)
                             &s->mass_kg, error, error_cap) ||
             !required_float(json, tokens, count, obj, "power_hp",
                             &s->power_hp, error, error_cap) ||
+            /* kept for backward compatibility and as a documented
+             * estimate, but kart_step no longer reads this for the
+             * actual physics — braking is traction-limited (mu_trac)
+             * now, the same as everything else a tire does, so there is
+             * no free per-car dial to shorten stopping distance with */
             !required_float(json, tokens, count, obj,
                             "brake_distance_100_kph_m", &s->brake_dist_100,
                             error, error_cap) ||
@@ -719,6 +726,7 @@ int config_write_cars_text(const KartSpec *specs, int count,
              (double)s->nominal_rpm,
              s->aspiration == ASPIRATION_TURBO ? "turbo" :
              s->aspiration == ASPIRATION_SUPERCHARGED ? "supercharged" :
+             s->aspiration == ASPIRATION_TWIN_TURBO ? "twin_turbo" :
              "na",
              dt, (i + 1 < count) ? "," : "");
     }
