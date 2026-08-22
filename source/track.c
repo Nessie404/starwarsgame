@@ -191,29 +191,50 @@ static const float CP_GUANELLA[][3] = {
 };
 
 /*
- * Width profiles, one multiplier per control point, eased between them.
- * The intent is a road that was designed rather than extruded: the three
- * tightest corners on each pass stay narrow and punishing, while two more
- * of the tight ones are opened out so they hold a second line and reward
- * carrying speed. Everywhere else keeps the circuit's nominal width. The
- * indices were picked from the measured corner radii, noted above each
- * profile.
+ * Width profiles, one multiplier per control point, eased between them
+ * with the same Catmull-Rom curve as the road itself (see `cp_width` in
+ * track_init_with_settings), so a wide or narrow section arrives
+ * gradually rather than as a step.
+ *
+ * BERTHOUD and LOVELAND follow the current blueprint: every named
+ * switchback/hairpin apex gets a wide multiplier (1.32) - room to brake
+ * deep on the inside and carry the exit out to the outside instead of
+ * pinching the one line a hairpin usually forces; every control point
+ * whose own 3-point circumradius reads as a genuine straight (>= 150 m)
+ * tapers a little (0.85), so the road pulls in between corners instead
+ * of holding one constant width the whole lap; everything in between -
+ * moderate bends, esses, chicanes, fast kinks - keeps the circuit's
+ * nominal width (1.00). This isn't just cosmetic: v1.27.0's combined
+ * friction circle already rewards braking on the way in and getting
+ * back to power on the way out, and a wide switchback with a narrowing
+ * approach is what gives a driver the physical room on the road to
+ * actually do that.
+ *
+ * MONARCH, BREAKNECK and GUANELLA below still run the older width
+ * philosophy this replaces (the tightest corners stay narrow, a couple
+ * of others are opened out, straights stay nominal) - see TODO.md for
+ * carrying this blueprint over to them.
  */
-/* W_BERTHOUD: tightest control points 18(R11) 19(R11) 6(R11) 7(R12) 13(R12) 12(R12) */
+/* W_BERTHOUD: wide at each named switchback's apex (7, 13, 19); tapers
+ * on the straights (0, 6, 15, 24, 27, 28, 30-32); nominal everywhere
+ * else, including the opening chicane (2-3) and the late tightening
+ * bend (29) - both genuinely tight, but neither a switchback. */
 static const float W_BERTHOUD[] = {
-   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 0.78f, 1.32f, 
-   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.32f, 1.00f, 1.00f, 
-   1.00f, 1.00f, 0.78f, 0.78f, 1.00f, 1.00f, 1.00f, 1.00f, 
-   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 
-   1.00f, 1.00f
+   0.85f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 0.85f, 1.32f,
+   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.32f, 1.00f, 0.85f,
+   1.00f, 1.00f, 1.00f, 1.32f, 1.00f, 1.00f, 1.00f, 1.00f,
+   0.85f, 1.00f, 1.00f, 0.85f, 0.85f, 1.00f, 0.85f, 0.85f,
+   0.85f, 1.00f,
 };
 
-/* W_LOVELAND: tightest control points 15(R12) 16(R13) 12(R13) 13(R13) 6(R13) 7(R14) */
+/* W_LOVELAND: wide at each named hairpin/turnaround's apex (7, 13, 16,
+ * 22); tapers on the straights (1, 2, 5, 9-11, 18, 19, 24-27); nominal
+ * everywhere else. */
 static const float W_LOVELAND[] = {
-   1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.32f, 1.00f, 
-   1.00f, 1.00f, 1.00f, 1.00f, 0.78f, 1.32f, 1.00f, 0.78f, 
-   0.78f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 1.00f, 
-   1.00f, 1.00f, 1.00f, 1.00f
+   1.00f, 0.85f, 0.85f, 1.00f, 1.00f, 0.85f, 1.00f, 1.32f,
+   1.00f, 0.85f, 0.85f, 0.85f, 1.00f, 1.32f, 1.00f, 1.00f,
+   1.32f, 1.00f, 0.85f, 0.85f, 1.00f, 1.00f, 1.32f, 1.00f,
+   0.85f, 0.85f, 0.85f, 0.85f,
 };
 
 /* W_MONARCH: tightest control points 45(R9) 44(R9) 37(R10) 36(R10) 41(R13) 40(R13) */

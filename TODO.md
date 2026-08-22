@@ -73,6 +73,24 @@ batching unrelated work to make a bigger changelog.
   road car aerodynamically. Worth a dedicated stat only if a future car
   archetype actually wants that trade-off back.
 
+- **Carry the switchback-wide/straight-taper width blueprint to the rest
+  of the roster.** BERTHOUD and LOVELAND (`W_BERTHOUD`/`W_LOVELAND` in
+  `track.c`) now follow a specific rule: every named switchback/hairpin
+  apex gets a wide multiplier (1.32), every control point whose own
+  3-point circumradius reads as a genuine straight (>= 150 m) tapers
+  (0.85), everything else stays nominal (1.00) — see the comment above
+  `W_BERTHOUD` for the exact reasoning. MONARCH, BREAKNECK and GUANELLA
+  still run the older width philosophy the blueprint replaced (tightest
+  corners narrow, a couple of others opened out, straights nominal) —
+  each already has a `cp_width` array and a "tightest control points"
+  comment identifying its own switchback indices, so converting them is
+  mostly re-deriving the same wide/taper split from radii already
+  measured, not remeasuring from scratch. KENOSHA, BERTHOUD 2.0 and
+  BULLRING have no `cp_width` at all yet (`NULL`, constant width the
+  whole lap) — BULLRING's two long straights and constant-radius sweeps
+  are the most obviously suited to a taper/no-taper split of the four
+  once someone gets to it.
+
 Roughly the order to work through whatever lands here next: cheapest/most
 self-contained first.
 
