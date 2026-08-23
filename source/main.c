@@ -2484,14 +2484,22 @@ static void draw_race_hud(void)
         draw_player_hud(p);
     draw_input_translator(0);
 
-    /* minimap: corner in 1P, spare quadrant in 3P. Highlighting a
-     * single car only makes sense when there is one obvious "the
-     * player" looking at it — kart 0 in the 1P case; the 3P case is
-     * one shared map for three different people, so no single ring
-     * would mean the same thing to all of them */
+    /* minimap: corner in 1P, one per player's own viewport in 2P, spare
+     * quadrant in 3P. Highlighting a single car only makes sense when
+     * there is one obvious "the player" looking at it — kart 0 in the
+     * 1P case, each player's own kart in their own half in 2P; the 3P
+     * case is one shared map for three different people, so no single
+     * ring would mean the same thing to all of them */
     if (game.cfg.n_humans == 1)
         draw_minimap(&game.track, 1, 0, W - 130.0f, H - 140.0f, 100.0f);
-    else if (game.cfg.n_humans == 3)
+    else if (game.cfg.n_humans == 2) {
+        for (p = 0; p < 2; p++) {
+            float vx, vy, vw, vh;
+            viewport_rect(p, 2, &vx, &vy, &vw, &vh);
+            draw_minimap(&game.track, 1, p, vx + vw - 110.0f, vy + 35.0f,
+                         80.0f);
+        }
+    } else if (game.cfg.n_humans == 3)
         draw_minimap(&game.track, 1, -1, W * 0.5f + 60.0f, H * 0.5f + 40.0f,
                      150.0f);
 
