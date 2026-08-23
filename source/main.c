@@ -1777,6 +1777,13 @@ static float hud_text_width(float cw, const char *s)
  * eastward road" to actually read as south/down rather than mirrored
  * north/up. Mapping +Z to screen "up" instead (i.e. flipping this sign)
  * mirrors the whole minimap left-for-right relative to the real track.
+ *
+ * `highlight` picks who gets the pulsing ring: a kart index rings just
+ * that one car (the 1P corner map's own kart), -1 rings nobody (the 3P
+ * spare-quadrant map, shared by three different people with no single
+ * "the player" among them), and -2 rings every human-controlled kart
+ * at once (the 2P shared map: both players are looking at the same
+ * screen, so both get picked out of the field together).
  */
 static void draw_minimap(const Track *t, int with_karts, int highlight,
                          float ox, float oy, float size)
@@ -1835,7 +1842,7 @@ static void draw_minimap(const Track *t, int with_karts, int highlight,
         float mx = ox + (k->x - t->min_x) * scale;
         float my = oy + (k->z - t->min_z) * scale;
         float s = (k->human >= 0) ? 5.0f : 4.0f;
-        if (i == highlight) {
+        if (i == highlight || (highlight == -2 && k->human >= 0)) {
             /* the viewer's own car: a pulsing white ring behind its own
              * marker, so picking it out of eleven other dots does not
              * mean reading colours against the clock mid-corner */
@@ -2484,22 +2491,31 @@ static void draw_race_hud(void)
         draw_player_hud(p);
     draw_input_translator(0);
 
-    /* minimap: corner in 1P, one per player's own viewport in 2P, spare
-     * quadrant in 3P. Highlighting a single car only makes sense when
-     * there is one obvious "the player" looking at it — kart 0 in the
-     * 1P case, each player's own kart in their own half in 2P; the 3P
-     * case is one shared map for three different people, so no single
-     * ring would mean the same thing to all of them */
+    /* minimap: corner in 1P, one shared map straddling the seam in 2P,
+     * spare quadrant in 3P. Highlighting a single car only makes sense
+     * when there is one obvious "the player" looking at it — kart 0 in
+     * the 1P case; both humans get the ring in 2P (highlight -2, see
+     * draw_minimap) since both are looking at the same shared map on
+     * the same screen; the 3P case is one shared map for three
+     * different people, so no single ring would mean the same thing to
+     * all of them.
+     *
+     * 2P's own HUD is a horizontal split (viewport_rect), so there is
+     * no spare quadrant the way 3P gets one — every screen edge and
+     * both top corners of each half are already spoken for (lap timer
+     * top-left, position/leaderboard top-right, gear/turbo/tire
+     * bottom). The one gap big enough for a real map and clear on both
+     * halves at once is a vertical strip left of the leaderboard
+     * column and right of the centered finish/wrong-way/lap-popup text
+     * (which never reaches past roughly x=400) — this sits it there,
+     * centered on the screen's own vertical middle so it's read the
+     * same way by whichever half a given player is looking at. */
     if (game.cfg.n_humans == 1)
         draw_minimap(&game.track, 1, 0, W - 130.0f, H - 140.0f, 100.0f);
-    else if (game.cfg.n_humans == 2) {
-        for (p = 0; p < 2; p++) {
-            float vx, vy, vw, vh;
-            viewport_rect(p, 2, &vx, &vy, &vw, &vh);
-            draw_minimap(&game.track, 1, p, vx + vw - 110.0f, vy + 35.0f,
-                         80.0f);
-        }
-    } else if (game.cfg.n_humans == 3)
+    else if (game.cfg.n_humans == 2)
+        draw_minimap(&game.track, 1, -2, W - 230.0f, H * 0.5f - 52.5f,
+                     105.0f);
+    else if (game.cfg.n_humans == 3)
         draw_minimap(&game.track, 1, -1, W * 0.5f + 60.0f, H * 0.5f + 40.0f,
                      150.0f);
 
