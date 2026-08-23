@@ -108,9 +108,11 @@ This file exposes the main tuning surfaces:
 - weather: how a snow patch melts (see below);
 - turbo: how fast it spools on the throttle and bleeds off without it,
   and how much engine power it's worth fully spooled;
-- understeer and oversteer: how much pushing past the grip limit costs,
-  and how a rear-driven car committing hard under power can rotate faster
-  than grip alone allows — reward it in time or spin;
+- understeer: how much pushing past the grip limit costs;
+- drift: the real per-axle slip-angle tire model — peak angle, how it
+  falls off past that, weight transfer under accel/braking, yaw inertia,
+  everyday stability control, and the loose-surface bonus a slide gets
+  off-road (see below);
 - AI pace, braking, safe-road use, and overcommit behavior;
 - cliff fall, blackout, fade, invincibility, and flash timing;
 - how long a human can drive the wrong way before the marshal helicopter
@@ -127,6 +129,32 @@ Width/scale/elevation values are multipliers, so `1.10` means ten percent
 more than the built-in geometry. A width multiplier scales the whole
 circuit; the *shape* of the width — which corners are pinched and which
 are opened out — is part of the track itself.
+
+### The `drift` block
+
+A real dynamic bicycle model, not a flat yaw cap: each axle's lateral
+force depends on its own slip angle (the angle between where the tire
+points and where the car is actually moving), rising to a peak at
+`peak_slip_deg` (default 8°) and falling off over `falloff_range` more
+peak-widths toward `floor_frac` of peak (default 0.62 — never zero, so
+a sustained slide settles into a slower equilibrium instead of
+spinning away forever). `weight_transfer_coeff` (default 0.24) loads
+the rear axle under acceleration and the front axle under braking or
+engine braking, which is what makes lifting off or trail-braking into
+a corner a genuine, free way to rotate the car — no handbrake needed.
+`yaw_inertia_mult` (default 1.0) scales how readily the car's own
+rotation responds to a given turning force; raise it for a car that
+feels more reluctant to change its yaw rate. `stability_control_strength`
+(default 0.85) is the everyday assist that keeps ordinary grip driving
+glued close to what the tires can actually deliver instead of letting
+the rear axle run away with itself in an extreme moment — pulling the
+handbrake is the one deliberate way to take it out of the loop,
+locking the rear axle to its sliding-friction floor outright regardless
+of slip angle, which is how a car spins on purpose now. `loose_surface_
+bonus` (default 0.30) is the extra force a slid tire gets off-road or
+on snow/ice from the wedge of displaced gravel or snow it builds up —
+imaginary on tarmac, which is why drifting only genuinely goes faster
+off pavement.
 
 ### The `hills` block
 

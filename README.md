@@ -258,6 +258,22 @@ for the hairpins.
   whatever a width profile or a track's own base width would otherwise
   produce — three circuits (Kenosha, Berthoud 2.0, BULLRING) were
   already sitting right at that upper edge before this release.
+- **v1.28.0** — drifting and grip driving rebuilt as a real dynamic
+  bicycle model: each axle's own slip angle drives its lateral force,
+  rising to a peak and falling off toward a sliding floor that never
+  reaches zero, so a slide settles into a real speed/yaw equilibrium
+  instead of snapping back or spinning away. Braking now spends grip
+  on both axles at once (a real car's brakes act on all four wheels
+  regardless of drivetrain), while only the driven axle spends grip on
+  accelerating. Weight transfer is real — a lift-off or a trail-braked
+  entry genuinely shifts grip toward the front axle, a free way to
+  provoke oversteer with no handbrake needed. The handbrake itself now
+  locks the rear axle to its sliding floor outright and disables
+  stability control while held — the one deliberate way to spin the
+  rear past its own grip peak on purpose. A slid tire off-road or on
+  snow/ice gets a genuine force bonus from the wedge of material it
+  displaces, which is the actual physical reason drifting is only
+  faster than gripping on a loose surface, never on tarmac.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -306,20 +322,28 @@ for the hairpins.
   (F = P/v, traction-capped), top speed emerges from aerodynamic drag,
   braking is traction-limited off the same grip a car has for
   cornering (not a separately settable stopping distance), and
-  cornering is limited by lateral grip (v²/r ≤ μg, boosted by road
-  banking where a circuit has it) — push a little past it and the tires
-  have a shoulder, holding a tighter line than the nominal limit before
-  it truly gives way; push further and it's progressive understeer, not
-  a surprise. Braking and cornering share one combined friction circle:
-  brake hard while still turning in and there is measurably less grip
-  left for the corner, which is what rewards braking in a straight line
-  and getting back on the power early over dragging the brake to the
-  apex. Lift off the throttle and real engine braking holds the car
-  back rather than letting it coast, and a simple traction control
-  trims power the instant the tires are already sliding. Grip holds
-  until you deliberately break it loose with the handbrake — that's
-  drifting, and it's the only way a car spins on purpose. Gravity acts
-  along the road grade: climbs cost speed, descents give it back.
+  cornering is a real dynamic bicycle model: each axle's own slip angle
+  (the gap between where the tire points and where the car is actually
+  moving) drives its lateral force, rising to a peak around 8° before
+  falling off toward a sliding floor that never quite reaches zero, so
+  pushing past the limit is a genuine, recoverable slide rather than an
+  instant scrub. Braking and accelerating share that same grip with
+  cornering, split the way a real car's actually is: braking spends
+  budget on both axles at once (brakes act on all four wheels
+  regardless of drivetrain), while only the driven axle spends budget
+  on accelerating — a front-driven car understeers more under power
+  than a rear-driven one for exactly that reason. Weight transfer is
+  real too: accelerating loads the rear axle, braking or lifting off
+  the throttle loads the front, so a trail-braked entry or a simple
+  lift-off genuinely helps the nose turn in, no handbrake required.
+  Grip holds until you deliberately break it loose with the handbrake,
+  which locks the rear axle to its sliding floor outright and takes
+  stability control out of the loop — that's drifting, and it's the
+  only way a car spins on purpose. A slid tire off-road or on snow/ice
+  gets a real bonus from the wedge of material it displaces, which is
+  why drifting is only actually quicker off pavement, never on it.
+  Gravity acts along the road grade: climbs cost speed, descents give
+  it back.
 - **Thirteen cars, and no two drive alike.** RACER (a 260 kg superkart) and
   TRUCK (a 2100 kg pickup) sit at opposite ends of the roster; between
   them are a hot hatch (RUBY), a rally car (RALLY) and a dune buggy
@@ -567,8 +591,10 @@ grace and you land back in the menu with `CONTROLLER LOST` — no freeze,
 no dead player.
 
 Driving notes: brake before hairpins — the grip circle is real. The
-handbrake rotates the car but costs you speed, so use it to place the car,
-not to go faster. Watch the rev bar next to the gear number: shift at the
+handbrake rotates the car but costs you speed on pavement, so use it to
+place the car there, not to go faster — off-road or on snow/ice it's the
+other way around, since a slid tire gets a real bonus from the material
+it displaces. Watch the rev bar next to the gear number: shift at the
 top of the band, and come down a gear before a hairpin so you are not
 bogged on the exit. RALLY keeps 72% of its grip on dirt, TOURER only 35%.
 Pick a tire compound for the whole race rather than the corner you happen

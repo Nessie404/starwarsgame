@@ -4,6 +4,57 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.28.0] - 2026-08-23
+
+### Changed
+
+- **Drifting and grip driving are now a real dynamic bicycle model, not
+  a flat yaw-rate cap.** Each axle's own slip angle (the gap between
+  where the tire points and where the car is actually moving) drives
+  its lateral force: rising smoothly to a peak around 8°, then falling
+  off toward a sliding floor that never quite reaches zero, so a
+  sustained slide finds a genuine speed/yaw equilibrium instead of
+  either snapping back instantly or diverging. `Kart.vy` (body-frame
+  lateral velocity) and `Kart.yaw_rate` are now real integrated states,
+  and the kart's position integrates the full velocity vector, so a
+  sliding car visibly travels somewhere other than exactly where its
+  nose points.
+- **Braking and accelerating force is now split per axle for the
+  friction circle**, not applied as one flat number: only the driven
+  axle(s) spend part of their own grip budget on accelerating (weighted
+  by drivetrain), while braking spends the same budget on both axles —
+  the way a real car's brakes, unlike its engine, act on all four
+  wheels regardless of drivetrain.
+- **Weight transfer is real now**: accelerating loads the rear axle,
+  braking or engine-braking loads the front — a free, no-handbrake way
+  to provoke oversteer with a lift-off or a trail-braked entry, the way
+  it actually works in a real car.
+- **The handbrake's job changed**: instead of a flat visual/yaw kick, it
+  now locks the rear axle directly to its sliding-friction floor
+  regardless of the actual slip angle, and takes the everyday stability
+  control out of the loop — the one deliberate way to put the rear past
+  its own grip peak on purpose. Everyday grip driving keeps a fast
+  stability governor blending yaw rate and lateral velocity back toward
+  the grip-limited kinematic reference, so an AI driver (which never
+  pulls the handbrake) cannot get stuck oscillating at a safety-clamp
+  extreme after an especially hard corner.
+- **Loose surfaces (off-road, snow, ice) now give a slid tire a genuine
+  extra force bonus** from the wedge of displaced material it builds up
+  past its grip peak — imaginary on tarmac, which is the physical
+  reason drifting is only actually quicker off pavement, never on it.
+- **The visible drift/slide lean on every car (`main.c`) now comes from
+  the real body slip angle** (`atan2(vy, speed)`) instead of a fixed
+  handbrake-only kick plus separate steering/slip fudge terms — it
+  looks like a slide under any real sliding condition now, not just a
+  handbrake pull.
+
+### Added
+
+- A new `drift` settings block (`config/settings.json`) exposing the
+  slip-angle peak and falloff shape, weight transfer strength, yaw
+  inertia, everyday stability control strength, and the loose-surface
+  force bonus — see `config/README.md` for the full breakdown.
+
 ## [1.27.1] - 2026-08-29
 
 ### Changed

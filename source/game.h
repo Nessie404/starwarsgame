@@ -547,6 +547,69 @@ struct GameSettings {
      * almost instant, matching today's un-damped behavior). */
     float chassis_settle_rate;
 
+    /*
+     * Real slip-angle cornering (v1.28.0): a tire's lateral force rises
+     * with slip angle (the angle between where it points and where it
+     * is actually traveling), peaks, then falls off — kart_step now
+     * computes a genuine front and rear slip angle each frame (a
+     * dynamic bicycle model, Kart.vy/yaw_rate as real integrated
+     * states) and reads this curve for each axle separately, rather
+     * than clamping a single whole-car yaw rate against one grip
+     * budget. See kart_step's steering section for the full model.
+     */
+    float slip_peak_deg;      /* slip angle at peak lateral force, deg  */
+    float slip_falloff_range; /* how many more "peaks" of slip angle it
+                               * takes to fall all the way to the
+                               * sliding floor below                    */
+    float slip_floor_frac;    /* force fraction (of peak) a tire still
+                               * makes deep into a slide — never zero,
+                               * or a sustained drift could never find
+                               * an equilibrium at all                  */
+    /*
+     * Weight transfer: accelerating squats the rear and loads it up,
+     * braking (or simply lifting off — engine braking counts) dives the
+     * nose and loads the front, at the other axle's expense — real
+     * "squat and dive," and the reason lifting off or trail-braking
+     * into a corner is a genuine way to provoke oversteer on its own,
+     * with no handbrake required.
+     */
+    float weight_transfer_coeff;   /* 0 = no transfer, 1 = a lot        */
+    /* Yaw inertia: I_z approximated as a uniform rod the length of the
+     * wheelbase (mass cancels out of the per-mass units this whole
+     * model works in, so only the shape — m*L^2/12 — actually matters
+     * here), scaled by this multiplier for tuning headroom. Bigger =
+     * the car resists changing its rotation more sluggishly. */
+    float yaw_inertia_mult;
+    /*
+     * Stability control. Everyday grip driving does not let the rear
+     * axle actually run away with itself the instant it reads past its
+     * own slip-angle peak — most road cars (and, this game assumes,
+     * these karts) have some form of it, and it is what keeps an AI
+     * driver (which never touches the handbrake) from spinning out the
+     * moment hard cornering under power pushes the rear a little past
+     * peak by accident. 0 = no assist, the rear's own sliding floor is
+     * all there is; 1 = the rear's force floor gets pulled all the way
+     * back up near its own peak, so it can barely lose grip at all.
+     * Pulling the handbrake (Kart.drifting) takes the driver out of
+     * this safety net on purpose — that is the one deliberate way to
+     * get the real, open-loop-unstable dynamics a genuine drift has
+     * past the rear's own peak, where the driver themself has to be
+     * the stabilizer.
+     */
+    float stability_control_strength;
+    /*
+     * Loose surfaces. A yawed tire off the pavement (or on snow/ice)
+     * builds a wedge of displaced gravel or snow that genuinely adds
+     * force a dry tire's friction coefficient alone would not give —
+     * real on loose surfaces, imaginary on tarmac, which is exactly why
+     * a sustained drift is only actually fast off-road: this bonus only
+     * ever applies to the sliding (past-peak) part of the curve, never
+     * to ordinary grip. On tarmac there is no such wedge, so a drift
+     * there just spends the tire's own friction budget as heat and
+     * wear for less lateral force than gripping would have made.
+     */
+    float drift_loose_surface_bonus;
+
     /* AI. overcommit_chance is checked once on each sufficiently tight,
      * unguarded corner and is scaled by the strategy's attack rating. */
     float ai_skill_mult;
@@ -748,8 +811,21 @@ typedef struct {
     /* pose */
     float x, z, y;
     float heading;        /* radians; ground dir = (cos h, sin h)       */
-    float speed;          /* m/s along heading, >= small reverse        */
-    float slip;           /* visual/audio slide amount 0..1             */
+    float speed;          /* m/s along heading (body-frame longitudinal,
+                           * "u" in the bicycle-model comments), >= small
+                           * reverse                                    */
+    float vy;             /* m/s, body-frame lateral ("v"/lateral slip
+                           * velocity) — zero for a car pointed exactly
+                           * where it is going, nonzero the moment the
+                           * tires are actually sliding sideways at all;
+                           * see kart_step's slip-angle model            */
+    float yaw_rate;        /* rad/s, actual angular velocity — an
+                           * integrated state now, not read straight off
+                           * the steering input each frame; see kart_step */
+    float slip;           /* worst of the two axles' past-peak slip
+                           * fraction this frame, 0 = neither axle past
+                           * its own peak, 1 = deep into the sliding
+                           * regime; visual/audio/AI-mistake signal      */
     float steer_vis;
 
     /* track relation */
@@ -796,7 +872,10 @@ typedef struct {
     float invincible_t;   /* contact immunity after the recovery        */
     int   respawned;      /* one-frame flag for the platform layer      */
     int   falls;          /* completed cliff falls (AI telemetry/tests) */
-    int   drifting;       /* handbrake locked in, +1/-1 = direction     */
+    int   drifting;       /* handbrake held: locks the rear axle to its
+                           * sliding (kinetic) friction level regardless
+                           * of slip angle, and takes stability control
+                           * out of the loop — see kart_step             */
     float tire_wear;      /* 0 = fresh, 1 = worn out                    */
     float tire_temp;      /* degrees C                                  */
     float tire_grip_now;  /* cornering: what the rubber is worth, 0..1+ */

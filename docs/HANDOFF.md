@@ -391,6 +391,39 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   `cp_width` array, a track's own `road_half`, or a `track_width_mult`
   setting would otherwise produce. See §6 for what running every
   circuit through this clamp actually turned up.
+- **v1.28.0**: the flat `yaw_cap = mu_a/v` model is gone, replaced by a
+  genuine dynamic bicycle model in `kart_step`. `Kart.vy` and
+  `Kart.yaw_rate` are now real integrated states (not an instantaneous
+  clamp), each axle computes its own slip angle (`alpha_f`/`alpha_r`,
+  from `vy`/`yaw_rate`/`steer_angle` via `atan2f`), and a new
+  `slip_force_frac` helper turns slip angle into lateral force: a sine
+  ease up to `slip_peak_deg`, then a linear falloff over
+  `slip_falloff_range` more peak-widths toward `slip_floor_frac` (never
+  zero, so a sustained slide has an equilibrium to find). The combined
+  friction circle from v1.27.0 is now per-axle: only the driven axle(s)
+  spend budget on `front_long`/`rear_long` (weighted by drivetrain),
+  braking spends the same budget on both (brakes act on all four
+  wheels regardless of drivetrain). `weight_transfer_coeff` shifts load
+  toward the rear under acceleration and the front under braking/
+  engine-braking — free lift-off/trail-brake oversteer, no handbrake
+  needed. `Kart.drifting` is now a plain bool: held, it locks the rear
+  axle's force straight to its floor (kinetic friction) regardless of
+  slip angle and disables stability control; released, stability
+  control blends `yaw_rate`/`vy` back toward the grip-capped kinematic
+  reference (`stability_control_strength`) fast enough that an AI
+  (which never handbrakes) can't get stuck oscillating at the hard
+  safety clamps (`±8` rad/s yaw rate, `±40` m/s vy) after an extreme
+  corner — see §6 for the two sign/edge-case bugs this model surfaced,
+  and for why the stability governor's reference has to be grip-capped
+  itself, not the raw unclamped kinematic formula. `drift_loose_surface_
+  bonus` adds real extra force past peak slip when off-road or in snow/
+  ice, the actual reason a slide is only faster than gripping off
+  pavement. Kart position now integrates the full velocity vector
+  (`cos(heading)*v - sin(heading)*vy`, etc.), not just heading, so a
+  sliding car visibly goes somewhere other than where its nose points.
+  `main.c`'s visual drift lean is now the real body slip angle
+  (`atan2f(vy, speed)`) instead of a fixed handbrake kick plus ad hoc
+  steer/slip fudge terms.
 
 ---
 
@@ -859,6 +892,106 @@ physical unit is the actual requirement (car widths, in this case, not
 "times 1.3"), check the derived absolute number directly, on every
 existing case, the first time that requirement shows up — don't assume
 existing values already satisfy a rule that was never checked before.
+
+**A slip-angle sign convention is easy to get backwards, and the tell
+is universal instability, not a wrong-looking number.** v1.28.0's first
+cut of `alpha_f`/`alpha_r` had every term negated relative to what was
+actually correct (`alpha_f = steer_angle - atan2f(...)` instead of
+`atan2f(...) - steer_angle`, similarly for `alpha_r`). The symptom
+wasn't a subtly wrong slide — it was every one of the 13 built-in cars
+reaching `slip = 1.00` within 5-10 frames of a trivial `steer = 0.08`
+input, because a backwards sign convention turns the tire's own
+self-correcting slip-angle response into positive feedback: the
+steering the model computes to *reduce* slip angle actually *increases*
+it, every frame, for every car. Root-caused by deriving the correct
+sign from first principles rather than guessing at the fix: reduce the
+dynamic model algebraically to the known-correct kinematic formula in
+the zero-slip limit (`yaw_rate → v*tan(steer)/wheelbase`) and check
+which sign convention actually produces that reduction. General lesson:
+when a physics model is universally, immediately unstable rather than
+subtly wrong in one case, suspect a sign error in the core feedback
+term before anything else — and verify a new formula's sign convention
+against a known-correct limiting case algebraically, rather than by
+trial and error against test output.
+
+**`atan2f(0, negative)` is exactly π, and a "floor the forward speed"
+guard has to floor the magnitude, not the raw signed value.** The slip
+angle computation needs a nonzero forward speed in its `atan2f`
+denominator, and the first cut floored it sign-preservingly (`(v >= 0)
+? fmaxf(v, 6) : fminf(v, -6)`). A freshly respawned or slope-parked car
+can creep to a slightly negative speed (gravity on a grade) while
+`vy`/`yaw_rate` are still exactly zero — and `atan2f(0.0f, -6.0f)`
+returns exactly π, a spurious 180° "slip angle" that corrupts the whole
+simulation from that frame on (this showed up as "car is dead" after a
+cliff respawn, and as full-race failures whenever a car spent even one
+frame stationary or creeping backward). Fixed by flooring the
+*magnitude* only (`fmaxf(fabsf(v), 6.0f)`), never the sign — a
+deliberate reverse-driving simplification, documented at the call site.
+Root-caused with an isolated, faithful reproduction of the failing
+test (including the parts of its setup that looked incidental, like a
+rival-kart-manipulation block — trimming "obviously irrelevant" setup
+from a repro is exactly how this one first failed to reproduce) plus a
+one-line debug print at the top of `kart_step` gated on the exact kart
+index, which caught `alpha_f = alpha_r = 3.14159` on the precise
+transition frame. General lesson: any "clamp a signed value away from
+zero" guard needs a moment's thought about what `atan2f` (or anything
+else sign-sensitive downstream) does when that value is legitimately
+allowed to be slightly negative — flooring the sign along with the
+magnitude is the bug, not a simplification.
+
+**A stability governor's reference point has to respect the same grip
+limit as everything else it's steering back toward, not just the
+kinematic formula.** The first cut of the yaw-rate/vy stability
+governor (added to stop an AI kart from getting permanently stuck
+oscillating at the `±8` rad/s / `±40` m/s safety clamps after a very
+tight, high-speed corner — reproduced with a dedicated probe tracing
+one specific kart on BERTHOUD past the exact frame it started spinning
+forever) blended `yaw_rate` toward the raw, unclamped kinematic formula
+(`v*tan(steer_angle)/wheelbase`). That fixed the permanent-spin bug,
+but broke two passing tests: at full lock and real speed that formula
+asks for far more yaw rate than any tire could ever deliver, so
+blending toward it during a genuine full-lock-at-speed maneuver dragged
+the state toward an equally unrealistic number and made a held-lock
+test's speed loss and yaw escalation both worse, not better. Fixed by
+clamping the reference itself to the same lateral-grip cap every axle
+force in the function already respects (`mu_a / max(|v|, 1)`) before
+blending toward it — kinematic and grip-realistic both, so it helps at
+low speed (where the two nearly coincide) and stays safe at the extreme
+(where the kinematic number alone would not). General lesson: a
+"pull it back to something sane" governor is only as sane as its own
+reference point — reusing an existing formula from elsewhere in the
+same function doesn't make it a safe target unless that formula
+already respects every limit the state it's correcting is itself
+subject to.
+
+**A test written against the old model's failure mode can still be
+right about the invariant and wrong about the number.** Several AI
+learning-curve tests (`test_ai_learns_from_mistakes`,
+`test_ai_strategies_differ`) asserted specific mistake counts and
+belief-ceiling bounds that had been calibrated to the old, more
+error-prone yaw-cap model. Under the real slip-angle model plus
+stability control, genuine driving mistakes (see `ai_learn`: off the
+road, a barrier, or slip past 0.85) are rarer — a bold strategy sheet
+can go an entire mid-length race without personally triggering one, and
+the field's mistake-count spread over a couple of minutes is now 0..1,
+not the 3+ a flatter, more error-prone model used to force. Separately,
+one bound (`mean <= conf_max + 0.01`) had gone stale against a real,
+intentional feature: v1.26.0 already scales each driver's belief
+ceiling by skill and the watched human's pace
+(`skill_ceiling`/`ceiling` in `ai_learn`), so a high-skill driver's
+genuine steady state can sit *above* the sheet's flat `conf_max` — the
+test just never accounted for that. Fixed the stale bound to replicate
+the real per-driver ceiling formula, and relaxed the per-strategy
+mistake-count/ceiling assertions to what the physics actually promises
+now (checked at the whole-bold-cohort level instead of requiring it of
+every individual driver) — see TODO.md for the longer-race AI-mistake-
+variety pass this is flagging as a genuine, deferred tuning gap, not
+swept under the rug. General lesson: when a physics rework makes a
+test fail, check whether the test encodes the physical invariant you
+actually care about or a specific number that was only ever true of the
+old model's particular failure shape — the fix might be the test, not
+the physics, but say so explicitly and leave a marker for the tuning
+pass that number was standing in for.
 
 ---
 

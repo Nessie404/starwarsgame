@@ -57,13 +57,56 @@ batching unrelated work to make a bigger changelog.
   in `draw_track` beyond the flat color tint.
 - **A real per-wheel suspension model.** v1.27.0's "shocks" (see below)
   are a single chassis-wide low-pass filter on bank and grade — no
-  vertical wheel travel, no spring rate or damper coefficient, no
-  per-corner weight transfer under braking or turn-in. A genuine
+  vertical wheel travel, no spring rate or damper coefficient. v1.28.0
+  added real front/rear weight transfer under acceleration and braking
+  (`weight_transfer_coeff`), but it's still axle-wide, not per-wheel:
+  no left/right load transfer under cornering (no camber/roll-couple
+  effect), and every car is implicitly assumed 50/50 front-rear at rest
+  — there's no `KartSpec` stat for static weight distribution, so a
+  nose-heavy or tail-heavy car drives identically to a balanced one
+  until weight transfer shifts load under accel/braking. A genuine
   suspension model (four independent wheel loads, pitch/roll from
-  weight transfer feeding back into per-tire grip) is a much bigger
-  undertaking than the filter that stands in for it today, and would
-  probably want its own designer stats (spring rate, damping) rather
-  than reusing `chassis_settle_rate`.
+  weight transfer feeding back into per-tire grip, a real static
+  distribution stat) is a much bigger undertaking than what stands in
+  for it today, and would probably want its own designer stats (spring
+  rate, damping, front/rear weight bias) rather than reusing
+  `chassis_settle_rate`/`weight_transfer_coeff`.
+- **Left-foot braking and a separately-modeled clutch-kick/Scandinavian
+  flick.** v1.28.0's dynamic bicycle model gives a real physical basis
+  for both real-world techniques, but neither is modeled as its own
+  mechanic yet: accel and brake stay mutually exclusive inputs (no way
+  to trail-brake with the left foot while still on the throttle, the
+  way a real left-foot braker rotates a car without lifting), and a
+  clutch-kick or Scandinavian flick — a deliberate, brief wheelspin or
+  opposite-direction weight transfer to snap the rear loose on
+  entry — has no dedicated input or mechanic; only the handbrake and
+  the free lift-off/trail-brake weight-transfer path (already real)
+  exist as ways to provoke it today.
+- **The AI-mistake-count spread over a short race is now much
+  narrower than it used to be.** v1.28.0's real slip-angle model plus
+  its stability governor means genuine driving mistakes (`ai_learn`:
+  off the road, a barrier, or slip past 0.85) are rarer events than the
+  old flatter yaw-cap model produced — over a couple of minutes on a
+  forgiving circuit like CLASSIC, the field's mistake counts now
+  typically span 0..1, not the wider spread a more error-prone model
+  used to force, and it's possible for a single bold-strategy driver
+  (LATE, CHARGER, or YOLO) to go a whole short race clean
+  (`test_ai_strategies_differ`/`test_ai_learns_from_mistakes` were
+  relaxed to check this at the whole-cohort level rather than per
+  driver — see `docs/HANDOFF.md` §6). Worth a real tuning pass once
+  there's reason to revisit AI difficulty/personality: either a longer
+  test-race window, a harsher circuit, or genuinely riskier default
+  corner-entry margins for the bold sheets so overconfidence reliably
+  costs them something within a normal race length again.
+- **Tire-compound long-race balance.** `test_tire_strategy_crossover`
+  now checks the wear *mechanism* (softs wear measurably faster than
+  hards) rather than a finish-time crossover between compounds over a
+  long race — under the current tuning, the expected soft-early/hard-
+  late strategic trade-off doesn't reliably produce a hard-tire finish-
+  time advantage late in a long race the way it's supposed to. Worth a
+  dedicated pass (probably `tire_grip_mult`/`tire_wear_rate` retuning,
+  or revisiting how wear feeds back into grip) once there's reason to
+  revisit tire strategy depth.
 - **A real downforce/aero stat.** `designer_grip()`'s drag term got its
   sign flipped in v1.27.0 (lower `cd_a` now means more grip, matching a
   road car's blunt-frontal-area drag rather than a wing), but drag area
@@ -159,6 +202,49 @@ A rolling window, newest first — see "How this list is organized" above.
 Any patch release that followed a minor release is folded into that
 release's entry rather than getting its own. For anything older,
 `CHANGELOG.md` and `docs/release-notes/` have the full record back to v1.0.
+
+### v1.28.0 — a real dynamic bicycle model for drifting and grip driving
+
+- [x] The flat `yaw_cap = mu_a/v` model is gone: each axle now computes
+  its own slip angle (`alpha_f`/`alpha_r`, from the car's real body-frame
+  lateral velocity `Kart.vy` and yaw rate `Kart.yaw_rate` — both now
+  genuinely integrated states, not an instantaneous clamp) and turns it
+  into lateral force via a new `slip_force_frac` curve: a sine ease up
+  to a peak around 8°, then a falloff toward a sliding floor that never
+  reaches zero, so a sustained slide finds a real speed/yaw equilibrium
+  instead of snapping back or diverging.
+- [x] The v1.27.0 combined friction circle is now per-axle: only the
+  driven axle(s) spend grip budget on accelerating (weighted by
+  drivetrain), while braking spends the same budget on both axles —
+  brakes act on all four wheels regardless of drivetrain, unlike the
+  engine.
+- [x] Weight transfer is real: accelerating loads the rear axle, braking
+  or engine-braking loads the front (`weight_transfer_coeff`) — a free,
+  no-handbrake way for a lift-off or a trail-braked entry to help the
+  car rotate.
+- [x] The handbrake's job changed: `Kart.drifting` is now a plain bool
+  that, held, locks the rear axle straight to its sliding-friction floor
+  regardless of actual slip angle and disables stability control — the
+  one deliberate way to put the rear past its own grip peak on purpose.
+  Released, a fast stability governor blends `yaw_rate`/`vy` back toward
+  the grip-capped kinematic reference, keeping an AI driver (which never
+  handbrakes) from getting stuck oscillating at the hard safety clamps
+  after an extreme corner — see `docs/HANDOFF.md` §6 for the two sign/
+  edge-case bugs this model surfaced and the governor's own reference-
+  point bug along the way.
+- [x] A slid tire off-road or on snow/ice now gets a genuine extra force
+  bonus past its slip peak (`drift_loose_surface_bonus`) from the wedge
+  of displaced material it builds up — imaginary on tarmac, the actual
+  physical reason drifting is only faster than gripping off pavement.
+- [x] Kart position now integrates the full velocity vector, not just
+  heading, so a sliding car visibly travels somewhere other than exactly
+  where its nose points; `main.c`'s visual drift lean is the real body
+  slip angle (`atan2f(vy, speed)`) now, replacing a fixed handbrake kick
+  plus separate ad hoc steer/slip fudge terms.
+- [x] New `drift` settings block (`config/settings.json`,
+  `config/README.md`) exposing the slip-angle peak/falloff shape, weight
+  transfer strength, yaw inertia, stability control strength, and the
+  loose-surface bonus.
 
 ### v1.27.0 — the combined friction circle, engine braking, traction control, and a fourth aspiration (plus a v1.27.1 follow-up patch)
 
@@ -399,38 +485,6 @@ release's entry rather than getting its own. For anything older,
   `if (t->alpine)` even though both tracks set `has_walls = 1`, so the
   flag never actually drew anything; guardrail/cliff-edge drawing is
   now gated on `has_walls` on its own.
-
-### v1.23.0 — BULLRING, two oval cars, smoother corners, and a car designer
-
-- [x] A ninth circuit, BULLRING: flat, wide, barriered, generated from
-  its own geometry (two straights, two constant-radius sweeping turns)
-  rather than hand-drawn, so it has no abrupt curves anywhere on the
-  lap. New `Track.grandstands` flag (`main.c`'s `place_scenery`/
-  `draw_grandstands`) draws grandstands along both straights.
-- [x] Two new cars tuned for it, STOCKER and SLIPSTREAM — huge power
-  and low drag for the straights, enough grip to hold BULLRING's
-  sweepers without banking to lean on. Both had to be retuned down
-  from their first cut (more power, less grip) after it stranded an
-  AI in a fall loop on MONARCH's tightest hairpin; trading some power
-  for more grip fixed that *and* made them faster on BULLRING, not
-  slower — see `docs/HANDOFF.md` §6.
-- [x] Every circuit but MONARCH got a wider corner-easing pass in
-  `track_init_with_settings` (a 5-point blend instead of 3), softening
-  how sharply curvature ramps into and out of a bend without eroding
-  a genuinely tight apex — Berthoud 2.0's and Guanella's hairpins are
-  unchanged. MONARCH keeps the original pass: the wider blend is the
-  other thing that stranded an AI in a fall loop there, for the same
-  underlying reason as the paragraph above (see `docs/HANDOFF.md` §6
-  — MONARCH has essentially no margin for any geometry change).
-- [x] An in-game car designer, reachable from the main menu as DESIGN
-  A CAR: pick a name, dial in mass, power, brakes, grip, drag, dirt
-  grip and drivetrain, see a live preview of the derived top speed and
-  0-100 time, then SAVE it into the garage for the session and — if
-  `cars.json` was actually found — back to disk too.
-  `kart_spec_validate`/`kart_specs_add_custom` (`game.c`) do the
-  validate-and-append; `config_write_cars_text`/`config_save_cars_file`
-  (`config.c`) do the write. `MAX_KART_SPECS` raised 16 → 24 for
-  headroom.
 
 ## Overall direction
 

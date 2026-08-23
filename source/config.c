@@ -973,6 +973,30 @@ int config_load_settings_text(GameSettings *settings, const char *json,
                          &s.understeer_scrub_curve, error,
                          error_cap))) goto fail;
 
+    obj = object_get(json, tokens, count, 0, "drift");
+    if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
+        set_error(error, error_cap, "DRIFT NEEDS OBJECT");
+        goto fail;
+    }
+    if (obj >= 0 &&
+        (!optional_float(json, tokens, count, obj, "peak_slip_deg",
+                         &s.slip_peak_deg, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "falloff_range",
+                         &s.slip_falloff_range, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "floor_frac",
+                         &s.slip_floor_frac, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "weight_transfer_coeff",
+                         &s.weight_transfer_coeff, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "yaw_inertia_mult",
+                         &s.yaw_inertia_mult, error, error_cap) ||
+         !optional_float(json, tokens, count, obj,
+                         "stability_control_strength",
+                         &s.stability_control_strength, error,
+                         error_cap) ||
+         !optional_float(json, tokens, count, obj, "loose_surface_bonus",
+                         &s.drift_loose_surface_bonus, error,
+                         error_cap))) goto fail;
+
     obj = object_get(json, tokens, count, 0, "ai");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
         set_error(error, error_cap, "AI NEEDS OBJECT");
