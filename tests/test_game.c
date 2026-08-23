@@ -3466,7 +3466,7 @@ static void test_json_configuration(void)
     const char *partial_settings =
         "{\"_comment\":\"race\","
         "\"respawn\":{\"black_hold_seconds\":1.5},"
-        "\"tracks\":{\"classic\":{\"width_multiplier\":1.2,"
+        "\"tracks\":{\"classic\":{\"width_multiplier\":1.1,"
         "\"laps\":7}}}";
 
     kart_specs_reset_defaults();
@@ -3534,7 +3534,14 @@ static void test_json_configuration(void)
                                      (int)sizeof(error)),
           "wrong settings section type was accepted");
     track_init_with_settings(&widened, TRACK_CLASSIC, &settings);
-    CHECK(fabsf(widened.road_half - 5.6f * 1.2f) < 0.01f,
+    /* 1.1x, not something bigger: CLASSIC's road_half (5.6) times too
+     * generous a multiplier would run past TRACK_MAX_FULL_WIDTH_M's
+     * absolute 10-car-width ceiling and get clamped there instead of
+     * reflecting the setting - this value is deliberately picked to
+     * land safely under that ceiling so the assertion is actually
+     * testing "the multiplier was read," not "the clamp works" (that
+     * gets its own test, below). */
+    CHECK(fabsf(widened.road_half - 5.6f * 1.1f) < 0.01f,
           "track width multiplier was ignored (%.2f)", widened.road_half);
     CHECK(widened.laps == 7,
           "explicit track lap count was clamped to %d", widened.laps);
@@ -3553,6 +3560,65 @@ static void test_json_configuration(void)
     printf("json config: %d cars, width x%.1f, gas W / RT -> %s\n",
            kart_spec_count, settings.track_width_mult[TRACK_CLASSIC],
            control_gamecube_name(controls.gamecube[CONTROL_ACCEL]));
+}
+
+/*
+ * No stretch of paved road on any circuit is allowed narrower than
+ * TRACK_MIN_FULL_WIDTH_M (3 car widths) or wider than
+ * TRACK_MAX_FULL_WIDTH_M (10) — an absolute, car-width-derived floor
+ * and ceiling on top of whatever a hand-authored cp_width profile or a
+ * track's own road_half asks for (game.h). Checked at default settings
+ * across every circuit, then again with a deliberately absurd
+ * track_width_mult override (both a near-zero and a huge value) on
+ * CLASSIC to prove the clamp holds even when a settings file asks for
+ * something the road-design values alone never would.
+ */
+static void test_track_width_stays_within_car_widths(void)
+{
+    int id;
+    float lo_half = TRACK_MIN_FULL_WIDTH_M / 2.0f;
+    float hi_half = TRACK_MAX_FULL_WIDTH_M / 2.0f;
+
+    for (id = 0; id < TRACK_COUNT; id++) {
+        Track t;
+        int i;
+        float lowest = 1.0e9f, highest = 0.0f;
+
+        track_init(&t, id);
+        for (i = 0; i < t.n; i++) {
+            if (t.road_half_seg[i] < lowest) lowest = t.road_half_seg[i];
+            if (t.road_half_seg[i] > highest) highest = t.road_half_seg[i];
+        }
+        CHECK(lowest >= lo_half - 0.01f,
+              "%s: road pinches to %.2f m half-width, floor is %.2f",
+              track_name(id), lowest, lo_half);
+        CHECK(highest <= hi_half + 0.01f,
+              "%s: road opens to %.2f m half-width, ceiling is %.2f",
+              track_name(id), highest, hi_half);
+    }
+
+    {
+        GameSettings settings;
+        Track narrow, wide;
+        int i;
+
+        game_settings_defaults(&settings);
+        settings.track_width_mult[TRACK_CLASSIC] = 0.01f;
+        track_init_with_settings(&narrow, TRACK_CLASSIC, &settings);
+        for (i = 0; i < narrow.n; i++)
+            CHECK(narrow.road_half_seg[i] >= lo_half - 0.01f,
+                  "an absurdly small track_width_mult still narrowed the "
+                  "road below the car-width floor (%.2f)",
+                  narrow.road_half_seg[i]);
+
+        settings.track_width_mult[TRACK_CLASSIC] = 20.0f;
+        track_init_with_settings(&wide, TRACK_CLASSIC, &settings);
+        for (i = 0; i < wide.n; i++)
+            CHECK(wide.road_half_seg[i] <= hi_half + 0.01f,
+                  "an absurdly large track_width_mult still widened the "
+                  "road past the car-width ceiling (%.2f)",
+                  wide.road_half_seg[i]);
+    }
 }
 
 /* The risky AI path is deliberate but repeatable: at least one aggressive
@@ -5531,6 +5597,7 @@ int main(void)
     test_car_designer_save_round_trips();
     test_car_designer_save_file_round_trips();
     test_json_configuration();
+    test_track_width_stays_within_car_widths();
     test_steering_filter();
     test_steer_sign();
     test_tracks_geometry();

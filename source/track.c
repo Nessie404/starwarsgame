@@ -704,6 +704,13 @@ void track_init_with_settings(Track *t, int track_id,
         float base_road = d->road_half * settings->track_width_mult[track_id];
         float base_wall = d->wall_half * settings->track_width_mult[track_id];
         float sum_road = 0.0f, sum_wall = 0.0f;
+        /* the multiplier bounds that make TRACK_MIN/MAX_FULL_WIDTH_M hold
+         * on the actual paved road, for this track's own base_road; a
+         * track_width_mult setting or a hand-authored road_half that's
+         * already narrow/wide to begin with shifts these right along with
+         * it, same as it shifts base_road itself */
+        float w_lo = TRACK_MIN_FULL_WIDTH_M / (2.0f * base_road);
+        float w_hi = TRACK_MAX_FULL_WIDTH_M / (2.0f * base_road);
 
         for (i = 0; i < t->n; i++) {
             /* a width multiplier is a road-design choice, but it still has
@@ -711,6 +718,10 @@ void track_init_with_settings(Track *t, int track_id,
             float w = width_mult[i];
             if (!(w >= 0.35f)) w = 0.35f;     /* also catches NaN */
             if (w > 3.0f) w = 3.0f;
+            /* then the hard, absolute floor/ceiling: 3-10 car widths of
+             * actual pavement, no matter what the above allowed */
+            if (w < w_lo) w = w_lo;
+            if (w > w_hi) w = w_hi;
             t->road_half_seg[i] = base_road * w;
             t->wall_half_seg[i] = base_wall * w;
             sum_road += t->road_half_seg[i];

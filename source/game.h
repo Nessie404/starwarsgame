@@ -33,6 +33,26 @@ typedef struct GameSettings GameSettings;
 #define TRACK_MAX_CHECKPOINTS 40
 #define CHECKPOINT_SPACING 12      /* samples between checkpoints      */
 
+/* A "car width" for the road-width floor/ceiling below: the body width
+ * draw_car_model (main.c) draws for a car at its own normalization
+ * point, mass_kg == 1000 (`wid = powf(mass_kg / 1000.0f, 0.30f)` is
+ * exactly 1.0 there, unclamped) — 0.65f * wid half-width, so 1.30 m
+ * full width. Real cars on the roster run narrower (RACER, 260 kg) to
+ * wider (TRUCK, 2100 kg) than that, but a single fixed reference is
+ * what a track's own geometry needs: road width is authored once, not
+ * per car. Not a design knob — deliberately not a GameSettings field,
+ * so no `cars.json`/`settings.json` value can widen or narrow it. */
+#define CAR_WIDTH_M 1.30f
+/* No stretch of any circuit's drivable road is ever allowed outside
+ * this range, however a cp_width profile, a track's own road_half, or
+ * a settings.json track_width_mult would otherwise ask for: 3 car
+ * widths is already very narrow (barely two cars side by side with
+ * room to spare), 10 is already wide enough that "keep to a line"
+ * stops meaning anything. Enforced in track_init_with_settings as a
+ * per-track, per-point clamp on the width multiplier itself. */
+#define TRACK_MIN_FULL_WIDTH_M (3.0f * CAR_WIDTH_M)
+#define TRACK_MAX_FULL_WIDTH_M (10.0f * CAR_WIDTH_M)
+
 enum {
     TRACK_CLASSIC  = 0,   /* flat speedway, barriered                 */
     TRACK_BERTHOUD = 1,   /* stylized Berthoud Pass (US-40, Colorado) */

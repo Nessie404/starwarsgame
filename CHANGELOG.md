@@ -4,7 +4,30 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
-## [1.27.0] - 2026-08-28
+## [1.27.1] - 2026-08-29
+
+### Changed
+
+- **Berthoud Pass and Loveland Pass open wide through every named
+  switchback and hairpin, and pinch in a little on the straights
+  between them.** Previously the three tightest corners on each pass
+  just stayed narrow while a couple of others opened out; now every
+  named switchback/hairpin apex gets real room to brake deep on the
+  inside and carry the exit out wide, and any stretch that reads as a
+  genuine straight tapers down instead of holding the same width the
+  whole lap. Physically real now that braking and cornering share one
+  grip budget (v1.27.0): a wide switchback is what actually gives a
+  driver the room on the road to use that trade-off.
+- **No circuit's road is ever narrower than 3 car widths or wider than
+  10, anywhere, no matter what asks for it.** A hand-authored width
+  profile, a track's own base road width, or a `track_width_mult`
+  setting could all previously push a stretch of road to an
+  unreasonable extreme — three circuits (KENOSHA, BERTHOUD 2.0,
+  BULLRING) were already at the very edge of what "10 car widths"
+  allows before this release, just never checked against it. A new
+  absolute floor and ceiling, derived from the game's own car-width
+  reference and enforced on every point of every circuit, now holds
+  regardless.
 
 ### Added
 

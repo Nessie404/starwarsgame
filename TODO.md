@@ -89,7 +89,15 @@ batching unrelated work to make a bigger changelog.
   BULLRING have no `cp_width` at all yet (`NULL`, constant width the
   whole lap) — BULLRING's two long straights and constant-radius sweeps
   are the most obviously suited to a taper/no-taper split of the four
-  once someone gets to it.
+  once someone gets to it. Whatever multiplier any of them ends up with,
+  v1.27.1's absolute `TRACK_MIN_FULL_WIDTH_M`/`TRACK_MAX_FULL_WIDTH_M`
+  clamp (`game.h`, enforced in `track_init_with_settings`) now backstops
+  it automatically — converting these three is lower-risk than it was,
+  since no width choice can actually leave the 3-10 car-width band by
+  mistake. KENOSHA and BERTHOUD 2.0 both already sit at the 10-car-width
+  ceiling uniformly (their unvaried `road_half` was already right at the
+  edge); giving them their own wide/taper profile would be the first
+  time either circuit's width varies within a lap at all.
 
 Roughly the order to work through whatever lands here next: cheapest/most
 self-contained first.
@@ -152,7 +160,7 @@ Any patch release that followed a minor release is folded into that
 release's entry rather than getting its own. For anything older,
 `CHANGELOG.md` and `docs/release-notes/` have the full record back to v1.0.
 
-### v1.27.0 — the combined friction circle, engine braking, traction control, and a fourth aspiration
+### v1.27.0 — the combined friction circle, engine braking, traction control, and a fourth aspiration (plus a v1.27.1 follow-up patch)
 
 - [x] Braking and cornering now share one grip budget instead of two
   unlimited ones: `kart_step`'s `yaw_cap` shrinks with however much
@@ -238,6 +246,17 @@ release's entry rather than getting its own. For anything older,
   suspension model — no vertical wheel travel, no spring rate, no
   weight transfer — see the new TODO item above for what a fuller
   version would need.
+- [x] *(v1.27.1 patch)* BERTHOUD and LOVELAND's width profiles reworked:
+  wide at every named switchback/hairpin apex, tapered on genuine
+  straights, nominal in between — documented as a blueprint in TODO.md
+  for the rest of the roster. Alongside it, a new absolute floor and
+  ceiling on road width itself (`TRACK_MIN_FULL_WIDTH_M`/`_MAX_`, 3 and
+  10 car widths, `game.h`), enforced per-point in
+  `track_init_with_settings` regardless of any `cp_width` profile,
+  `road_half`, or `track_width_mult` setting — catching three circuits
+  (KENOSHA, BERTHOUD 2.0, BULLRING) that were already sitting right at
+  the 10-car-width edge unclamped, and holding LOVELAND's new wide
+  switchbacks to that same ceiling.
 
 ### v1.26.0 — weather everywhere (with a toggle), and skill that shows up on track (plus a v1.26.1 follow-up patch)
 

@@ -250,6 +250,14 @@ for the hairpins.
   water included, which used to be its best condition. Brake lights,
   and FLOOR IT now forces a real kickdown on an automatic gearbox with
   nothing already spooled to use.
+- **v1.27.1** — Berthoud Pass and Loveland Pass now open wide through
+  every named switchback and hairpin, with a little taper on the
+  straights between them — room to actually use the braking/cornering
+  trade-off v1.27.0 added. Alongside it, no circuit's road is ever
+  narrower than 3 car widths or wider than 10, anywhere on the lap,
+  whatever a width profile or a track's own base width would otherwise
+  produce — three circuits (Kenosha, Berthoud 2.0, BULLRING) were
+  already sitting right at that upper edge before this release.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -336,25 +344,32 @@ for the hairpins.
   | Circuit | Length | Width | Corners | Tightest | Climb | Steepest | Rails | Laps |
   |---------|--------|-------|---------|----------|-------|----------|-------|------|
   | CLASSIC | 546 m | 11.2 m | 10 | 28 m | flat | — | yes | 4 |
-  | BERTHOUD (US-40) | 1820 m | 9.6 m | 15 | 14 m | 63 m | 15% | yes | 2 |
-  | LOVELAND (US-6) | 1925 m | 12.0 m | 11 | 14 m | 70 m | 14% | **no** | 2 |
-  | KENOSHA (US-285) | 2096 m | 13.2 m | 42 | 16 m | 58 m | 10% | yes | 2 |
+  | BERTHOUD (US-40) | 1820 m | 9.5 m | 15 | 14 m | 63 m | 15% | yes | 2 |
+  | LOVELAND (US-6) | 1925 m | 11.4 m | 11 | 14 m | 70 m | 14% | **no** | 2 |
+  | KENOSHA (US-285) | 2096 m | 13.0 m | 42 | 16 m | 58 m | 10% | yes | 2 |
   | MONARCH (US-50) | 2462 m | 8.6 m | 32 | 10 m | 135 m | 20% | **no** | 2 |
   | BREAKNECK | 938 m | 7.4 m | 12 | 32 m | 44 m | 29% | **no** | 3 |
   | GUANELLA | 2349 m | 7.8 m | 16 | 7 m | 77 m | 19% | **no** | 2 |
-  | BERTHOUD 2.0 | 3628 m | 13.2 m | 31 | 7 m | 85 m | 21% | yes | 2 |
-  | BULLRING | 1238 m | 15.0 m | 10 | 62 m | flat | — | yes | 3 |
+  | BERTHOUD 2.0 | 3628 m | 13.0 m | 31 | 7 m | 85 m | 21% | yes | 2 |
+  | BULLRING | 1238 m | 13.0 m | 10 | 62 m | flat | — | yes | 3 |
 
-  **Berthoud 2.0** is the longest pass; **Monarch** climbs the most and
-  has no rails. **Kenosha** is the widest of the mountain passes and has
-  the most corners. **Breakneck** is the steepest anywhere on the roster
-  and the shortest pass; **Guanella** and **Berthoud 2.0** tie for the
-  tightest hairpin. **BULLRING** is the odd one out: no elevation change
-  anywhere on the lap, the widest pavement in the game, and nothing
-  tighter than a wide, sweeping turn — a generated oval rather than a
-  hand-drawn pass, specifically so it has no abrupt curves anywhere.
-  Its own turns carry a real, deliberately gentle bank (see Road
-  banking below) well beyond the small crown every other circuit gets.
+  Width is an average: no circuit's road is ever narrower than 3 car
+  widths or wider than 10 anywhere on the lap, and BERTHOUD's and
+  LOVELAND's own width varies within those bounds — wide through every
+  named switchback or hairpin, a little tighter on the straights
+  between them (see Physically-based driving, above, for why that
+  actually matters now). **Berthoud 2.0** is the longest pass;
+  **Monarch** climbs the most and has no rails. **Kenosha**,
+  **Berthoud 2.0**, and **BULLRING** are tied at the 10-car-width
+  ceiling, the widest any circuit is allowed to run; **Kenosha** also
+  has the most corners. **Breakneck** is the steepest anywhere on the
+  roster and the shortest pass; **Guanella** and **Berthoud 2.0** tie
+  for the tightest hairpin. **BULLRING** is the odd one out: no
+  elevation change anywhere on the lap and nothing tighter than a wide,
+  sweeping turn — a generated oval rather than a hand-drawn pass,
+  specifically so it has no abrupt curves anywhere. Its own turns
+  carry a real, deliberately gentle bank (see Road banking below) well
+  beyond the small crown every other circuit gets.
 - **Road banking.** Every circuit's curves cant into the turn — a small
   crown on the mountain passes and CLASSIC, scaled to how tight the
   bend is, and a real bank on BULLRING's own turns. It is not just a

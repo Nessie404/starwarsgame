@@ -376,6 +376,21 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   (`bank_filt`/`grade_filt`, explicitly not a real per-wheel suspension
   model) round out the batch. See §6 for the `tire_traction_now`
   initialization bug this batch's own new tests caught.
+- **v1.27.1**: BERTHOUD's and LOVELAND's `cp_width` profiles
+  (`W_BERTHOUD`/`W_LOVELAND`, `track.c`) reworked to a new blueprint —
+  wide (1.32) at every named switchback/hairpin apex, tapered (0.85) on
+  any control point whose own 3-point circumradius reads as a genuine
+  straight (>= 150 m), nominal (1.00) everywhere in between — replacing
+  the older "keep the tightest corners narrow, open a couple of others
+  out" philosophy MONARCH/BREAKNECK/GUANELLA still run (see TODO.md for
+  carrying the new blueprint over to them). Alongside it, a new
+  absolute floor and ceiling on road width itself: `TRACK_MIN_FULL_
+  WIDTH_M`/`TRACK_MAX_FULL_WIDTH_M` (`game.h`, 3 and 10 times
+  `CAR_WIDTH_M`) clamp the per-point width multiplier in
+  `track_init_with_settings` before it's applied, regardless of what a
+  `cp_width` array, a track's own `road_half`, or a `track_width_mult`
+  setting would otherwise produce. See §6 for what running every
+  circuit through this clamp actually turned up.
 
 ---
 
@@ -820,6 +835,30 @@ on a kart's very first simulated frame is exactly the kind existing
 tests (which mostly measure steady-state behavior after a warm-up) can
 miss entirely. It was this batch's own new tests, written to exercise
 the new mechanic directly, that actually caught it.
+
+**A per-point width multiplier and a track's own base width both need
+checking against the real-world number, not just each other.** Before
+v1.27.1, the only guard on `cp_width` was a sanity clamp on the
+multiplier itself (`w` kept in `[0.35, 3.0]` in `track_init_with_
+settings`) — nothing ever checked the *actual metres* that produced,
+because nothing needed to until "no track can ever be narrower/wider
+than N car widths" became an explicit requirement. Running every
+circuit's `road_half * track_width_mult` through that lens for the
+first time turned up three that were already right at the edge of what
+"10 car widths" (13.0 m full width, at this game's `CAR_WIDTH_M`)
+allows — KENOSHA and BERTHOUD 2.0 both sit at exactly 13.2 m, BULLRING
+at 15.0 m — none of it from a bug, just three `road_half` values picked
+long before there was any ceiling to check them against. The fix is a
+second clamp layered on top of the existing one, computed once per
+track from its own `base_road` (`w_lo`/`w_hi` in `track_init_with_
+settings`) rather than a fixed multiplier range, since the same
+multiplier means a different absolute width on a 4.3 m-`road_half`
+circuit than a 7.5 m one. General lesson: a multiplier-only guard rail
+is only as good as the base value it's multiplying — when a real
+physical unit is the actual requirement (car widths, in this case, not
+"times 1.3"), check the derived absolute number directly, on every
+existing case, the first time that requirement shows up — don't assume
+existing values already satisfy a rule that was never checked before.
 
 ---
 
