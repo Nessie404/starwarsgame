@@ -858,7 +858,11 @@ int config_load_settings_text(GameSettings *settings, const char *json,
          !optional_float(json, tokens, count, obj, "speed_fade",
                          &s.steer_speed_fade, error, error_cap) ||
          !optional_float(json, tokens, count, obj, "response_curve",
-                         &s.steer_curve, error, error_cap))) goto fail;
+                         &s.steer_curve, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "max_angle_deg",
+                         &s.steer_max_angle_deg, error, error_cap) ||
+         !optional_float(json, tokens, count, obj, "speed_taper",
+                         &s.steer_speed_taper, error, error_cap))) goto fail;
 
     obj = object_get(json, tokens, count, 0, "tires");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
@@ -1300,7 +1304,7 @@ void control_config_defaults(ControlConfig *c)
     snprintf(c->xbox_label[CONTROL_STEER_RIGHT], CONTROL_LABEL_LEN, "LS RIGHT");
     snprintf(c->xbox_label[CONTROL_ACCEL], CONTROL_LABEL_LEN, "RT");
     snprintf(c->xbox_label[CONTROL_BRAKE], CONTROL_LABEL_LEN, "LT");
-    snprintf(c->xbox_label[CONTROL_HANDBRAKE], CONTROL_LABEL_LEN, "A");
+    snprintf(c->xbox_label[CONTROL_HANDBRAKE], CONTROL_LABEL_LEN, "B");
     snprintf(c->xbox_label[CONTROL_GEAR_UP], CONTROL_LABEL_LEN, "RB");
     snprintf(c->xbox_label[CONTROL_GEAR_DOWN], CONTROL_LABEL_LEN, "LB");
     snprintf(c->xbox_label[CONTROL_BOOST], CONTROL_LABEL_LEN, "Y");

@@ -203,7 +203,7 @@ Any patch release that followed a minor release is folded into that
 release's entry rather than getting its own. For anything older,
 `CHANGELOG.md` and `docs/release-notes/` have the full record back to v1.0.
 
-### v1.28.0 — a real dynamic bicycle model for drifting and grip driving
+### v1.28.0 — a real dynamic bicycle model for drifting and grip driving (plus a v1.28.1 follow-up patch)
 
 - [x] The flat `yaw_cap = mu_a/v` model is gone: each axle now computes
   its own slip angle (`alpha_f`/`alpha_r`, from the car's real body-frame
@@ -245,6 +245,26 @@ release's entry rather than getting its own. For anything older,
   `config/README.md`) exposing the slip-angle peak/falloff shape, weight
   transfer strength, yaw inertia, stability control strength, and the
   loose-surface bonus.
+- [x] *(v1.28.1 patch)* The steering-lock budget (`delta_max` in
+  `kart_step`) is noticeably more speed-sensitive: promoted from two
+  hardcoded constants to real settings (`steer_max_angle_deg`,
+  `steer_speed_taper` in the `steering` block), retuned from 27.5°/
+  1+0.02v to 40°/1+0.048v — sharper at a dead stop for tight, slow
+  maneuvering, tapering off faster at speed than before, while landing
+  close to the old value at typical racing speed so the physics tests
+  already calibrated against it (full-lock cornering at 25 m/s) still
+  hold. Aimed at the v1.28.0 dynamic tire model reading twitchier at
+  speed than v1.27.1's flatter yaw cap.
+- [x] *(v1.28.1 patch)* The GameCube/Xbox handbrake control
+  (`CONTROL_HANDBRAKE`, `main.c`) is now press-to-toggle instead of
+  hold: a static per-player latch flips on the button's rising edge, so
+  one press engages the handbrake and a second press releases it
+  without needing to hold it through a whole corner. Keyboard, Wii
+  Remote, Nunchuk, and Classic Controller handbrake inputs are
+  untouched, still hold-based to match their own documented gesture.
+  Recommended Xbox label for the handbrake changed from A to B
+  (`config/controls.json`'s `xbox_recommended`, `config.c` defaults);
+  the regular brake stays the left trigger, unchanged.
 
 ### v1.27.0 — the combined friction circle, engine braking, traction control, and a fourth aspiration (plus a v1.27.1 follow-up patch)
 

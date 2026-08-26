@@ -4,6 +4,28 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.28.1] - 2026-08-26
+
+### Changed
+
+- **The steering-lock budget is noticeably more speed-sensitive.** The
+  actual road-wheel angle available at full lock now starts higher at a
+  dead stop (40° vs the previous 27.5°) for sharper low-speed
+  maneuvering, and tapers off faster as speed climbs (retuned so the
+  angle at typical racing speed lands close to where it was before,
+  while high-speed lock is noticeably tighter than it used to be) —
+  aimed at the v1.28.0 dynamic tire model feeling twitchier than
+  v1.27.1's flatter yaw cap at speed. Both numbers (`max_angle_deg`,
+  `speed_taper`) are now real settings in the `steering` block
+  (`config/settings.json`) instead of hardcoded constants.
+- **The GameCube/Xbox handbrake is press-to-toggle now, not hold.** One
+  press engages it, a second press releases it, so a long drift through
+  a corner doesn't need a finger held on the trigger the whole way.
+  Keyboard, Wii Remote, Nunchuk, and Classic Controller handbrake inputs
+  are unchanged (still hold-based, matching their documented gesture).
+  The recommended Xbox control for the handbrake is now labeled **B**
+  (was A) to match; the regular brake stays on the left trigger.
+
 ## [1.28.0] - 2026-08-23
 
 ### Changed

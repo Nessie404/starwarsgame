@@ -279,6 +279,8 @@ void game_settings_defaults(GameSettings *s)
     s->steer_rate_center = 6.0f;
     s->steer_speed_fade = 0.035f;
     s->steer_curve = 1.55f;
+    s->steer_max_angle_deg = 40.0f;
+    s->steer_speed_taper = 0.048f;
     s->tire_grip_mult[TIRE_MEDIUM] = 1.00f;
     s->tire_grip_mult[TIRE_SOFT] = 1.08f;
     s->tire_grip_mult[TIRE_HARD] = 0.96f;
@@ -441,6 +443,8 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
     FINITE_RANGE(s->steer_rate_center, 0.2f, 30.0f, "BAD CENTER RATE");
     FINITE_RANGE(s->steer_speed_fade, 0.0f, 0.5f, "BAD SPEED FADE");
     FINITE_RANGE(s->steer_curve, 0.2f, 4.0f, "BAD STEER CURVE");
+    FINITE_RANGE(s->steer_max_angle_deg, 5.0f, 60.0f, "BAD STEER ANGLE");
+    FINITE_RANGE(s->steer_speed_taper, 0.0f, 0.2f, "BAD STEER TAPER");
     for (i = 0; i < TIRE_COMPOUNDS; i++) {
         FINITE_RANGE(s->tire_grip_mult[i], 0.30f, 2.0f, "BAD TIRE GRIP");
         FINITE_RANGE(s->tire_traction_mult[i], 0.30f, 2.0f,
@@ -2607,7 +2611,8 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
      * counter-steer and throttle, the same way a real driver is.
      */
     {
-        float delta_max = 0.48f / (1.0f + fabsf(v) * 0.02f);
+        float delta_max = (g->settings.steer_max_angle_deg * PI_F / 180.0f) /
+                          (1.0f + fabsf(v) * g->settings.steer_speed_taper);
         /* the driver's actual road-wheel angle — and the whole
          * counter-steer budget available to catch a slide with, since
          * it cannot ask for more than this either way */

@@ -424,6 +424,27 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   `main.c`'s visual drift lean is now the real body slip angle
   (`atan2f(vy, speed)`) instead of a fixed handbrake kick plus ad hoc
   steer/slip fudge terms.
+- **v1.28.1**: two feel fixes on top of v1.28.0. The steering-lock
+  budget (`delta_max` in `kart_step`) is now driven by two real settings
+  (`steer_max_angle_deg`, `steer_speed_taper`, in the `steering` block)
+  instead of the hardcoded `0.48f / (1 + v*0.02f)`, retuned to 40°/
+  `1+0.048v` — noticeably sharper at a dead stop, noticeably tighter at
+  high speed, but chosen to land close to the *old* formula's value at
+  25 m/s specifically, because several physics tests were already
+  calibrated against exactly that speed/full-lock combination (see §6
+  for the one that broke on a first, more aggressive attempt and how it
+  got caught). Separately, the GameCube/Xbox handbrake (`main.c`'s
+  `read_player_input`) is now press-to-toggle via a small per-player
+  static latch (`gc_hop_prev`/`gc_hop_latched`, reset in `start_race`
+  alongside `steer_axis_reset`) instead of a held button — only the
+  GameCube-sourced contribution to `Input.hop` goes through the latch,
+  so Wiimote/keyboard/Classic Controller handbrake stay hold-based
+  exactly as documented. Recommended Xbox label for the handbrake moved
+  from A to B (`config/controls.json`'s `xbox_recommended`, and
+  `config.c`'s compiled default) to match; this is a documentation-only
+  change; the GameCube input constant (`GC_INPUT_Z`) is unchanged; the
+  physical button a player's own Dolphin profile maps to it is entirely
+  up to their own configuration.
 
 ---
 
@@ -992,6 +1013,30 @@ actually care about or a specific number that was only ever true of the
 old model's particular failure shape — the fix might be the test, not
 the physics, but say so explicitly and leave a marker for the tuning
 pass that number was standing in for.
+
+**A speed-sensitivity curve retuned in one direction can quietly break
+tests calibrated at a specific speed elsewhere on that same curve.**
+v1.28.1's first cut of the steering-lock retune (higher base angle,
+steeper speed taper, aimed at making low-speed steering sharper and
+high-speed steering safer) picked numbers without checking what they
+did at the *specific* speed several existing physics tests were already
+teleporting a kart to — 25 m/s, used repeatedly because it is a plain,
+round "moderate racing speed" for a full-lock/half-lock steer test.
+The first attempt (30°, `1+0.035v`) landed noticeably *below* the old
+formula's angle at exactly that speed, and
+`test_friction_circle_couples_braking_and_cornering` (a 0.5 steer input
+at 25 m/s) failed: not because the friction circle stopped coupling
+braking to cornering, but because the reduced steer angle no longer
+pushed the front axle far enough past its slip peak for the test's
+braking-vs-coasting slip margin to show up. Fixed by solving for the
+taper coefficient that reproduces the *old* formula's value at 25 m/s
+specifically (40°, `1+0.048v` — nearly identical to the old curve
+right at that one speed, while still meaningfully higher below it and
+lower above it). General lesson: retuning a speed-dependent curve isn't
+just "pick a shape that feels right at the two extremes" — check what
+it evaluates to at every specific speed an existing test already
+teleports a kart to, and either preserve that value deliberately or
+expect (and re-derive) the fallout.
 
 ---
 

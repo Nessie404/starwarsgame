@@ -46,7 +46,7 @@
     "steer_right": "LS RIGHT",
     "accelerate": "RT",
     "brake": "LT",
-    "handbrake": "A",
+    "handbrake": "B",
     "shift_up": "RB",
     "shift_down": "LB",
     "boost": "Y",

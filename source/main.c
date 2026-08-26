@@ -453,6 +453,16 @@ static unsigned int gamecube_down_state(int p)
 
 static SteerAxis steer_axis[MAX_HUMANS];
 
+/* The GameCube/Xbox handbrake control is a press-to-toggle latch, not a
+ * hold: one press engages it, a second press releases it, so a drift can
+ * be held through a long corner without pinning a finger on the trigger
+ * the whole way. Wiimote/Nunchuk/Classic Controller/keyboard handbrake
+ * inputs stay hold-based, matching their own documented "hold B"/"hold
+ * SPACE" gesture — only the GameCube-sourced contribution to Input.hop
+ * goes through this latch. */
+static int gc_hop_prev[MAX_HUMANS];
+static int gc_hop_latched[MAX_HUMANS];
+
 static void read_player_input(int p, Input *in, float dt)
 {
     const WPADData *wd;
@@ -539,7 +549,15 @@ static void read_player_input(int p, Input *in, float dt)
             steer += STEER_RIGHT;
         in->accel |= (gc & control_config.gamecube[CONTROL_ACCEL]) != 0;
         in->brake |= (gc & control_config.gamecube[CONTROL_BRAKE]) != 0;
-        in->hop   |= (gc & control_config.gamecube[CONTROL_HANDBRAKE]) != 0;
+        {
+            /* press-to-toggle: a fresh press flips the latch, holding
+             * the button down does not re-trigger it every frame */
+            int raw = (gc & control_config.gamecube[CONTROL_HANDBRAKE]) != 0;
+            if (raw && !gc_hop_prev[p])
+                gc_hop_latched[p] = !gc_hop_latched[p];
+            gc_hop_prev[p] = raw;
+            in->hop |= gc_hop_latched[p];
+        }
         in->gear_up |= (gc & control_config.gamecube[CONTROL_GEAR_UP]) != 0;
         in->gear_down |=
             (gc & control_config.gamecube[CONTROL_GEAR_DOWN]) != 0;
@@ -3363,6 +3381,8 @@ static void start_race(void)
         lap_popup_t[p] = 0.0f;
         rumble_t[p] = 0.0f;
         steer_axis_reset(&steer_axis[p]);
+        gc_hop_prev[p] = 0;
+        gc_hop_latched[p] = 0;
     }
     app_state = APP_RACE;
     audio_beep(660.0f, 90, 160);

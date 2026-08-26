@@ -14,10 +14,13 @@
     "bog_fraction": 0.34
   },
   "steering": {
+    "_comment": "wind_on/self_center/speed_fade/response_curve shape the virtual analog stick's feel. max_angle_deg/speed_taper are the actual road-wheel steering-lock budget kart_step uses: the full max_angle_deg is available at a dead stop, shrinking as speed climbs (max_angle_deg / (1 + speed * speed_taper)) so tight, slow maneuvering stays sharp while a twitch of the stick at speed can't snap the car sideways.",
     "wind_on_rate": 2.6,
     "self_center_rate": 6.0,
     "speed_fade": 0.035,
-    "response_curve": 1.55
+    "response_curve": 1.55,
+    "max_angle_deg": 40.0,
+    "speed_taper": 0.048
   },
   "tires": {
     "_comment": "A compound is a trade, not a rank: grip when warm, against how fast it wears, how well it rolls, and the temperature it wants. Softs win sprints, hards and mediums win long races. ambient_c is the air temperature the rubber cools towards.",

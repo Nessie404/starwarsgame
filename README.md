@@ -274,6 +274,17 @@ for the hairpins.
   snow/ice gets a genuine force bonus from the wedge of material it
   displaces, which is the actual physical reason drifting is only
   faster than gripping on a loose surface, never on tarmac.
+- **v1.28.1** — the steering-lock budget is noticeably more speed-
+  sensitive now: sharper at a dead stop for tight, slow maneuvering,
+  tapering off faster as speed climbs so a twitch of the stick can't
+  snap the car sideways at pace — aimed at v1.28.0's real tire model
+  feeling twitchier than v1.27.1's flatter yaw cap at speed. The
+  GameCube/Xbox handbrake is now press-to-toggle (press once to
+  engage, press again to release) instead of hold, so a long drift
+  doesn't need a finger held down the whole way through; keyboard and
+  Wii Remote handbrake are unchanged. The recommended Xbox control for
+  the handbrake is now B (was A); the regular brake stays on the left
+  trigger.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -551,7 +562,7 @@ pad under Dolphin) or Wii Remotes.
 | Brake / reverse | **S** | **K** | GC B | Left trigger | 1 |
 | Up a gear | **E** | **O** | GC R | Right bumper | D-pad ↑ / Classic ZR |
 | Down a gear | **Q** | **U** | GC L | Left bumper | D-pad ↓ / Classic ZL |
-| Handbrake | Space | **P** | GC Z | A | Hold B |
+| Handbrake | Space | **P** | GC Z | B (press to toggle) | Hold B |
 | Back to menu | **R** | **R** | GC Start | Start | + |
 | Quit | (EXIT row) | — | GC Z + Start | A + Start | HOME |
 
@@ -565,7 +576,10 @@ edit `config/controls.json` to move them. The Xbox column is a recommended
 host-side Dolphin map, not something Wii code can detect directly: WiiKart
 receives the logical GameCube column. Keep the `xbox_recommended` labels
 in the JSON aligned with your Dolphin profile and the live panel becomes
-an exact translation chart.
+an exact translation chart. The GameCube/Xbox handbrake is press-to-toggle
+— press once to engage it, press again to release — so a long drift
+doesn't need a finger held down the whole way through; keyboard and Wii
+Remote handbrake stay hold-based, matching their own gesture.
 
 Mario Kart Wii itself has no manual transmission: its karts shift
 automatically. WiiKart therefore defaults each garage gearbox to AUTO. If

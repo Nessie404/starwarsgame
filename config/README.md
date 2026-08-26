@@ -100,7 +100,9 @@ This file exposes the main tuning surfaces:
 
 - race countdown, target distance, and lap limits;
 - drivetrain, rolling resistance, shift time, and engine bog point;
-- steering response and speed sensitivity;
+- steering response (how fast the virtual stick winds on/centers) and
+  the actual road-wheel steering-lock budget, which is largest at a
+  dead stop and shrinks as speed climbs;
 - tire compounds: grip, drag, rolling resistance, wear rate and how much
   grip that wear costs, the temperature each wants and how wide its window
   is, how fast it heats and cools, and how much grip is left outside the

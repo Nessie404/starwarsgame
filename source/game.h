@@ -396,6 +396,19 @@ struct GameSettings {
     float steer_rate_center;
     float steer_speed_fade;
     float steer_curve;
+    /* the actual road-wheel angle available at full lock, in degrees,
+     * at a dead stop — `kart_step`'s steering-lock budget, not the
+     * virtual-stick response modeled above. Falls off with speed
+     * (see steer_speed_taper) the same way a real rack's effective
+     * turn-in gets less aggressive the faster you're going, so tight,
+     * quick maneuvering (parking, a hairpin taken slow) stays sharp
+     * while high-speed lane changes don't snap the car sideways from a
+     * twitch of the stick. */
+    float steer_max_angle_deg;
+    /* how quickly that lock budget shrinks with speed:
+     * `steer_max_angle_deg / (1 + |speed| * steer_speed_taper)`. Higher
+     * means the available angle falls off faster as speed climbs. */
+    float steer_speed_taper;
     float tire_grip_mult[TIRE_COMPOUNDS];      /* peak grip, when warm    */
     float tire_drag_mult[TIRE_COMPOUNDS];      /* aero/rolling penalty    */
     /*
