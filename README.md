@@ -285,6 +285,16 @@ for the hairpins.
   Wii Remote handbrake are unchanged. The recommended Xbox control for
   the handbrake is now B (was A); the regular brake stays on the left
   trigger.
+- **v1.28.2** — v1.28.0's dynamic bicycle model and handbrake-drift
+  mechanic are gone: braking while steering had become uncontrollable
+  (the car could snap around and head the other way from a plain
+  brake-and-turn input), so driving physics are back to the simpler,
+  well-tested model v1.27.1 shipped — grip-capped yaw, a progressive
+  understeer shoulder, the v1.27.0 combined friction circle (eased a
+  little further, 0.60 → 0.45, so braking hard while turning costs a
+  bit less grip than even v1.27.x did). The handbrake control still
+  exists but has no gameplay effect any more; the steering-lock budget
+  (v1.28.1) is back to its original, flatter 1.27.x curve too.
 
 > **Note on Nintendo content:** this is 100% original homebrew. It contains
 > no Nintendo code or assets and does not require (or include) any game
@@ -333,28 +343,24 @@ for the hairpins.
   (F = P/v, traction-capped), top speed emerges from aerodynamic drag,
   braking is traction-limited off the same grip a car has for
   cornering (not a separately settable stopping distance), and
-  cornering is a real dynamic bicycle model: each axle's own slip angle
-  (the gap between where the tire points and where the car is actually
-  moving) drives its lateral force, rising to a peak around 8° before
-  falling off toward a sliding floor that never quite reaches zero, so
-  pushing past the limit is a genuine, recoverable slide rather than an
-  instant scrub. Braking and accelerating share that same grip with
-  cornering, split the way a real car's actually is: braking spends
-  budget on both axles at once (brakes act on all four wheels
-  regardless of drivetrain), while only the driven axle spends budget
-  on accelerating — a front-driven car understeers more under power
-  than a rear-driven one for exactly that reason. Weight transfer is
-  real too: accelerating loads the rear axle, braking or lifting off
-  the throttle loads the front, so a trail-braked entry or a simple
-  lift-off genuinely helps the nose turn in, no handbrake required.
-  Grip holds until you deliberately break it loose with the handbrake,
-  which locks the rear axle to its sliding floor outright and takes
-  stability control out of the loop — that's drifting, and it's the
-  only way a car spins on purpose. A slid tire off-road or on snow/ice
-  gets a real bonus from the wedge of material it displaces, which is
-  why drifting is only actually quicker off pavement, never on it.
-  Gravity acts along the road grade: climbs cost speed, descents give
-  it back.
+  cornering is limited by lateral grip (v²/r ≤ μg, boosted by road
+  banking where a circuit has it) — push a little past it and the tires
+  have a shoulder, holding a tighter line than the nominal limit before
+  it truly gives way; push further and it's progressive understeer, not
+  a surprise. Braking and cornering share one combined friction circle:
+  brake hard while still turning in and there is measurably less grip
+  left for the corner, which is what rewards braking in a straight line
+  and getting back on the power early over dragging the brake to the
+  apex. Lift off the throttle and real engine braking holds the car
+  back rather than letting it coast, and a simple traction control
+  trims power the instant the tires are already sliding. Gravity acts
+  along the road grade: climbs cost speed, descents give it back. There
+  is no handbrake/drift mechanic — v1.28.0 briefly added one (a real
+  dynamic bicycle model with a rear axle you could lock into a slide),
+  but combined with that release's other changes it made ordinary
+  braking-while-steering read as uncontrollable, so v1.28.2 backed the
+  whole thing out to the simpler, well-tested model above and eased
+  the friction circle a little further for good measure.
 - **Thirteen cars, and no two drive alike.** RACER (a 260 kg superkart) and
   TRUCK (a 2100 kg pickup) sit at opposite ends of the roster; between
   them are a hot hatch (RUBY), a rally car (RALLY) and a dune buggy

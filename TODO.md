@@ -203,7 +203,18 @@ Any patch release that followed a minor release is folded into that
 release's entry rather than getting its own. For anything older,
 `CHANGELOG.md` and `docs/release-notes/` have the full record back to v1.0.
 
-### v1.28.0 — a real dynamic bicycle model for drifting and grip driving (plus a v1.28.1 follow-up patch)
+### v1.28.0 — a real dynamic bicycle model for drifting and grip driving (plus v1.28.1 and v1.28.2 follow-up patches)
+
+**Reverted in v1.28.2** — the dynamic bicycle model and handbrake-drift
+mechanic below shipped in v1.28.0, but combined with that release's other
+changes, ordinary braking while steering read as uncontrollable (a plain
+brake-and-turn input could snap the car around to face the other way).
+v1.28.2 reverted `game.c`'s steering/friction-circle code to the simpler
+v1.27.1 model and removed the handbrake's physics effect entirely — see
+that patch's own bullets at the end of this section, and `docs/HANDOFF.md`
+§6 for the full story. The bullets immediately below are kept as an
+accurate record of what v1.28.0/v1.28.1 actually shipped at the time, not
+of what the game does today.
 
 - [x] The flat `yaw_cap = mu_a/v` model is gone: each axle now computes
   its own slip angle (`alpha_f`/`alpha_r`, from the car's real body-frame
@@ -265,6 +276,25 @@ release's entry rather than getting its own. For anything older,
   Recommended Xbox label for the handbrake changed from A to B
   (`config/controls.json`'s `xbox_recommended`, `config.c` defaults);
   the regular brake stays the left trigger, unchanged.
+- [x] *(v1.28.2 patch)* Reverted `source/game.c`, `source/game.h`,
+  `source/config.c`, `config/settings.json`, and `config/README.md` to
+  their exact v1.27.1 state (`git checkout 7c5a21c --`), then removed
+  the handbrake mechanic entirely on top of that restored baseline:
+  `Kart.drifting` is set to `0` unconditionally and never read again in
+  `kart_step`'s steering section, so holding or toggling the handbrake
+  (`Input.hop`) no longer changes cornering at all — the control is
+  still read, just inert. `friction_circle_strength` eased 0.60 → 0.45
+  on top of the restored model, per the specific ask for braking to be
+  "a slight tweak" of v1.27.x rather than reinvented. `main.c`'s visible
+  drift lean is back to the old `Kart.drifting`-based formula (now
+  always inert, since the field never moves) since the `Kart.vy` field
+  it briefly used is gone along with the dynamic bicycle model.
+  `steer_max_angle_deg`/`steer_speed_taper` (v1.28.1) are gone too —
+  `delta_max` is the original hardcoded `0.48f / (1 + |speed| * 0.02f)`
+  again. `tests/test_game.c` reverted the same way, with one test
+  (formerly `test_drifting_rotates_faster_than_gripped_cornering`)
+  rewritten as `test_handbrake_has_no_special_effect`, asserting the
+  handbrake now changes nothing.
 
 ### v1.27.0 — the combined friction circle, engine braking, traction control, and a fourth aspiration (plus a v1.27.1 follow-up patch)
 

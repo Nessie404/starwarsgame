@@ -445,6 +445,29 @@ in `game.c` (or a new portable module) and let `main.c` only draw it.
   change; the GameCube input constant (`GC_INPUT_Z`) is unchanged; the
   physical button a player's own Dolphin profile maps to it is entirely
   up to their own configuration.
+- **v1.28.2**: reverted the whole v1.28.0 dynamic bicycle model and its
+  handbrake mechanic — reported as making ordinary braking-while-steering
+  uncontrollable (the car could snap around and head the other way from
+  a plain brake-and-turn input, not just under the handbrake). `source/
+  game.c`, `source/game.h`, `source/config.c`, `config/settings.json`,
+  `config/README.md`, and `tests/test_game.c` were restored to their
+  exact v1.27.1 state (`git checkout 7c5a21c --`), then the handbrake's
+  physics effect was stripped from that restored baseline: `Kart.
+  drifting` is unconditionally `0` now and `kart_step` never branches on
+  it or `Input.hop` again, so holding/toggling the handbrake changes
+  nothing (the control is still read; see §6 for why it was kept rather
+  than ripped out). `friction_circle_strength` eased 0.60 → 0.45 on top
+  of the restored model — the one deliberate tuning change beyond a pure
+  revert, per the explicit ask for braking to be "a slight tweak," not
+  reinvented. The v1.28.1 steering-lock settings
+  (`steer_max_angle_deg`/`steer_speed_taper`) are gone too, since they
+  existed only to retune the v1.28.0 model's feel; `delta_max` is back to
+  the original hardcoded formula. `main.c`'s visible drift lean reverted
+  to the `Kart.drifting`-based formula (dormant now) since the `Kart.vy`
+  field it briefly read is gone. One test
+  (`test_drifting_rotates_faster_than_gripped_cornering`) was rewritten
+  as `test_handbrake_has_no_special_effect`, asserting the opposite of
+  what it used to.
 
 ---
 
@@ -1037,6 +1060,35 @@ just "pick a shape that feels right at the two extremes" — check what
 it evaluates to at every specific speed an existing test already
 teleports a kart to, and either preserve that value deliberately or
 expect (and re-derive) the fallout.
+
+**A green host test suite is not the same claim as "fine to actually
+drive," and a physics rework needs to say which claim it's making.**
+v1.28.0's dynamic bicycle model passed the entire host suite — every
+frame-by-frame unit test, every full-race AI simulation on every
+circuit — and still shipped a real regression: ordinary braking while
+steering read as uncontrollable in actual play, badly enough that the
+whole model got reverted two patches later (v1.28.2). The gap is what
+the tests exercise versus what a person playing the game actually does:
+tests teleport a kart to a chosen speed and hold a chosen, usually
+moderate or gradually-varying steer/brake input for a handful of
+frames; a human on a keyboard or a D-pad snaps `Input.steer` straight
+to ±1.0 and slams the brake at the same instant, with no analog ease-in
+at all, then holds that adversarial combination for as long as they
+feel like it — closer to what `test_holding_full_lock_does_not_
+escalate_or_force_a_spin` checks than to the friction-circle or
+cornering tests, but that test used accel, not brake, and never
+combined full lock with full brake specifically. None of the new
+model's own tests happened to reproduce the exact "digital full brake
+plus digital full steer, held" input a real player on a keyboard gives
+constantly and by default. General lesson: a physics rework that
+changes how braking and steering interact needs at least one test that
+teleports a kart to a real racing speed and holds full digital brake
+and full digital steer at the same time for a couple of seconds,
+checking the car does not reverse its own heading or otherwise do
+something no driver commanded — the exact adversarial combination a
+human controller gives for free that an AI's smoothed, moderate inputs
+never do. Passing the existing suite is evidence the new model is
+internally consistent, not evidence a human will find it drivable.
 
 ---
 

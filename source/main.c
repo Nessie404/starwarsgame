@@ -1476,14 +1476,12 @@ static void draw_car_model(float cx, float cy, float cz, float yaw,
 static void draw_kart(const Track *t, const Kart *k)
 {
     const u8 *col = kart_color(k);
-    /* the real body slip angle (v1.28.0's dynamic bicycle model tracks
-     * lateral velocity directly now) already looks like a drift crab
-     * angle under a handbrake and a gentle cornering lean everywhere
-     * else, so one physically real number replaces the old fixed
-     * drifting-flag kick plus its separate ad hoc steer/slip fudges */
-    float body_slip = game_clampf(atan2f(k->vy, fmaxf(k->speed, 0.5f)),
-                                  -1.2f, 1.2f);
-    float yaw = k->heading + body_slip;
+    /* k->drifting is always 0 as of v1.28.2 (the handbrake drift
+     * mechanic was removed), so this term is dormant; kept rather than
+     * stripped in case a future session brings a drift mechanic back */
+    float yaw = k->heading + (k->drifting ? (float)k->drifting * 0.30f : 0.0f)
+                + k->steer_vis * 0.05f + k->slip * 0.10f *
+                  (k->steer_vis > 0.0f ? -1.0f : 1.0f);
     float dirdot = cosf(k->heading) * t->dx[k->seg] +
                    sinf(k->heading) * t->dz[k->seg];
     float pitch = atanf(t->slope[k->seg] * dirdot);

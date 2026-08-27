@@ -4,6 +4,41 @@ Notable player-facing and development changes are recorded here. Release
 artifacts and their longer descriptions remain available on the
 [GitHub releases page](https://github.com/Nessie404/starwarsgame/releases).
 
+## [1.28.2] - 2026-08-27
+
+### Changed
+
+- **Driving physics are back to the model v1.27.1 shipped, and the
+  handbrake/drift mechanic is gone.** v1.28.0 replaced the grip-capped
+  yaw-cap steering model with a full dynamic bicycle model (separate
+  front/rear slip angles, integrated yaw rate and lateral velocity) and
+  gave the handbrake a real "lock the rear axle into an open-loop
+  slide" mechanic. Combined with that release's other changes, ordinary
+  braking while steering read as uncontrollable — a plain brake-and-turn
+  input could snap the car around to face the other way. This release
+  reverts `game.c`'s steering and friction-circle code to the simpler,
+  well-tested v1.27.1 model (grip-capped yaw, a progressive understeer
+  shoulder past the limit, the v1.27.0 combined friction circle) and
+  removes the handbrake's physics effect entirely: `Kart.drifting`
+  always reads 0 now, and holding or toggling the handbrake control no
+  longer changes how the car corners. The control itself still exists
+  (still read, still bindable) in case a future session wants to build
+  something else on top of it, but it does nothing today.
+- **The combined friction circle is a little gentler than even v1.27.x's
+  was**: `friction_circle_strength` eased from 0.60 to 0.45, so braking
+  hard while still turning in costs a bit less cornering grip than
+  before, per the specific ask to make braking "a slight tweak," not
+  a reinvention.
+- **The steering-lock budget (v1.28.1) is back to its original, flatter
+  1.27.x curve**: the `steer_max_angle_deg`/`steer_speed_taper` settings
+  and their retuned values are gone; `delta_max` in `kart_step` is the
+  original `0.48f / (1 + |speed| * 0.02f)` again.
+- The visible drift/slide lean on cars (`main.c`) is back to the
+  `Kart.drifting`-based formula (always inert now, since `drifting`
+  never sets away from 0) instead of the real body-slip-angle formula
+  v1.28.0 introduced, since the underlying `Kart.vy` field this relied
+  on is gone along with the dynamic bicycle model.
+
 ## [1.28.1] - 2026-08-26
 
 ### Changed

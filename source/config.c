@@ -858,11 +858,7 @@ int config_load_settings_text(GameSettings *settings, const char *json,
          !optional_float(json, tokens, count, obj, "speed_fade",
                          &s.steer_speed_fade, error, error_cap) ||
          !optional_float(json, tokens, count, obj, "response_curve",
-                         &s.steer_curve, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "max_angle_deg",
-                         &s.steer_max_angle_deg, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "speed_taper",
-                         &s.steer_speed_taper, error, error_cap))) goto fail;
+                         &s.steer_curve, error, error_cap))) goto fail;
 
     obj = object_get(json, tokens, count, 0, "tires");
     if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
@@ -975,30 +971,6 @@ int config_load_settings_text(GameSettings *settings, const char *json,
                          &s.understeer_scrub, error, error_cap) ||
          !optional_float(json, tokens, count, obj, "scrub_curve",
                          &s.understeer_scrub_curve, error,
-                         error_cap))) goto fail;
-
-    obj = object_get(json, tokens, count, 0, "drift");
-    if (obj >= 0 && tokens[obj].type != JT_OBJECT) {
-        set_error(error, error_cap, "DRIFT NEEDS OBJECT");
-        goto fail;
-    }
-    if (obj >= 0 &&
-        (!optional_float(json, tokens, count, obj, "peak_slip_deg",
-                         &s.slip_peak_deg, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "falloff_range",
-                         &s.slip_falloff_range, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "floor_frac",
-                         &s.slip_floor_frac, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "weight_transfer_coeff",
-                         &s.weight_transfer_coeff, error, error_cap) ||
-         !optional_float(json, tokens, count, obj, "yaw_inertia_mult",
-                         &s.yaw_inertia_mult, error, error_cap) ||
-         !optional_float(json, tokens, count, obj,
-                         "stability_control_strength",
-                         &s.stability_control_strength, error,
-                         error_cap) ||
-         !optional_float(json, tokens, count, obj, "loose_surface_bonus",
-                         &s.drift_loose_surface_bonus, error,
                          error_cap))) goto fail;
 
     obj = object_get(json, tokens, count, 0, "ai");

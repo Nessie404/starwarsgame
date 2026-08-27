@@ -14,13 +14,10 @@
     "bog_fraction": 0.34
   },
   "steering": {
-    "_comment": "wind_on/self_center/speed_fade/response_curve shape the virtual analog stick's feel. max_angle_deg/speed_taper are the actual road-wheel steering-lock budget kart_step uses: the full max_angle_deg is available at a dead stop, shrinking as speed climbs (max_angle_deg / (1 + speed * speed_taper)) so tight, slow maneuvering stays sharp while a twitch of the stick at speed can't snap the car sideways.",
     "wind_on_rate": 2.6,
     "self_center_rate": 6.0,
     "speed_fade": 0.035,
-    "response_curve": 1.55,
-    "max_angle_deg": 40.0,
-    "speed_taper": 0.048
+    "response_curve": 1.55
   },
   "tires": {
     "_comment": "A compound is a trade, not a rank: grip when warm, against how fast it wears, how well it rolls, and the temperature it wants. Softs win sprints, hards and mediums win long races. ambient_c is the air temperature the rubber cools towards.",
@@ -63,16 +60,6 @@
     "_comment": "Pushing past the grip limit costs speed at scrub * (1 + scrub_curve * slip) * dt, so a corner taken barely too hot still just runs a little wide, one taken way too hot really pays for it.",
     "scrub": 0.22,
     "scrub_curve": 0.60
-  },
-  "drift": {
-    "_comment": "The real dynamic-bicycle-model tire physics: each axle's lateral force rises with its slip angle (the gap between where the tire points and where it's actually moving) up to peak_slip_deg, then falls off over falloff_range more peak-widths toward floor_frac of peak — never all the way to zero, so a sustained slide finds an equilibrium instead of just diverging. weight_transfer_coeff loads the rear under acceleration and the front under braking/engine braking (real lift-off/trail-brake oversteer, no handbrake needed). yaw_inertia_mult scales how quickly yaw rate itself can change for a given turning force. stability_control_strength is the everyday assist that keeps grip driving glued near the tire's actual capability instead of the rear running away with itself; pulling the handbrake takes it out of the loop on purpose, locking the rear to its sliding-friction floor regardless of slip angle — that's how a car spins on purpose now. loose_surface_bonus is the free extra force a yawed tire gets off-road or on snow/ice from the wedge of displaced material it builds, on top of the sliding floor — the reason drifting is only genuinely fast off pavement.",
-    "peak_slip_deg": 8.0,
-    "falloff_range": 2.5,
-    "floor_frac": 0.62,
-    "weight_transfer_coeff": 0.24,
-    "yaw_inertia_mult": 1.0,
-    "stability_control_strength": 0.85,
-    "loose_surface_bonus": 0.30
   },
   "oversteer": {
     "_comment": "A rear-driven car committing hard to a corner on the throttle can rotate faster than grip alone allows, for as long as the driver keeps asking for more than the car can grip (grow_rate_per_second builds it, up to max_bonus). Ease off (catch_decay_per_second) before spin_after_seconds runs out and it settles back down for free; keep pushing and it spins for spin_seconds, rotating at up to spin_yaw_multiplier times the car's own grip-limited yaw rate while losing speed at spin_speed_loss per second.",

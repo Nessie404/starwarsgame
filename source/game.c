@@ -8,28 +8,26 @@
  *  - acceleration from engine power (F = P/v, traction-capped)
  *  - aerodynamic drag from Cd*A, rolling resistance, so top speed is
  *    emergent rather than scripted
- *  - braking from the same traction budget as everything else, not a
- *    free-standing stopping-distance dial
- *  - cornering from a real dynamic bicycle model (v1.28.0): front and
- *    rear each get their own slip angle and read a genuine tire curve
- *    off it — rises to a peak, falls off past it toward a sliding
- *    floor that never quite reaches zero — instead of one whole-car
- *    yaw rate clamped against a single grip number. Kart.vy and
- *    Kart.yaw_rate are real integrated states now, not values read
- *    straight off the steering input each frame.
+ *  - braking from the same traction budget as everything else (mu_trac),
+ *    not a free-standing stopping-distance dial
+ *  - cornering from a bicycle steering model whose yaw rate is capped
+ *    by the tire's lateral grip (v^2/r <= mu*g) — exceed it and the
+ *    car understeers wide, scrubbing speed. Braking or accelerating
+ *    hard while still turning shrinks that cap too (the combined
+ *    friction circle), so trail-braking/exit-speed technique pays off.
  *  - gravity acting along the road grade, so climbs cost speed and
- *    descents give it back, and weight transfer front-to-back under
- *    acceleration and braking, the same "squat and dive" a real chassis
- *    has
+ *    descents give it back
  *
- * The handbrake locks the rear axle to its sliding friction level and
- * switches off stability control — the one deliberate way to put the
- * rear axle past its own peak on purpose and hand the driver the real,
- * open-loop-unstable dynamics a genuine drift has there. There is
- * deliberately no hidden slide boost or rubber-banding: sliding costs
- * real speed on tarmac, and is only actually quick on loose surfaces,
- * where a yawed tire builds a wedge of displaced material that adds
- * force a dry tire's friction alone would not give.
+ * v1.28.2: there is no handbrake/drift mechanic. v1.28.0 replaced this
+ * whole model with a genuine dynamic bicycle model (separate front/rear
+ * slip angles, integrated yaw rate and lateral velocity) plus a
+ * handbrake that locked the rear axle into an open-loop-unstable slide.
+ * Combined with that release's other changes, ordinary braking while
+ * steering read as uncontrollable — cars could snap around and head the
+ * other way from a plain brake-and-turn input. This file is back to the
+ * simpler, well-understood model above (last shipped in v1.27.1); the
+ * handbrake input is still read but has no effect on the physics. There
+ * is deliberately no hidden slide boost or rubber-banding.
  */
 #include <ctype.h>
 #include <math.h>
@@ -44,6 +42,13 @@
 #define DEFAULT_DRIVE 0.85f    /* drivetrain efficiency                */
 #define HP_TO_W    745.7f
 #define V100       27.78f      /* 100 km/h in m/s                      */
+/* A real tire's grip does not end at a hard wall: past the nominal
+ * v^2/r <= mu*g limit there is a "shoulder" where it still delivers
+ * most of what is asked, at a steepening cost, before it actually lets
+ * go. TIRE_SHOULDER is how much more yaw rate that buys a driver who
+ * pushes past yaw_cap — see the cornering step in kart_step — before
+ * the road really does start scrubbing away underneath them. */
+#define TIRE_SHOULDER 1.12f
 
 /*
  * The compiled-in roster mirrors config/cars.json exactly, so opening the
@@ -279,8 +284,6 @@ void game_settings_defaults(GameSettings *s)
     s->steer_rate_center = 6.0f;
     s->steer_speed_fade = 0.035f;
     s->steer_curve = 1.55f;
-    s->steer_max_angle_deg = 40.0f;
-    s->steer_speed_taper = 0.048f;
     s->tire_grip_mult[TIRE_MEDIUM] = 1.00f;
     s->tire_grip_mult[TIRE_SOFT] = 1.08f;
     s->tire_grip_mult[TIRE_HARD] = 0.96f;
@@ -354,15 +357,12 @@ void game_settings_defaults(GameSettings *s)
     s->understeer_scrub_curve = 0.60f;
     s->engine_brake_decel = 2.2f;
     s->tc_strength = 0.55f;
-    s->friction_circle_strength = 0.60f;
+    /* v1.28.2: eased from 0.60 — braking hard while still turning in
+     * still costs real cornering grip, just a bit less sharply, after
+     * the combination read as too easy to spin the car with, especially
+     * on a full-lock digital steering input (keyboard/D-pad) */
+    s->friction_circle_strength = 0.45f;
     s->chassis_settle_rate = 8.0f;
-    s->slip_peak_deg = 8.0f;
-    s->slip_falloff_range = 2.5f;
-    s->slip_floor_frac = 0.62f;
-    s->weight_transfer_coeff = 0.24f;
-    s->yaw_inertia_mult = 1.0f;
-    s->stability_control_strength = 0.85f;
-    s->drift_loose_surface_bonus = 0.30f;
     s->ai_skill_mult = 1.06f;
     s->ai_brake_mult = 0.76f;
     s->ai_unguarded_line_room = 0.72f;
@@ -443,8 +443,6 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
     FINITE_RANGE(s->steer_rate_center, 0.2f, 30.0f, "BAD CENTER RATE");
     FINITE_RANGE(s->steer_speed_fade, 0.0f, 0.5f, "BAD SPEED FADE");
     FINITE_RANGE(s->steer_curve, 0.2f, 4.0f, "BAD STEER CURVE");
-    FINITE_RANGE(s->steer_max_angle_deg, 5.0f, 60.0f, "BAD STEER ANGLE");
-    FINITE_RANGE(s->steer_speed_taper, 0.0f, 0.2f, "BAD STEER TAPER");
     for (i = 0; i < TIRE_COMPOUNDS; i++) {
         FINITE_RANGE(s->tire_grip_mult[i], 0.30f, 2.0f, "BAD TIRE GRIP");
         FINITE_RANGE(s->tire_traction_mult[i], 0.30f, 2.0f,
@@ -489,15 +487,6 @@ int game_settings_validate(GameSettings *s, char *error, int error_cap)
     FINITE_RANGE(s->friction_circle_strength, 0.0f, 1.0f,
                  "BAD FRICTION CIRCLE");
     FINITE_RANGE(s->chassis_settle_rate, 0.5f, 60.0f, "BAD CHASSIS RATE");
-    FINITE_RANGE(s->slip_peak_deg, 2.0f, 25.0f, "BAD SLIP PEAK");
-    FINITE_RANGE(s->slip_falloff_range, 0.3f, 10.0f, "BAD SLIP FALLOFF");
-    FINITE_RANGE(s->slip_floor_frac, 0.05f, 1.0f, "BAD SLIP FLOOR");
-    FINITE_RANGE(s->weight_transfer_coeff, 0.0f, 1.0f, "BAD WEIGHT TRANSFER");
-    FINITE_RANGE(s->yaw_inertia_mult, 0.2f, 5.0f, "BAD YAW INERTIA");
-    FINITE_RANGE(s->stability_control_strength, 0.0f, 1.0f,
-                 "BAD STABILITY CONTROL");
-    FINITE_RANGE(s->drift_loose_surface_bonus, 0.0f, 1.0f,
-                 "BAD LOOSE SURFACE BONUS");
     FINITE_RANGE(s->grade_gravity_mult, 0.0f, 3.0f, "BAD GRADE GRAUITY");
     FINITE_RANGE(s->grade_load_effect, 0.0f, 1.0f, "BAD GRADE LOAD");
     FINITE_RANGE(s->tacho_idle_rpm, 0.0f, 20000.0f, "BAD IDLE RPM");
@@ -2138,37 +2127,6 @@ static void cooldown_control(Game *g, Kart *k, Input *in, float dt)
         in->accel = 1;         /* hold the cruise, don't just coast to it */
 }
 
-/*
- * The slip-angle curve, in one place: force rises smoothly from zero at
- * zero slip angle to the tire's peak at peak_rad, then decays toward a
- * sliding floor over the next falloff_range peak-widths, and holds
- * there — never all the way to zero, the same way a real tire still
- * drags at huge slip angles. That floor is what lets a sustained drift
- * find an equilibrium at all instead of just spinning the instant it
- * passes peak: the driver (or the physics below) can still find a
- * throttle/steering balance against a real, nonzero rear force, even
- * deep into a slide.
- *
- * floor_frac can be pushed above 1.0 (see the loose-surface bonus in
- * kart_step) to model a yawed tire on gravel or snow genuinely making
- * more usable force sliding than gripping would — the one situation
- * where that is actually true.
- */
-static float slip_force_frac(float alpha_abs, float peak_rad,
-                             float falloff_range, float floor_frac)
-{
-    if (peak_rad <= 0.001f) return 0.0f;
-    if (alpha_abs <= peak_rad)
-        return sinf((alpha_abs / peak_rad) * (PI_F * 0.5f));
-    {
-        float over = (alpha_abs - peak_rad) / peak_rad;
-        float t = (falloff_range > 0.01f)
-                      ? game_clampf(over / falloff_range, 0.0f, 1.0f)
-                      : 1.0f;
-        return 1.0f + (floor_frac - 1.0f) * t;
-    }
-}
-
 static void kart_step(Game *g, Kart *k, const Input *in, float dt,
                       float power_scale)
 {
@@ -2477,19 +2435,15 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         mu_trac *= load;
     }
     /* how much of this frame's longitudinal acceleration or braking is
-     * actually asking the tires for grip — signed, positive for
-     * accelerating and negative for braking/engine-braking, since both
-     * the combined-slip split below and weight transfer need to know
-     * which way the car is actually loading its tires, not just how
-     * hard. Fed to the per-axle combined slip in the steering section
-     * below, so a driver who brakes hard while still asking for a lot
-     * of yaw finds less cornering grip left over, the same way a real
-     * tire's total grip is one shared budget rather than a separate
-     * allowance for turning and for slowing down. Drag and rolling
-     * resistance are not tire-limited (aerodynamic drag is not a
-     * friction-circle force at all, and rolling resistance is a small,
+     * actually asking the tires for grip — fed to the combined friction
+     * circle below, so a driver who brakes hard while still asking for
+     * a lot of yaw finds less cornering grip left over, the same way a
+     * real tire's total grip is one shared budget rather than a
+     * separate allowance for turning and for slowing down. Drag and
+     * rolling resistance are not tire-limited (aerodynamic drag is not
+     * a friction-circle force at all, and rolling resistance is a small,
      * constant loss) so neither counts here. */
-    float a_tire_long = 0.0f;
+    float a_long_use = 0.0f;
     if (accel && !brake) {
         float a_drive = P / (s->mass_kg * (fabsf(v) > 3.0f ? fabsf(v) : 3.0f));
         /* two driven axles share the traction demand between them, so
@@ -2506,7 +2460,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
                                                        k->slip);
         if (a_drive > cap) a_drive = cap;
         a += a_drive;
-        a_tire_long = a_drive;
+        a_long_use = a_drive;
     } else if (!accel) {
         /* Engine braking: off the throttle, a real engine is still
          * turning with the wheels through a closed throttle plate, so
@@ -2519,7 +2473,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
                                game_clampf(k->rev_frac, 0.0f, 1.0f);
         if (fabsf(v) > 0.3f) {
             a += (v > 0.0f) ? -a_engine_brake : a_engine_brake;
-            a_tire_long = -a_engine_brake;
+            a_long_use = a_engine_brake;
         }
     }
     /* drag + rolling resistance oppose motion */
@@ -2540,7 +2494,7 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
              * exactly as hard as its own grip, weather and tires
              * actually allow, same as everything else here. */
             a -= mu_trac;
-            a_tire_long = -mu_trac;
+            a_long_use = mu_trac;
         } else if (!accel) {
             /* reverse gear, gently */
             v += (-6.0f - v) * 1.2f * dt;
@@ -2550,244 +2504,103 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
     v = game_clampf(v, -10.0f, 90.0f);
 
     /*
-     * Handbrake. A real handbrake locks the rear axle to its kinetic
-     * (sliding) friction level regardless of slip angle, and takes
-     * stability control out of the loop — see the steering section
-     * below for what that actually does to the car. There is no
-     * mini-turbo reward for using it: sliding a car is slow, and
-     * pretending otherwise was the most arcade thing in here.
+     * v1.28.2: the handbrake no longer does anything special. v1.28.0
+     * gave it a real, open-loop-unstable "lock the rear axle" drift
+     * mechanic; combined with the same release's other changes it made
+     * ordinary braking-while-steering feel uncontrollable — the reported
+     * regression this release backs out. Held or not, k->drifting stays
+     * 0 and the handbrake control has no physics effect; it is still
+     * read (Input.hop) so the button/binding keeps working for whatever
+     * uses it later, it just does not change how the car drives.
      */
-    if (!k->drifting) {
-        if (in->hop && fabsf(steer) > 0.2f && v > 8.0f)
-            k->drifting = 1;
-    } else if (!in->hop || v < 5.0f) {
-        k->drifting = 0;
-    }
+    k->drifting = 0;
 
     /*
-     * --- steering: a real dynamic bicycle model ---
+     * --- steering: bicycle model, grip-capped yaw — grip until it lets go ---
      *
-     * A tire's lateral force is a curve in slip angle (the angle
-     * between where a wheel points and where it is actually
-     * traveling): it rises smoothly to a peak, then falls off toward a
-     * sliding floor that never quite reaches zero (slip_force_frac,
-     * above). Front and rear each get their own slip angle and read
-     * that same curve separately — this is what makes counter-steering
-     * a real, emergent mechanic rather than a scripted one: steering
-     * further into a slide pushes the front's own slip angle further
-     * from zero too (alpha_f below is the front's own velocity angle
-     * minus the steer angle directly), so the front keeps losing grip
-     * right when a driver most wants it to bite; steering away
-     * (opposite lock) brings alpha_f back toward zero and hands the
-     * front axle back its grip — the textbook reason counter-steering
-     * works at all.
-     *
-     * Combined slip, per axle: whatever this frame's accelerating or
-     * braking (a_tire_long, set above) is asking of the tires eats into
-     * that same axle's lateral budget, the same shared-grip idea the
-     * whole-car friction circle used before v1.28.0, now split by which
-     * axle actually carries it. Braking acts on all four wheels, so it
-     * costs both axles alike; accelerating only costs the driven
-     * axle(s) (dt_front), so an undriven axle keeps its whole lateral
-     * budget — this is the whole reason RWD and AWD can drift on the
-     * throttle and FWD genuinely cannot the same way: spending the
-     * rear's own budget on drive lowers the rear's own lateral force,
-     * which grows the yaw moment, which grows the slide — throttle
-     * becomes a yaw control once the rear is past its own peak, exactly
-     * backwards from what it does below peak.
-     *
-     * Weight transfer adds "squat and dive" on top: accelerating loads
-     * the rear (more grip there, less at the nose), braking or lifting
-     * off loads the front — a genuine way to provoke oversteer with no
-     * handbrake at all, same as a real trail-brake or lift-off flick.
-     *
-     * Past its own peak, a tire's force actually falls as slip angle
-     * keeps growing — genuinely open-loop unstable once the rear gets
-     * there: more yaw angle costs rear force, which grows yaw further
-     * still. Ordinary grip driving never reaches this (stability
-     * control below holds the rear's own floor close to its peak); the
-     * handbrake deliberately switches it off and hands the driver the
-     * real dynamics, unsmoothed — they are the stabilizer now, via
-     * counter-steer and throttle, the same way a real driver is.
+     * A tire holds its line right up to yaw_cap (derived from mu_a, the
+     * same cornering-grip budget the corner-speed AI reads), with a
+     * little shoulder past that (TIRE_SHOULDER) where it turns in a bit
+     * tighter than the nominal limit before understeer scrub really
+     * bites — progressively, the further past the limit you ask for.
+     * There is deliberately no automatic, timed "hold the wheel over and
+     * it spins" mechanic here any more: that used to escalate yaw_cap by
+     * up to 40% over about a second of committed steering and then force
+     * an uncontrollable spin if it wasn't "caught," which read as the
+     * car suddenly turning far harder than the driver asked for and then
+     * snapping off the road, unannounced. There is no drift/handbrake
+     * mechanic here either any more (see above) — this is just grip.
      */
     {
-        float delta_max = (g->settings.steer_max_angle_deg * PI_F / 180.0f) /
-                          (1.0f + fabsf(v) * g->settings.steer_speed_taper);
-        /* the driver's actual road-wheel angle — and the whole
-         * counter-steer budget available to catch a slide with, since
-         * it cannot ask for more than this either way */
-        float steer_angle = steer * delta_max;
-        float a_dist = s->wheelbase * 0.5f;     /* CG assumed centered —
-                                                 * no separate front/rear
-                                                 * weight-distribution
-                                                 * stat; see HANDOFF.md */
-        float b_dist = s->wheelbase * 0.5f;
-        float peak_rad = g->settings.slip_peak_deg * PI_F / 180.0f;
-        /* slip angles are only well-defined with a real forward speed
-         * to measure them against — same 6 m/s floor the old yaw_cap
-         * used. Always positive, even in reverse: atan2's second
-         * argument going negative with the first pinned at ~0 (a
-         * car creeping backward with no lateral velocity at all, the
-         * exact state a fresh respawn or a parked car on a grade sits
-         * in) returns a spurious +/-pi "slip angle" — 180 degrees of
-         * sideways sliding that was never actually happening — rather
-         * than the genuine near-zero angle straight-line reversing
-         * actually has. Reverse's own slip-angle physics is not
-         * modeled precisely here, same simplification the rest of
-         * reverse gear already gets (see "reverse gear, gently"
-         * above) — this just keeps it from blowing up. */
-        float u = fmaxf(fabsf(v), 6.0f);
-        float alpha_f = atan2f(k->vy + k->yaw_rate * a_dist, u) - steer_angle;
-        float alpha_r = atan2f(k->vy - k->yaw_rate * b_dist, u);
+        float delta_max = 0.48f / (1.0f + fabsf(v) * 0.02f);
+        float yaw_cmd = v * tanf(steer * delta_max) / s->wheelbase;
+        /*
+         * yaw_cap = mu_a / v is a steady-state approximation (v^2/r <=
+         * mu*g) that only holds while speed is the thing actually
+         * limiting the turn. Below a walking pace, steering geometry
+         * (delta_max above) is the real limit, not grip — dividing by
+         * the true, near-zero v here would let yaw_cap grow without
+         * bound as a car scrubbed off nearly all its speed (e.g. pinned
+         * against a guardrail under sustained understeer), which read
+         * as the car spinning faster and faster the slower it got. A
+         * 6 m/s floor keeps the cap from ever running away like that.
+         *
+         * Combined friction circle: a_long_use (set above, whichever of
+         * driving, braking or engine-braking this frame actually asked
+         * the tires for) eats into the same mu_a budget cornering reads,
+         * scaled by friction_circle_strength so it can be tuned rather
+         * than only ever the full textbook circle. This is the piece
+         * that actually makes brake-in/power-out technique pay off: get
+         * the braking done before the wheel is still turned in hard and
+         * the full mu_a is there to lean on; carry the brake to the
+         * apex instead, still asking for real yaw, and there is
+         * measurably less of it left.
+         */
+        float a_long_circle = a_long_use * g->settings.friction_circle_strength;
+        float mu_lat_sq = mu_a * mu_a - a_long_circle * a_long_circle;
+        float mu_lat = (mu_lat_sq > 0.0f) ? sqrtf(mu_lat_sq) : 0.0f;
+        float yaw_cap = mu_lat / (fabsf(v) > 6.0f ? fabsf(v) : 6.0f);
+        float yaw;
 
-        float wt = g->settings.weight_transfer_coeff *
-                  (a_tire_long / GRAVITY);
-        float front_load_mult = game_clampf(1.0f - wt, 0.4f, 1.6f);
-        float rear_load_mult  = game_clampf(1.0f + wt, 0.4f, 1.6f);
+        /* the driven axle spends some of its own grip on traction rather
+         * than cornering: a front-driven car understeers under power
+         * (the same tires steer and drive) a little more than a
+         * rear-driven one, which keeps the front axle free to corner. */
+        if (accel && !brake && dt_front >= 0.5f)
+            yaw_cap *= 1.0f - 0.04f * (dt_front - 0.5f) * 2.0f;
 
-        float front_long, rear_long;
-        if (a_tire_long > 0.0f) {
-            front_long = a_tire_long * dt_front;
-            rear_long  = a_tire_long * (1.0f - dt_front);
+        if (yaw_cmd > yaw_cap) {
+            /* the tire's shoulder: genuinely deliver more turn-in than
+             * the nominal grip circle allows, up to TIRE_SHOULDER, so a
+             * driver who pushes a little past the limit holds the
+             * tighter line instead of the car simply refusing to turn
+             * that much — at a scrub cost that ramps up over the same
+             * shoulder instead of over the whole cap again */
+            float shoulder_cap = yaw_cap * TIRE_SHOULDER;
+            yaw = fminf(yaw_cmd, shoulder_cap);
+            k->slip = game_clampf((yaw_cmd - yaw_cap) / yaw_cap, 0.0f, 1.0f);
+            v -= g->settings.understeer_scrub *
+                 (1.0f + g->settings.understeer_scrub_curve * k->slip) *
+                 mu_a * k->slip * dt;                /* understeer scrub */
+        } else if (yaw_cmd < -yaw_cap) {
+            float shoulder_cap = yaw_cap * TIRE_SHOULDER;
+            yaw = fmaxf(yaw_cmd, -shoulder_cap);
+            k->slip = game_clampf((-yaw_cmd - yaw_cap) / yaw_cap, 0.0f, 1.0f);
+            v -= g->settings.understeer_scrub *
+                 (1.0f + g->settings.understeer_scrub_curve * k->slip) *
+                 mu_a * k->slip * dt;
         } else {
-            front_long = a_tire_long;
-            rear_long  = a_tire_long;
+            yaw = yaw_cmd;
+            k->slip *= (1.0f - 4.0f * dt);
         }
-        float circle = g->settings.friction_circle_strength;
-        float front_peak = mu_a * front_load_mult;
-        float rear_peak  = mu_a * rear_load_mult;
-        {
-            float fl = front_long * circle, rl = rear_long * circle;
-            float f2 = front_peak * front_peak - fl * fl;
-            float r2 = rear_peak * rear_peak - rl * rl;
-            front_peak = (f2 > 0.0f) ? sqrtf(f2) : 0.0f;
-            rear_peak  = (r2 > 0.0f) ? sqrtf(r2) : 0.0f;
-        }
-
-        /* loose surfaces: a yawed tire past its peak builds a wedge of
-         * displaced gravel or snow that genuinely adds force a dry
-         * tire's friction coefficient alone would not give — real
-         * off-road or on snow/ice, imaginary on tarmac */
-        float loose_bonus = 0.0f;
-        if (offroad)
-            loose_bonus = g->settings.drift_loose_surface_bonus *
-                         (1.0f - s->offroad_grip);
-        else if (weather == WEATHER_SNOW || weather == WEATHER_ICE)
-            loose_bonus = g->settings.drift_loose_surface_bonus * 0.6f;
-
-        /* stability control: everyday grip driving does not let the
-         * rear axle actually run away with itself — pulling the
-         * handbrake (k->drifting) is the one deliberate way to take
-         * that assist out of the loop */
-        {
-            float rear_floor = g->settings.slip_floor_frac + loose_bonus;
-            float front_floor = g->settings.slip_floor_frac + loose_bonus;
-            float frac_f, frac_r;
-
-            if (!k->drifting)
-                rear_floor += (1.0f - rear_floor) *
-                             g->settings.stability_control_strength;
-
-            frac_f = slip_force_frac(fabsf(alpha_f), peak_rad,
-                                     g->settings.slip_falloff_range,
-                                     front_floor);
-            /* the handbrake locks the rear to kinetic friction outright
-             * — a locked wheel has no speed-dependent rolling grip left
-             * to peak toward, just the sliding floor, whatever the rear
-             * slip angle actually reads */
-            frac_r = k->drifting
-                        ? rear_floor
-                        : slip_force_frac(fabsf(alpha_r), peak_rad,
-                                          g->settings.slip_falloff_range,
-                                          rear_floor);
-
-            {
-                float Fyf = -copysignf(front_peak * frac_f, alpha_f);
-                float Fyr = -copysignf(rear_peak * frac_r, alpha_r);
-                float over_f = fmaxf(0.0f,
-                                     (fabsf(alpha_f) - peak_rad) / peak_rad);
-                float over_r = fmaxf(0.0f,
-                                     (fabsf(alpha_r) - peak_rad) / peak_rad);
-                float r_gyr_sq = (s->wheelbase * s->wheelbase / 12.0f) *
-                                g->settings.yaw_inertia_mult;
-                float yaw_moment = a_dist * Fyf * cosf(steer_angle) -
-                                   b_dist * Fyr;
-                float yaw_accel = yaw_moment /
-                                  (r_gyr_sq > 0.01f ? r_gyr_sq : 0.01f);
-                float vy_dot = Fyf * cosf(steer_angle) + Fyr - v * k->yaw_rate;
-
-                k->slip = game_clampf(fmaxf(over_f, over_r), 0.0f, 1.0f);
-                /* sliding this hard bleeds real speed: the same
-                 * progressive curve understeer scrub always used, now
-                 * driven by the true slip angle rather than a yaw_cap
-                 * ratio — most of a hard drift's own cost on tarmac,
-                 * where there is no loose-surface force to spend it on
-                 * instead */
-                if (k->slip > 0.0f)
-                    v -= g->settings.understeer_scrub *
-                         (1.0f + g->settings.understeer_scrub_curve *
-                                 k->slip) *
-                         mu_a * k->slip * dt;
-                else
-                    k->slip = 0.0f;
-
-                k->yaw_rate += yaw_accel * dt;
-                k->yaw_rate = game_clampf(k->yaw_rate, -8.0f, 8.0f);
-                k->vy += vy_dot * dt;
-                k->vy = game_clampf(k->vy, -40.0f, 40.0f);
-
-                /* stability control's real job: a fully-gripped tire simply
-                 * cannot sustain the runaway yaw_rate/vy combination that
-                 * pushes both axles past their peak at once and keeps them
-                 * there — that only happens on paper, when a single hard
-                 * frame (a tight corner taken too fast) launches the state
-                 * past what the force curve can pull back on its own. Real
-                 * ESC brakes individual wheels to cut the excess yaw
-                 * directly rather than waiting for the slip-angle curve to
-                 * do it; model that directly here as a fast blend toward
-                 * the kinematic (fully-gripped, no-slide) reference whenever
-                 * the handbrake isn't deliberately overriding it. This is
-                 * the backstop that keeps an AI driver — which never lifts,
-                 * never countersteers, and never releases a handbrake it
-                 * never pulled — from ever getting stuck oscillating at the
-                 * hard safety clamps instead of recovering the corner. */
-                if (!k->drifting) {
-                    /* the reference is kinematic (zero-slip) turning *capped
-                     * by the same lateral grip limit every other axle force
-                     * in this function already respects* — not the raw
-                     * unclamped kinematic formula, which at full lock and
-                     * real speed asks for far more yaw rate than any tire
-                     * could ever deliver and would drag the state toward an
-                     * equally unrealistic number instead of a safe one. */
-                    float kinematic_yaw = (fabsf(s->wheelbase) > 0.01f)
-                                       ? v * tanf(steer_angle) / s->wheelbase
-                                       : 0.0f;
-                    float grip_cap = mu_a / (fabsf(v) > 1.0f ? fabsf(v) : 1.0f);
-                    float ref_yaw = game_clampf(kinematic_yaw, -grip_cap,
-                                                grip_cap);
-                    float blend = game_clampf(
-                        g->settings.stability_control_strength * 6.0f * dt,
-                        0.0f, 1.0f);
-                    k->yaw_rate += (ref_yaw - k->yaw_rate) * blend;
-                    k->vy += (0.0f - k->vy) * blend;
-                }
-            }
-        }
-        k->heading = game_angle_wrap(k->heading + k->yaw_rate * dt);
+        k->heading = game_angle_wrap(k->heading + yaw * dt);
     }
     k->steer_vis += (steer - k->steer_vis) * 10.0f * dt;
     k->speed = v;
 
     /* --- integrate --- */
-    {
-        /* the car's real velocity vector, not just its heading: a
-         * sliding car (k->vy != 0) travels somewhere other than exactly
-         * where its nose points, same as a real one drifting through a
-         * bend */
-        float ch = cosf(k->heading), sh = sinf(k->heading);
-        k->x += (ch * v - sh * k->vy) * dt;
-        k->z += (sh * v + ch * k->vy) * dt;
-    }
+    k->x += cosf(k->heading) * v * dt;
+    k->z += sinf(k->heading) * v * dt;
 
     /* --- track relation --- */
     {
@@ -2885,8 +2698,6 @@ static void kart_step(Game *g, Kart *k, const Input *in, float dt,
         k->y = t->py[cseg];
         k->heading = atan2f(t->dz[cseg], t->dx[cseg]);
         k->speed = 0.0f;
-        k->vy = 0.0f;
-        k->yaw_rate = 0.0f;
         k->gear = 0;
         k->shift_t = 0.0f;
         k->turbo_spool = 0.0f;
